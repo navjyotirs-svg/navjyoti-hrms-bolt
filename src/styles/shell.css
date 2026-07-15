@@ -1,0 +1,254 @@
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ---- Sidebar ---- */
+.sidebar {
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  background: var(--ink);
+  color: #edeae2;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 0 16px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 100;
+  transition: transform var(--transition-normal);
+}
+
+.sidebar-brand {
+  padding: 0 20px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 14px;
+}
+
+.sidebar-brand-name {
+  font-family: var(--font-heading);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: #fff;
+  margin: 0;
+}
+
+.sidebar-brand-sub {
+  font-size: 11px;
+  color: var(--rail-dim);
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.sidebar-nav {
+  padding: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  color: #c6c2b8;
+  border: 1px solid transparent;
+  transition: background var(--transition-fast);
+  min-height: 40px;
+}
+
+.sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-item.active {
+  background: var(--teal);
+  color: #fff;
+  font-weight: 600;
+}
+
+.sidebar-item-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.sidebar-foot {
+  padding: 12px 20px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--rail-dim);
+}
+
+.sidebar-foot-label {
+  margin: 0;
+}
+
+.sidebar-foot-name {
+  color: #fff;
+  font-weight: 600;
+  font-size: 12.5px;
+  margin: 2px 0 0;
+}
+
+.sidebar-foot-role {
+  margin: 0 0 8px;
+}
+
+.sidebar-signout {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--rail-dim);
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  font-weight: 600;
+  width: 100%;
+  transition: all var(--transition-fast);
+  min-height: 32px;
+}
+
+.sidebar-signout:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 101;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.sidebar-overlay {
+  display: none;
+}
+
+/* ---- Main ---- */
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-left: var(--sidebar-width);
+}
+
+.topbar {
+  height: var(--topbar-height);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 26px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.topbar-title {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.topbar-bell {
+  position: relative;
+  background: none;
+  border: none;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-text);
+  transition: background var(--transition-fast);
+}
+
+.topbar-bell:hover {
+  background: var(--paper);
+}
+
+.topbar-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.topbar-user-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-text);
+}
+
+.topbar-user-role {
+  font-size: 10.5px;
+  color: var(--slate);
+}
+
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 26px;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 24, 31, 0.5);
+    z-index: 99;
+  }
+
+  .app-main {
+    margin-left: 0;
+  }
+
+  .topbar {
+    padding-left: 60px;
+  }
+
+  .topbar-user {
+    display: none;
+  }
+
+  .app-content {
+    padding: 16px;
+  }
+}
