@@ -1,0 +1,1305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Navjyoti HRMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#14181F;
+    --ink-2:#1D2330;
+    --paper:#F7F5F0;
+    --paper-2:#FFFFFF;
+    --line:#E4E0D6;
+    --teal:#0E6E63;
+    --teal-dark:#0A544B;
+    --amber:#C17817;
+    --rose:#B3413A;
+    --slate:#5B6472;
+    --ink-text:#1F242D;
+    --rail-dim:#7A8394;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{
+    font-family:'Inter',sans-serif;
+    background:var(--paper);
+    color:var(--ink-text);
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.display{font-family:'Zilla Slab',serif;}
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  a{color:inherit;}
+  #app{display:flex;min-height:100vh;}
+
+  /* ---- Sidebar ---- */
+  #sidebar{
+    width:250px;flex-shrink:0;background:var(--ink);color:#EDEAE2;
+    display:flex;flex-direction:column;padding:22px 0 16px;
+  }
+  .brand{padding:0 20px 18px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:14px;}
+  .brand .display{font-size:19px;font-weight:600;letter-spacing:.2px;color:#fff;margin:0;}
+  .brand .sub{font-size:11px;color:var(--rail-dim);margin-top:3px;text-transform:uppercase;letter-spacing:1px;}
+
+  .rail{padding:0 20px 18px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:8px;}
+  .rail-label{font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--rail-dim);margin-bottom:10px;}
+  .rail-chain{display:flex;flex-direction:column;gap:0;}
+  .rail-rung{display:flex;align-items:center;gap:9px;padding:4px 0;font-size:12.5px;color:var(--rail-dim);position:relative;}
+  .rail-rung .dot{width:7px;height:7px;border-radius:50%;background:var(--rail-dim);flex-shrink:0;}
+  .rail-rung.active{color:#fff;font-weight:600;}
+  .rail-rung.active .dot{background:var(--amber);box-shadow:0 0 0 3px rgba(193,120,23,.25);}
+  .rail-rung .lline{position:absolute;left:3px;top:16px;width:1px;height:14px;background:rgba(255,255,255,.15);}
+
+  nav.navlist{padding:6px 12px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;}
+  .navitem{
+    display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:7px;
+    font-size:13.5px;color:#C6C2B8;cursor:pointer;border:1px solid transparent;transition:background .12s;
+  }
+  .navitem:hover{background:rgba(255,255,255,.05);}
+  .navitem.active{background:var(--teal);color:#fff;font-weight:600;}
+  .navitem .ic{width:16px;text-align:center;font-size:13px;opacity:.85;}
+
+  .sidebar-foot{padding:12px 20px 0;border-top:1px solid rgba(255,255,255,.08);margin-top:8px;font-size:11px;color:var(--rail-dim);}
+
+  /* ---- Main ---- */
+  #main{flex:1;display:flex;flex-direction:column;min-width:0;}
+  #topbar{
+    height:60px;background:var(--paper-2);border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;padding:0 26px;flex-shrink:0;
+  }
+  #topbar .page-title{font-family:'Zilla Slab',serif;font-size:20px;font-weight:600;}
+  .topbar-right{display:flex;align-items:center;gap:14px;}
+  select.userpick{
+    font-family:'Inter';font-size:12.5px;padding:7px 10px;border-radius:6px;border:1px solid var(--line);
+    background:#fff;color:var(--ink-text);cursor:pointer;
+  }
+  .bell{position:relative;cursor:pointer;font-size:16px;padding:6px 8px;border-radius:6px;}
+  .bell:hover{background:var(--paper);}
+  .bell .badge{
+    position:absolute;top:1px;right:1px;background:var(--rose);color:#fff;font-size:9px;
+    border-radius:8px;padding:1px 5px;font-weight:700;
+  }
+  .clock-actions{display:flex;gap:8px;}
+
+  #content{flex:1;overflow-y:auto;padding:26px;}
+
+  /* ---- Reusable components ---- */
+  .grid{display:grid;gap:16px;}
+  .g4{grid-template-columns:repeat(4,1fr);}
+  .g3{grid-template-columns:repeat(3,1fr);}
+  .g2{grid-template-columns:repeat(2,1fr);}
+  @media(max-width:1100px){.g4{grid-template-columns:repeat(2,1fr);}.g3{grid-template-columns:repeat(2,1fr);}}
+
+  .card{background:var(--paper-2);border:1px solid var(--line);border-radius:10px;padding:18px;}
+  .kpi .num{font-family:'Zilla Slab',serif;font-size:30px;font-weight:700;color:var(--ink-text);}
+  .kpi .lbl{font-size:11.5px;color:var(--slate);text-transform:uppercase;letter-spacing:.6px;margin-top:4px;}
+  .kpi.flag-amber .num{color:var(--amber);}
+  .kpi.flag-rose .num{color:var(--rose);}
+  .kpi.flag-teal .num{color:var(--teal);}
+
+  .section-title{font-family:'Zilla Slab',serif;font-size:16px;font-weight:600;margin:26px 0 12px;display:flex;align-items:center;justify-content:space-between;}
+  .btn{
+    font-family:'Inter';font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:6px;border:1px solid transparent;
+    cursor:pointer;background:var(--teal);color:#fff;transition:background .12s;
+  }
+  .btn:hover{background:var(--teal-dark);}
+  .btn.secondary{background:#fff;color:var(--ink-text);border:1px solid var(--line);}
+  .btn.secondary:hover{background:var(--paper);}
+  .btn.danger{background:var(--rose);}
+  .btn.amber{background:var(--amber);}
+  .btn.small{padding:5px 10px;font-size:11.5px;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{
+    text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--slate);
+    border-bottom:1px solid var(--line);padding:8px 10px;font-weight:600;
+  }
+  tbody td{padding:10px 10px;border-bottom:1px solid var(--line);vertical-align:middle;}
+  tbody tr:hover{background:#FBFAF7;}
+  tbody tr:last-child td{border-bottom:none;}
+
+  .tag{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:600;letter-spacing:.2px;}
+  .tag.gray{background:#EEECE6;color:var(--slate);}
+  .tag.teal{background:#E1F0EC;color:var(--teal-dark);}
+  .tag.amber{background:#F7EBD8;color:var(--amber);}
+  .tag.rose{background:#F6E4E2;color:var(--rose);}
+  .tag.ink{background:#E5E7EA;color:var(--ink-2);}
+
+  .empty{padding:34px 10px;text-align:center;color:var(--slate);font-size:13px;}
+  .empty .big{font-size:26px;margin-bottom:6px;}
+
+  input,textarea,select{
+    font-family:'Inter';font-size:13px;padding:8px 10px;border-radius:6px;border:1px solid var(--line);
+    width:100%;background:#fff;color:var(--ink-text);
+  }
+  textarea{resize:vertical;min-height:64px;}
+  label.field{display:block;font-size:11.5px;color:var(--slate);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;}
+  .field-wrap{margin-bottom:13px;}
+
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(20,24,31,.5);display:flex;align-items:flex-start;justify-content:center;
+    padding:40px 20px;z-index:50;overflow-y:auto;}
+  .modal{background:#fff;border-radius:12px;max-width:560px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25);}
+  .modal h3{margin:0 0 4px;font-size:18px;}
+  .modal .sub{font-size:12px;color:var(--slate);margin-bottom:16px;}
+  .modal-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line);}
+  .close-x{position:absolute;top:16px;right:20px;cursor:pointer;font-size:18px;color:var(--slate);}
+  .modal{position:relative;}
+
+  .toast{position:fixed;bottom:22px;right:22px;background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;
+    font-size:12.5px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.3);opacity:0;transform:translateY(8px);transition:.2s;}
+  .toast.show{opacity:1;transform:translateY(0);}
+
+  .task-row{cursor:pointer;}
+  .progress-bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;width:80px;display:inline-block;vertical-align:middle;}
+  .progress-fill{height:100%;background:var(--teal);}
+
+  .ledger-line{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line);font-size:13px;}
+  .ledger-line:last-child{border-bottom:none;}
+  .ledger-line .amt{font-family:'IBM Plex Mono',monospace;font-weight:600;}
+  .ledger-line.total{font-weight:700;border-top:2px solid var(--ink-text);margin-top:6px;padding-top:10px;}
+
+  .split-bar{height:26px;border-radius:6px;overflow:hidden;display:flex;margin:10px 0;}
+  .split-bar .fixed{background:var(--ink-2);}
+  .split-bar .perf{background:var(--amber);}
+  .split-legend{display:flex;gap:16px;font-size:11.5px;color:var(--slate);}
+  .split-legend .sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;}
+
+  .lock-note{font-size:11.5px;color:var(--slate);background:var(--paper);border:1px dashed var(--line);border-radius:6px;padding:8px 10px;margin-top:8px;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:#D8D3C6;border-radius:6px;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modalRoot"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===================== DATA LAYER ===================== */
+const STORAGE_KEY = 'hrms_db_v1';
+let DB = null;
+let currentUserId = null;
+let currentView = 'dashboard';
+let currentTaskDetail = null;
+
+const ROLES = ['Director','HR','Manager','Employee'];
+
+function uid(prefix){ return prefix + '-' + Math.random().toString(36).slice(2,8); }
+
+function seedDB(){
+  const now = new Date();
+  const iso = (d)=> d.toISOString().slice(0,10);
+  const addDays = (base,n)=>{ const d=new Date(base); d.setDate(d.getDate()+n); return d; };
+  const addMinutes = (base,n)=>{ const d=new Date(base); d.setMinutes(d.getMinutes()+n); return d; };
+  const REQUIRED_TOTAL_MINUTES = 540; // 480 work + 60 break, per Architecture.md attendance policy v2
+  function mkAttendance(employeeId, checkInDate, checkOutDate){
+    const requiredCheckoutAt = addMinutes(checkInDate, REQUIRED_TOTAL_MINUTES);
+    const rec = {
+      id: uid('A'), employeeId, date: iso(checkInDate),
+      checkInAt: checkInDate.toISOString(), requiredCheckoutAt: requiredCheckoutAt.toISOString(),
+      checkOutAt: checkOutDate ? checkOutDate.toISOString() : null,
+      checkoutImageCaptured:false, checkoutLat:null, checkoutLng:null,
+      preCheckoutAlertSentAt:null, checkoutReminderSentAt:null,
+      finalStatus:'PENDING_CHECKOUT', actualElapsedMinutes:null,
+      correctedBy:null, correctionReason:null,
+    };
+    if(checkOutDate){
+      const elapsed = Math.round((checkOutDate-checkInDate)/60000);
+      rec.actualElapsedMinutes = elapsed;
+      rec.finalStatus = elapsed >= REQUIRED_TOTAL_MINUTES ? 'FULL_DAY' : 'HALF_DAY';
+    }
+    return rec;
+  }
+
+  const employees = [
+    {id:'E-DIR', name:'Ananya Singh', role:'Director', dept:'Leadership', designation:'Director', managerId:null, salary:120000, joinDate:'2019-04-01', email:'ananya.singh@navjyoti.org', location:'Gurugram', workType:'Office', casualLeave:6, sickLeave:6, username:'ananya.singh'},
+    {id:'E-HR1', name:'Rohit Verma', role:'HR', dept:'Human Resources', designation:'HR Manager', managerId:'E-DIR', salary:55000, joinDate:'2020-06-15', email:'rohit.verma@navjyoti.org', location:'Gurugram', workType:'Office', casualLeave:4, sickLeave:5, username:'rohit.verma'},
+    {id:'E-MGR', name:'Priya Nair', role:'Manager', dept:'Programs', designation:'Department Manager', managerId:'E-DIR', salary:70000, joinDate:'2020-01-10', email:'priya.nair@navjyoti.org', location:'Delhi', workType:'Office', casualLeave:3, sickLeave:4, username:'priya.nair'},
+    {id:'E-EMP1', name:'Karan Mehta', role:'Employee', dept:'Programs', designation:'Program Associate', managerId:'E-MGR', salary:30000, joinDate:'2022-08-01', email:'karan.mehta@navjyoti.org', location:'Delhi', workType:'Hybrid', casualLeave:5, sickLeave:3, username:'karan.mehta'},
+    {id:'E-EMP2', name:'Sneha Iyer', role:'Employee', dept:'Programs', designation:'Field Coordinator', managerId:'E-MGR', salary:28000, joinDate:'2023-02-20', email:'sneha.iyer@navjyoti.org', location:'Mumbai', workType:'WFH', casualLeave:2, sickLeave:2, username:'sneha.iyer'},
+  ];
+
+  const tasks = [
+    {id:'T-1001', title:'Q3 Donor Report Draft', description:'Prepare the draft donor impact report for Q3 covering all program branches.', assignedTo:'E-EMP1', assignedBy:'E-MGR', dept:'Programs', priority:'High', startDate:iso(addDays(now,-9)), deadline:iso(addDays(now,-2)), weight:20, status:'Completed After Deadline', progress:100, completedDate:iso(addDays(now,-1)), delayDays:1,
+      deduction:{amount:300, status:'Pending Director Approval', reason:'Awaiting supplier data', managerRemarks:'Delay caused by late finance inputs; recommend partial waiver review.', proposedBy:'E-MGR'}, incentive:null, rejection:null},
+    {id:'T-1002', title:'Field Visit Report — Sector 12', description:'Submit field visit findings and photographic evidence for Sector 12 outreach.', assignedTo:'E-EMP2', assignedBy:'E-MGR', dept:'Programs', priority:'Medium', startDate:iso(addDays(now,-5)), deadline:iso(addDays(now,3)), weight:10, status:'In Progress', progress:55, completedDate:null, delayDays:0, deduction:null, incentive:null, rejection:null},
+    {id:'T-1003', title:'Volunteer Onboarding Batch 4', description:'Complete onboarding documentation for the new volunteer batch before the training weekend.', assignedTo:'E-EMP1', assignedBy:'E-MGR', dept:'Programs', priority:'Medium', startDate:iso(addDays(now,-6)), deadline:iso(addDays(now,-3)), weight:10, status:'Completed Before Deadline', progress:100, completedDate:iso(addDays(now,-4)), delayDays:0,
+      deduction:null, incentive:{amount:800, status:'Approved', reason:'Completed a day early with full documentation quality', qualityScore:'High', proposedBy:'E-MGR', approvedBy:'E-DIR'}, rejection:null},
+    {id:'T-1004', title:'Annual Compliance Filing', description:'Coordinate statutory compliance filing for the Delhi branch.', assignedTo:'E-EMP2', assignedBy:'E-HR1', dept:'Compliance', priority:'High', startDate:iso(addDays(now,-2)), deadline:iso(addDays(now,5)), weight:30, status:'Assigned', progress:0, completedDate:null, delayDays:0, deduction:null, incentive:null, rejection:null},
+  ];
+
+  /* Attendance policy v2 (see Memory.md 2026-07-15 entry):
+     no Late/Absent/Short-Attendance. Required checkout = check-in + 540 minutes.
+     final_status is PENDING_CHECKOUT | FULL_DAY | HALF_DAY only. */
+  const attendance = [
+    mkAttendance('E-EMP1', addMinutes(now,-330)),
+    mkAttendance('E-MGR', addMinutes(now,-600), addMinutes(now,-60)),
+  ];
+
+  const leaves = [
+    {id:uid('L'), employeeId:'E-EMP1', type:'Casual Leave', from:iso(addDays(now,4)), to:iso(addDays(now,4)), days:1, reason:'Personal work', status:'Pending', appliedOn:iso(now)},
+  ];
+
+  const tickets = [
+    {id:uid('TK'), employeeId:'E-EMP2', category:'Unrealistic deadline', subject:'Sector 12 report timeline too tight', description:'Given the travel distance, the current 3-day window is difficult to meet without additional support.', priority:'Medium', dept:'Programs', status:'Open', createdDate:iso(now), resolution:''},
+  ];
+
+  const notifications = [
+    {id:uid('N'), from:'E-DIR', target:'all', category:'Announcement', message:'Half-yearly review meeting scheduled for all departments next month.', date:iso(now), readBy:[]},
+  ];
+
+  const calendarEvents = [
+    {id:uid('C'), title:'Independence Day', date:'2026-08-15', type:'Holiday', branch:'All'},
+    {id:uid('C'), title:'Quarterly Review', date:iso(addDays(now,10)), type:'Meeting', branch:'All'},
+  ];
+
+  return { employees, tasks, attendance, leaves, tickets, notifications, calendarEvents, nextIds:{task:1005} };
+}
+
+async function loadDB(){
+  try{
+    const res = await window.storage.get(STORAGE_KEY, true);
+    if(res && res.value){ DB = JSON.parse(res.value); }
+    else { DB = seedDB(); await saveDB(); }
+  }catch(e){ DB = seedDB(); await saveDB(); }
+}
+async function saveDB(){
+  try{ await window.storage.set(STORAGE_KEY, JSON.stringify(DB), true); }
+  catch(e){ showToast('Could not save — changes are local only for now.'); }
+}
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=> t.classList.remove('show'), 2600);
+}
+
+/* ===================== HELPERS ===================== */
+function emp(id){ return DB.employees.find(e=>e.id===id); }
+function empName(id){ const e=emp(id); return e? e.name : '—'; }
+function fmtMoney(n){ return '₹' + Math.round(n).toLocaleString('en-IN'); }
+function today(){ return new Date().toISOString().slice(0,10); }
+function isManagerOf(mgrId, empId){ const e=emp(empId); return e && e.managerId===mgrId; }
+function teamOf(mgrId){ return DB.employees.filter(e=>e.managerId===mgrId); }
+function tagClassForStatus(s){
+  if(s.includes('Overdue')||s.includes('Rejected')||s.includes('After Deadline')||s==='Cancelled') return 'rose';
+  if(s.includes('Before Deadline')||s==='Completed on time'||s==='Completed On Time'||s==='Approved') return 'teal';
+  if(s.includes('Pending')||s==='Assigned'||s==='Reassignment Requested'||s==='Open'||s==='In Progress') return 'amber';
+  return 'gray';
+}
+function perm(){
+  const u = emp(currentUserId);
+  return {
+    isDirector: u.role==='Director',
+    isHR: u.role==='HR',
+    isManager: u.role==='Manager',
+    isEmployee: u.role==='Employee',
+    canApproveFinance: u.role==='Director',
+    canSeeAllSalary: u.role==='Director' || u.role==='HR',
+    canManageEmployees: u.role==='Director' || u.role==='HR',
+    canAssignTasks: u.role!=='Employee',
+  };
+}
+function visibleTasks(){
+  const u = emp(currentUserId);
+  if(u.role==='Director' || u.role==='HR') return DB.tasks;
+  if(u.role==='Manager') return DB.tasks.filter(t=> t.assignedBy===u.id || isManagerOf(u.id,t.assignedTo) || t.assignedTo===u.id);
+  return DB.tasks.filter(t=> t.assignedTo===u.id);
+}
+function visibleEmployeesForAttendanceLeave(){
+  const u = emp(currentUserId);
+  if(u.role==='Director'||u.role==='HR') return DB.employees;
+  if(u.role==='Manager') return [u, ...teamOf(u.id)];
+  return [u];
+}
+function computeSalary(e){
+  const fixed = Math.round(e.salary*0.8);
+  const perfBase = e.salary - fixed;
+  const empTasks = DB.tasks.filter(t=>t.assignedTo===e.id);
+  let deductions = 0, deductionRows = [];
+  let incentives = 0, incentiveRows = [];
+  empTasks.forEach(t=>{
+    if(t.deduction && t.deduction.status==='Approved'){ deductions += t.deduction.amount; deductionRows.push(t); }
+    if(t.incentive && t.incentive.status==='Approved'){ incentives += t.incentive.amount; incentiveRows.push(t); }
+  });
+  deductions = Math.min(deductions, perfBase);
+  const perfPayable = perfBase - deductions;
+  const net = fixed + perfPayable + incentives;
+  return {fixed, perfBase, deductions, deductionRows, incentives, incentiveRows, perfPayable, net};
+}
+
+/* ===================== RENDER: SHELL ===================== */
+function navItemsFor(role){
+  const base = [
+    {id:'dashboard', label:'Dashboard', ic:'◆'},
+    {id:'tasks', label: role==='Employee' ? 'My Tasks' : 'Tasks', ic:'◇'},
+    {id:'attendance', label:'Attendance', ic:'⏱'},
+    {id:'leave', label:'Leave', ic:'◐'},
+    {id:'tickets', label:'Tickets', ic:'✦'},
+    {id:'calendar', label:'Calendar', ic:'▦'},
+    {id:'notifications', label:'Notifications', ic:'✉'},
+    {id:'payroll', label: role==='Employee' ? 'My Salary' : 'Payroll', ic:'৳'},
+  ];
+  if(role==='Director' || role==='HR'){ base.splice(1,0,{id:'employees', label:'Employees', ic:'☰'}); }
+  if(role==='Director'){ base.push({id:'approvals', label:'Approvals', ic:'✓'}); }
+  return base;
+}
+
+function renderShell(){
+  const u = emp(currentUserId);
+  const items = navItemsFor(u.role);
+  const app = document.getElementById('app');
+
+  // hierarchy chain rendering: Director -> HR -> Manager -> You (only relevant rungs)
+  let chain = [];
+  if(u.role==='Director') chain = [{label:'Director', me:true}];
+  else if(u.role==='HR') chain = [{label:'Director'},{label:'HR (You)', me:true}];
+  else if(u.role==='Manager') chain = [{label:'Director'},{label:'Manager (You)', me:true}];
+  else chain = [{label:'Director'},{label:'Manager'},{label:'You', me:true}];
+
+  app.innerHTML = `
+    <div id="sidebar">
+      <div class="brand">
+        <p class="display">Navjyoti HRMS</p>
+        <div class="sub">Unified Ops Portal</div>
+      </div>
+      <div class="rail">
+        <div class="rail-label">Reporting Line</div>
+        <div class="rail-chain">
+          ${chain.map(c=>`<div class="rail-rung ${c.me?'active':''}"><span class="dot"></span>${c.label}</div>`).join('')}
+        </div>
+      </div>
+      <nav class="navlist">
+        ${items.map(i=>`<div class="navitem ${currentView===i.id?'active':''}" onclick="setView('${i.id}')"><span class="ic">${i.ic}</span>${i.label}</div>`).join('')}
+      </nav>
+      <div class="sidebar-foot">Signed in as<br><strong style="color:#fff">${u.name}</strong> · ${u.role}</div>
+    </div>
+    <div id="main">
+      <div id="topbar">
+        <div class="page-title" id="pageTitle"></div>
+        <div class="topbar-right">
+          <div class="clock-actions" id="clockActions"></div>
+          <div class="bell" onclick="setView('notifications')">✉ ${unreadCount()>0?`<span class="badge">${unreadCount()}</span>`:''}</div>
+          <select class="userpick" onchange="switchUser(this.value)">
+            ${DB.employees.map(e=>`<option value="${e.id}" ${e.id===currentUserId?'selected':''}>${e.name} — ${e.role}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="content"></div>
+    </div>
+  `;
+  renderTopClock();
+  renderView();
+}
+
+function unreadCount(){
+  return DB.notifications.filter(n=> targetsMe(n) && !n.readBy.includes(currentUserId)).length;
+}
+function targetsMe(n){
+  const u = emp(currentUserId);
+  if(n.target==='all') return true;
+  if(n.target==='managers') return u.role==='Manager';
+  if(n.target==='hr') return u.role==='HR';
+  if(n.target===u.dept) return true;
+  if(n.target===currentUserId) return true;
+  return false;
+}
+
+function renderTopClock(){
+  const u = emp(currentUserId);
+  const rec = DB.attendance.find(a=>a.employeeId===u.id && a.date===today());
+  const el = document.getElementById('clockActions');
+  if(!rec){
+    el.innerHTML = `<button class="btn small" onclick="checkIn()">Check in</button>`;
+  } else if(!rec.checkOutAt){
+    const reqTime = kolkataTime(rec.requiredCheckoutAt);
+    const remaining = msToHm(new Date(rec.requiredCheckoutAt) - new Date());
+    el.innerHTML = `<span class="tag teal">In · ${kolkataTime(rec.checkInAt)}</span>
+      <span class="mono" style="font-size:11.5px;color:var(--slate);">Checkout by ${reqTime} (${remaining})</span>
+      <button class="btn small secondary" onclick="openCheckoutModal()">Check out</button>`;
+  } else {
+    const badgeClass = rec.finalStatus==='FULL_DAY' ? 'teal' : 'amber';
+    el.innerHTML = `<span class="tag ${badgeClass}">${rec.finalStatus.replace('_',' ')} · ${kolkataTime(rec.checkInAt)}–${kolkataTime(rec.checkOutAt)}</span>`;
+  }
+}
+function kolkataTime(isoStr){
+  return new Date(isoStr).toLocaleTimeString('en-IN', {timeZone:'Asia/Kolkata', hour:'numeric', minute:'2-digit'});
+}
+function msToHm(ms){
+  if(ms<=0) return 'now';
+  const mins = Math.round(ms/60000);
+  const h = Math.floor(mins/60), m = mins%60;
+  return h>0 ? `${h}h ${m}m left` : `${m}m left`;
+}
+
+function switchUser(id){ currentUserId = id; currentView='dashboard'; renderShell(); }
+function setView(v){ currentView = v; renderShell(); }
+
+/* ===================== ATTENDANCE ACTIONS (policy v2) =====================
+   No Late/Absent/Short-Attendance. Employee may check in at any time.
+   required_checkout_at = check_in_at + 540 minutes (480 work + 60 break).
+   Server timestamps are authoritative in the real backend (see
+   backend/src/modules/attendance/attendance.service.ts); this in-browser
+   demo uses the device clock only because there is no server in this
+   mockup, and reminders here fire only while the tab is open — the real
+   implementation uses the Postgres-backed scheduler worker so reminders
+   are not dependent on a browser tab staying open. */
+const REQUIRED_TOTAL_MINUTES_UI = 540;
+
+async function checkIn(){
+  const existing = DB.attendance.find(a=>a.employeeId===currentUserId && a.date===today() && !a.checkOutAt);
+  if(existing){ showToast('You already have an active check-in for today'); return; }
+  const now = new Date();
+  const requiredCheckoutAt = new Date(now.getTime() + REQUIRED_TOTAL_MINUTES_UI*60000);
+  const rec = {
+    id:uid('A'), employeeId:currentUserId, date:today(),
+    checkInAt: now.toISOString(), requiredCheckoutAt: requiredCheckoutAt.toISOString(),
+    checkOutAt:null, checkoutImageCaptured:false, checkoutLat:null, checkoutLng:null,
+    preCheckoutAlertSentAt:null, checkoutReminderSentAt:null,
+    finalStatus:'PENDING_CHECKOUT', actualElapsedMinutes:null, correctedBy:null, correctionReason:null,
+  };
+  DB.attendance.push(rec);
+  await saveDB();
+  showToast(`Checked in. Your full-day checkout time is ${kolkataTime(rec.requiredCheckoutAt)}.`);
+  renderShell();
+  scheduleReminders(rec);
+}
+
+function openCheckoutModal(){
+  const rec = DB.attendance.find(a=>a.employeeId===currentUserId && a.date===today() && !a.checkOutAt);
+  if(!rec){ showToast('No active check-in found for today'); return; }
+  const remainingMs = new Date(rec.requiredCheckoutAt) - new Date();
+  const willBe = remainingMs > 0 ? 'HALF_DAY' : 'FULL_DAY';
+  const notice = remainingMs > 0
+    ? 'Check out before the required time and your attendance will be marked Half Day.'
+    : 'You have completed the required attendance duration.';
+  showModal(`
+    <h3>Check out</h3>
+    <p class="sub">${notice}</p>
+    <div id="checkoutCaptureStatus" style="font-size:12.5px;color:var(--slate);margin-bottom:12px;">
+      Camera and location permission will be requested.
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="performCheckout('${rec.id}')">Capture photo &amp; location, then check out</button>
+    </div>
+  `);
+}
+
+async function performCheckout(recId){
+  const rec = DB.attendance.find(a=>a.id===recId);
+  const statusEl = document.getElementById('checkoutCaptureStatus');
+  try{
+    statusEl.textContent = 'Requesting camera access…';
+    let imageCaptured = false;
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({video:true});
+      stream.getTracks().forEach(t=>t.stop()); // demo only: confirm access, don't store frames client-side
+      imageCaptured = true;
+    }catch(camErr){
+      showToast('Camera permission denied — checkout cannot proceed without an image');
+      statusEl.textContent = 'Camera permission denied. Checkout requires image capture.';
+      return;
+    }
+    statusEl.textContent = 'Requesting location access…';
+    const position = await new Promise((resolve,reject)=>{
+      if(!navigator.geolocation){ reject(new Error('Geolocation unsupported')); return; }
+      navigator.geolocation.getCurrentPosition(resolve, reject, {timeout:8000});
+    }).catch(()=>null);
+    if(!position){
+      showToast('Location permission denied — checkout cannot proceed without location');
+      statusEl.textContent = 'Location permission denied. Checkout requires geolocation.';
+      return;
+    }
+    statusEl.textContent = 'Photo and location captured. Recording checkout…';
+
+    const now = new Date();
+    const elapsedMinutes = Math.round((now - new Date(rec.checkInAt))/60000);
+    rec.checkOutAt = now.toISOString();
+    rec.checkoutImageCaptured = imageCaptured;
+    rec.checkoutLat = position.coords.latitude;
+    rec.checkoutLng = position.coords.longitude;
+    rec.actualElapsedMinutes = elapsedMinutes;
+    rec.finalStatus = elapsedMinutes >= REQUIRED_TOTAL_MINUTES_UI ? 'FULL_DAY' : 'HALF_DAY';
+
+    await saveDB();
+    closeModal();
+    showToast(`Checked out — marked ${rec.finalStatus.replace('_',' ')}`);
+    renderShell();
+  }catch(err){
+    showToast('Checkout failed: '+err.message);
+  }
+}
+
+/* Client-side reminder simulation only (demo). Real reminders are sent by
+   the Postgres-backed scheduler worker — see
+   backend/src/modules/attendance/attendance.scheduler.ts — which is
+   idempotent via *_sent_at columns and independent of any open browser tab. */
+function scheduleReminders(rec){
+  const check = ()=>{
+    const fresh = DB.attendance.find(a=>a.id===rec.id);
+    if(!fresh || fresh.checkOutAt) return;
+    const msToRequired = new Date(fresh.requiredCheckoutAt) - new Date();
+    if(!fresh.preCheckoutAlertSentAt && msToRequired <= 2*60000 && msToRequired > 0){
+      fresh.preCheckoutAlertSentAt = new Date().toISOString();
+      saveDB();
+      loudAlert('Your checkout time is approaching in 2 minutes. Please get ready to check out and ensure your report is submitted.');
+    }
+    if(!fresh.checkoutReminderSentAt && msToRequired <= 0){
+      fresh.checkoutReminderSentAt = new Date().toISOString();
+      saveDB();
+      loudAlert('Your required attendance duration is complete. You may now check out. Please submit your daily report before checkout if it is still pending.');
+    }
+    if(!fresh.checkOutAt) setTimeout(check, 5000);
+  };
+  setTimeout(check, 5000);
+}
+function loudAlert(message){
+  playAlertTone();
+  if(navigator.vibrate) navigator.vibrate([250,120,250,120,250]);
+  showModal(`<h3>🔊 Checkout reminder</h3><p class="sub">${message}</p>
+    <div style="display:flex;justify-content:flex-end;"><button class="btn" onclick="closeModal()">OK</button></div>`);
+  showToast(message);
+}
+function playAlertTone(){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    [0,0.35,0.7].forEach(delay=>{
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = 'sine'; osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.35, ctx.currentTime+delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+delay+0.3);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime+delay); osc.stop(ctx.currentTime+delay+0.3);
+    });
+  }catch(e){ /* audio not available in this environment */ }
+}
+
+/* ===================== VIEW ROUTER ===================== */
+function renderView(){
+  const title = {
+    dashboard:'Dashboard', employees:'Employees', tasks: perm().isEmployee?'My Tasks':'Tasks',
+    attendance:'Attendance', leave:'Leave Management', tickets:'Tickets', calendar:'Company Calendar',
+    notifications:'Notifications', payroll: perm().isEmployee?'My Salary':'Payroll', approvals:'Financial Approvals'
+  }[currentView] || '';
+  document.getElementById('pageTitle').textContent = title;
+  const c = document.getElementById('content');
+  const renderers = {
+    dashboard: renderDashboard, employees: renderEmployees, tasks: renderTasks, attendance: renderAttendance,
+    leave: renderLeave, tickets: renderTickets, calendar: renderCalendar, notifications: renderNotifications,
+    payroll: renderPayroll, approvals: renderApprovals
+  };
+  c.innerHTML = (renderers[currentView] || renderDashboard)();
+}
+
+/* ---------- DASHBOARD ---------- */
+function renderDashboard(){
+  const u = emp(currentUserId);
+  const myTasks = visibleTasks();
+  const overdue = myTasks.filter(t=> !t.status.startsWith('Completed') && t.status!=='Cancelled' && t.deadline < today());
+  const pendingLeaves = DB.leaves.filter(l=> l.status==='Pending' && (perm().isDirector||perm().isHR|| (perm().isManager && isManagerOf(u.id,l.employeeId))));
+  const openTickets = DB.tickets.filter(t=> t.status!=='Closed' && t.status!=='Resolved');
+  const pendingApprovals = DB.tasks.filter(t=> (t.deduction && t.deduction.status==='Pending Director Approval') || (t.incentive && t.incentive.status==='Pending Director Approval'));
+
+  let kpis = [];
+  if(perm().isDirector){
+    kpis = [
+      {n:DB.employees.length, l:'Total Workforce', f:'teal'},
+      {n:overdue.length, l:'Overdue Tasks', f:'rose'},
+      {n:pendingApprovals.length, l:'Pending Approvals', f:'amber'},
+      {n:openTickets.length, l:'Open Tickets', f:'gray'},
+    ];
+  } else if(perm().isHR){
+    kpis = [
+      {n:DB.employees.length, l:'Total Employees', f:'teal'},
+      {n:DB.leaves.filter(l=>l.status==='Pending').length, l:'Pending Leave Requests', f:'amber'},
+      {n:openTickets.length, l:'Open Tickets', f:'gray'},
+      {n:DB.employees.filter(e=>e.joinDate>=today().slice(0,4)+'-01-01').length, l:'New Joiners (YTD)', f:'teal'},
+    ];
+  } else if(perm().isManager){
+    kpis = [
+      {n:teamOf(u.id).length, l:'Team Size', f:'teal'},
+      {n:myTasks.filter(t=>t.status==='Assigned').length, l:'Pending Acceptance', f:'amber'},
+      {n:overdue.length, l:'Overdue Tasks', f:'rose'},
+      {n:pendingLeaves.length, l:'Leave Approvals', f:'amber'},
+    ];
+  } else {
+    kpis = [
+      {n:myTasks.filter(t=>!t.status.startsWith('Completed')&&t.status!=='Cancelled').length, l:'Active Tasks', f:'teal'},
+      {n:overdue.length, l:'Overdue', f:'rose'},
+      {n:u.casualLeave, l:'Casual Leave Balance', f:'gray'},
+      {n:u.sickLeave, l:'Sick Leave Balance', f:'gray'},
+    ];
+  }
+
+  const recentTasks = myTasks.slice(-5).reverse();
+  return `
+    <div class="grid g4">
+      ${kpis.map(k=>`<div class="card kpi flag-${k.f}"><div class="num">${k.n}</div><div class="lbl">${k.l}</div></div>`).join('')}
+    </div>
+    <div class="section-title">Recent Task Activity</div>
+    <div class="card" style="padding:0;">${taskTableHTML(recentTasks, false)}</div>
+    ${perm().canAssignTasks ? `<div class="section-title">Needs Attention</div>
+    <div class="card">
+      ${overdue.length ? `<div style="margin-bottom:10px;"><span class="tag rose">Overdue</span> ${overdue.length} task(s) past deadline</div>`:''}
+      ${pendingApprovals.length && perm().isDirector ? `<div style="margin-bottom:10px;"><span class="tag amber">Awaiting You</span> ${pendingApprovals.length} incentive/deduction recommendation(s) need Director decision — see Approvals.</div>`:''}
+      ${pendingLeaves.length ? `<div><span class="tag amber">Leave</span> ${pendingLeaves.length} request(s) awaiting your approval</div>`:''}
+      ${(!overdue.length && !pendingLeaves.length && (!pendingApprovals.length||!perm().isDirector)) ? '<div class="empty">Nothing urgent right now.</div>' : ''}
+    </div>` : ''}
+  `;
+}
+
+/* ---------- EMPLOYEES ---------- */
+function renderEmployees(){
+  return `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
+      <button class="btn" onclick="openEmployeeModal()">+ Add employee</button>
+    </div>
+    <div class="card" style="padding:0;">
+      <table>
+        <thead><tr><th>Name</th><th>Role</th><th>Department</th><th>Reports To</th><th>Location</th><th>Work Mode</th><th>Joined</th></tr></thead>
+        <tbody>
+          ${DB.employees.map(e=>`
+            <tr>
+              <td><strong>${e.name}</strong><div class="mono" style="font-size:10.5px;color:var(--slate)">${e.id}</div></td>
+              <td><span class="tag ink">${e.role}</span></td>
+              <td>${e.dept}</td>
+              <td>${e.managerId? empName(e.managerId): '—'}</td>
+              <td>${e.location}</td>
+              <td>${e.workType}</td>
+              <td class="mono">${e.joinDate}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+function openEmployeeModal(){
+  showModal(`
+    <h3>Add Employee</h3>
+    <div class="sub">Creates a login profile. The employee changes their temporary password on first login.</div>
+    <div class="grid g2">
+      <div class="field-wrap"><label class="field">Full name</label><input id="f_name"></div>
+      <div class="field-wrap"><label class="field">Role</label>
+        <select id="f_role">${ROLES.map(r=>`<option>${r}</option>`).join('')}</select></div>
+      <div class="field-wrap"><label class="field">Department</label><input id="f_dept" value="Programs"></div>
+      <div class="field-wrap"><label class="field">Designation</label><input id="f_desig"></div>
+      <div class="field-wrap"><label class="field">Reporting manager</label>
+        <select id="f_mgr"><option value="">— None —</option>${DB.employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}</select></div>
+      <div class="field-wrap"><label class="field">Monthly salary (₹)</label><input id="f_salary" type="number" value="25000"></div>
+      <div class="field-wrap"><label class="field">Work location</label><input id="f_loc" value="Delhi"></div>
+      <div class="field-wrap"><label class="field">Work type</label>
+        <select id="f_wtype"><option>Office</option><option>WFH</option><option>Hybrid</option></select></div>
+      <div class="field-wrap"><label class="field">Email</label><input id="f_email" type="email"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="submitNewEmployee()">Create account</button>
+    </div>
+  `);
+}
+async function submitNewEmployee(){
+  const name = document.getElementById('f_name').value.trim();
+  if(!name){ showToast('Enter a name'); return; }
+  const e = {
+    id: uid('E'), name, role: document.getElementById('f_role').value,
+    dept: document.getElementById('f_dept').value, designation: document.getElementById('f_desig').value,
+    managerId: document.getElementById('f_mgr').value || null, salary: Number(document.getElementById('f_salary').value)||0,
+    joinDate: today(), email: document.getElementById('f_email').value, location: document.getElementById('f_loc').value,
+    workType: document.getElementById('f_wtype').value, casualLeave:0, sickLeave:0, username: name.toLowerCase().replace(/\s+/g,'.')
+  };
+  DB.employees.push(e); await saveDB(); closeModal(); showToast('Employee account created'); renderView();
+  document.querySelector('.userpick').innerHTML = DB.employees.map(x=>`<option value="${x.id}" ${x.id===currentUserId?'selected':''}>${x.name} — ${x.role}</option>`).join('');
+}
+
+/* ---------- TASKS ---------- */
+function taskTableHTML(list, clickable=true){
+  if(!list.length) return `<div class="empty"><div class="big">◇</div>No tasks to show.</div>`;
+  return `<table>
+    <thead><tr><th>Task</th><th>Assignee</th><th>Deadline</th><th>Weight</th><th>Progress</th><th>Status</th></tr></thead>
+    <tbody>
+      ${list.map(t=>`
+        <tr class="task-row" ${clickable?`onclick="openTaskDetail('${t.id}')"`:''}>
+          <td><strong>${t.title}</strong><div class="mono" style="font-size:10.5px;color:var(--slate)">${t.id}</div></td>
+          <td>${empName(t.assignedTo)}</td>
+          <td class="mono">${t.deadline}</td>
+          <td>${t.weight}%</td>
+          <td><span class="progress-bar"><span class="progress-fill" style="width:${t.progress}%"></span></span></td>
+          <td><span class="tag ${tagClassForStatus(t.status)}">${t.status}</span></td>
+        </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+function renderTasks(){
+  const list = visibleTasks().slice().reverse();
+  return `
+    ${perm().canAssignTasks ? `<div style="display:flex;justify-content:flex-end;margin-bottom:14px;"><button class="btn" onclick="openTaskModal()">+ Assign task</button></div>` : ''}
+    <div class="card" style="padding:0;">${taskTableHTML(list)}</div>
+  `;
+}
+function assignableEmployees(){
+  const u = emp(currentUserId);
+  if(u.role==='Director'||u.role==='HR') return DB.employees.filter(e=>e.id!==u.id);
+  if(u.role==='Manager') return teamOf(u.id);
+  return [];
+}
+function openTaskModal(){
+  const opts = assignableEmployees();
+  showModal(`
+    <h3>Assign Task</h3>
+    <div class="sub">Every task carries a performance weightage used in the monthly score.</div>
+    <div class="field-wrap"><label class="field">Task title</label><input id="t_title"></div>
+    <div class="field-wrap"><label class="field">Description</label><textarea id="t_desc"></textarea></div>
+    <div class="grid g2">
+      <div class="field-wrap"><label class="field">Assign to</label>
+        <select id="t_assignee">${opts.map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}</select></div>
+      <div class="field-wrap"><label class="field">Priority</label>
+        <select id="t_priority"><option>High</option><option>Medium</option><option>Low</option></select></div>
+      <div class="field-wrap"><label class="field">Start date</label><input id="t_start" type="date" value="${today()}"></div>
+      <div class="field-wrap"><label class="field">Deadline</label><input id="t_deadline" type="date"></div>
+      <div class="field-wrap"><label class="field">Performance weightage</label>
+        <select id="t_weight"><option value="30">Major project — 30%</option><option value="20">Important operational — 20%</option><option value="10" selected>Regular — 10%</option><option value="5">Minor follow-up — 5%</option></select></div>
+      <div class="field-wrap"><label class="field">Department</label><input id="t_dept" value="Programs"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="submitNewTask()">Assign task</button>
+    </div>
+  `);
+}
+async function submitNewTask(){
+  const title = document.getElementById('t_title').value.trim();
+  const deadline = document.getElementById('t_deadline').value;
+  if(!title || !deadline){ showToast('Title and deadline are required'); return; }
+  const t = {
+    id: uid('T'), title, description: document.getElementById('t_desc').value,
+    assignedTo: document.getElementById('t_assignee').value, assignedBy: currentUserId,
+    dept: document.getElementById('t_dept').value, priority: document.getElementById('t_priority').value,
+    startDate: document.getElementById('t_start').value, deadline,
+    weight: Number(document.getElementById('t_weight').value), status:'Assigned', progress:0,
+    completedDate:null, delayDays:0, deduction:null, incentive:null, rejection:null
+  };
+  DB.tasks.push(t); await saveDB(); closeModal(); showToast('Task assigned to '+empName(t.assignedTo)); renderView();
+}
+
+function openTaskDetail(id){
+  currentTaskDetail = id;
+  renderTaskDetailModal();
+}
+function renderTaskDetailModal(){
+  const t = DB.tasks.find(x=>x.id===currentTaskDetail);
+  const u = emp(currentUserId);
+  const isAssignee = t.assignedTo===currentUserId;
+  const isAssigner = t.assignedBy===currentUserId || (perm().isManager && isManagerOf(u.id,t.assignedTo)) || perm().isDirector || perm().isHR;
+
+  let actions = '';
+  if(t.status==='Assigned' && isAssignee){
+    actions = `
+      <button class="btn" onclick="acceptTask()">Accept task</button>
+      <button class="btn secondary" onclick="openReassignForm()">Request reassignment / cancellation</button>`;
+  } else if(t.status==='Accepted' && isAssignee){
+    actions = `<button class="btn" onclick="startTask()">Start work</button>`;
+  } else if(t.status==='In Progress' && isAssignee){
+    actions = `
+      <div class="field-wrap"><label class="field">Update progress (%)</label><input id="progress_input" type="number" min="0" max="100" value="${t.progress}"></div>
+      <button class="btn secondary" onclick="updateProgress()">Save progress</button>
+      <button class="btn" onclick="submitTask()">Submit for review</button>`;
+  } else if(t.status==='Submitted' && isAssigner){
+    actions = `<button class="btn" onclick="reviewComplete()">Mark reviewed &amp; complete</button>
+      <button class="btn secondary" onclick="requestRevision()">Request revision</button>`;
+  } else if(t.status==='Reassignment Requested' && isAssigner){
+    const r = t.rejection||{};
+    actions = `
+      <div class="lock-note"><strong>Employee's request:</strong> ${r.reason||''}<br>Proposed deadline: <span class="mono">${r.proposedDeadline||'—'}</span> · Proposed target note: ${r.proposedTarget||'—'}</div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn" onclick="approveReassignment()">Approve — apply new deadline</button>
+        <button class="btn secondary" onclick="rejectReassignment()">Reject — keep original</button>
+        <button class="btn danger" onclick="cancelTask()">Cancel task</button>
+      </div>`;
+  }
+
+  let financeBlock = '';
+  if(t.deduction){
+    financeBlock += `<div class="lock-note" style="border-color:var(--rose);">
+      <strong>Deduction recommendation</strong> — ${fmtMoney(t.deduction.amount)} · <span class="tag ${tagClassForStatus(t.deduction.status)}">${t.deduction.status}</span><br>
+      Reason: ${t.deduction.reason||'Late completion'} ${t.deduction.managerRemarks? '· Manager remarks: '+t.deduction.managerRemarks : ''}
+      ${perm().canApproveFinance && t.deduction.status==='Pending Director Approval' ? `<div style="margin-top:8px;display:flex;gap:8px;">
+        <button class="btn small amber" onclick="decideFinance('deduction','Approved')">Approve</button>
+        <button class="btn small secondary" onclick="decideFinance('deduction','Waived')">Waive</button>
+      </div>`:''}
+    </div>`;
+  }
+  if(t.incentive){
+    financeBlock += `<div class="lock-note" style="border-color:var(--amber);margin-top:8px;">
+      <strong>Incentive recommendation</strong> — ${fmtMoney(t.incentive.amount)} · <span class="tag ${tagClassForStatus(t.incentive.status)}">${t.incentive.status}</span><br>
+      Reason: ${t.incentive.reason}
+      ${perm().canApproveFinance && t.incentive.status==='Pending Director Approval' ? `<div style="margin-top:8px;display:flex;gap:8px;">
+        <button class="btn small" onclick="decideFinance('incentive','Approved')">Approve</button>
+        <button class="btn small secondary" onclick="decideFinance('incentive','Rejected')">Reject</button>
+      </div>`:''}
+    </div>`;
+  }
+
+  showModal(`
+    <h3>${t.title}</h3>
+    <div class="sub mono">${t.id} · assigned to ${empName(t.assignedTo)} by ${empName(t.assignedBy)}</div>
+    <p style="font-size:13px;color:var(--ink-text);">${t.description||'No description provided.'}</p>
+    <div class="grid g3" style="margin-bottom:14px;">
+      <div><label class="field">Deadline</label><div class="mono">${t.deadline}</div></div>
+      <div><label class="field">Priority</label><div>${t.priority}</div></div>
+      <div><label class="field">Weightage</label><div>${t.weight}%</div></div>
+    </div>
+    <div style="margin-bottom:10px;"><span class="tag ${tagClassForStatus(t.status)}">${t.status}</span></div>
+    ${financeBlock}
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">${actions}</div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Close</button></div>
+  `);
+}
+async function acceptTask(){ const t=curT(); t.status='Accepted'; await saveDB(); showToast('Task accepted'); renderTaskDetailModal(); renderView(); }
+async function startTask(){ const t=curT(); t.status='In Progress'; await saveDB(); renderTaskDetailModal(); renderView(); }
+async function updateProgress(){ const t=curT(); t.progress = Math.max(0,Math.min(100, Number(document.getElementById('progress_input').value)||0)); await saveDB(); showToast('Progress updated'); renderTaskDetailModal(); renderView(); }
+async function submitTask(){ const t=curT(); t.status='Submitted'; t.progress=100; await saveDB(); showToast('Submitted for review'); renderTaskDetailModal(); renderView(); }
+async function requestRevision(){ const t=curT(); t.status='In Progress'; t.progress=Math.min(t.progress,80); await saveDB(); showToast('Sent back for revision'); renderTaskDetailModal(); renderView(); }
+function curT(){ return DB.tasks.find(x=>x.id===currentTaskDetail); }
+
+async function reviewComplete(){
+  const t = curT();
+  const dl = new Date(t.deadline), cd = new Date();
+  const cdStr = today();
+  let outcome, delayDays=0;
+  if(cdStr < t.deadline) outcome='Completed Before Deadline';
+  else if(cdStr === t.deadline) outcome='Completed on time';
+  else { outcome='Completed After Deadline'; delayDays = Math.round((cd - dl)/86400000); }
+  t.status = outcome; t.completedDate = cdStr; t.delayDays = delayDays;
+
+  if(outcome==='Completed After Deadline'){
+    const e = emp(t.assignedTo);
+    const perfBase = e.salary*0.2;
+    const amount = Math.round(perfBase*0.05);
+    t.deduction = {amount, status:'Pending Director Approval', reason:`${delayDays} day(s) delayed`, managerRemarks:'', proposedBy: currentUserId};
+    showToast('Marked complete — deduction sent for Director approval');
+  } else if(outcome==='Completed Before Deadline'){
+    t.incentive = null; // manager can add via prompt below
+    showToast('Marked complete before deadline — you can recommend an incentive');
+    await saveDB(); renderTaskDetailModal(); renderView();
+    openIncentiveForm();
+    return;
+  } else {
+    showToast('Marked complete on time');
+  }
+  await saveDB(); renderTaskDetailModal(); renderView();
+}
+function openIncentiveForm(){
+  const t = curT();
+  showModal(`
+    <h3>Recommend Incentive</h3>
+    <div class="sub">${t.title} — completed before deadline. Only the Director can give final approval.</div>
+    <div class="field-wrap"><label class="field">Recommended amount (₹)</label><input id="inc_amount" type="number" value="500"></div>
+    <div class="field-wrap"><label class="field">Reason / quality note</label><textarea id="inc_reason">Completed ahead of schedule with good quality.</textarea></div>
+    <div class="modal-foot">
+      <button class="btn secondary" onclick="closeModal()">Skip</button>
+      <button class="btn amber" onclick="submitIncentive()">Send for Director approval</button>
+    </div>
+  `);
+}
+async function submitIncentive(){
+  const t = curT();
+  t.incentive = {amount:Number(document.getElementById('inc_amount').value)||0, status:'Pending Director Approval', reason:document.getElementById('inc_reason').value, proposedBy:currentUserId};
+  await saveDB(); closeModal(); showToast('Incentive recommendation sent to Director'); renderView();
+}
+async function decideFinance(kind, decision){
+  const t = curT();
+  t[kind].status = decision;
+  t[kind].approvedBy = currentUserId;
+  await saveDB(); showToast(`${kind==='deduction'?'Deduction':'Incentive'} ${decision.toLowerCase()}`); renderTaskDetailModal(); renderView();
+}
+function openReassignForm(){
+  showModal(`
+    <h3>Request Reassignment / Cancellation</h3>
+    <div class="sub">Explain why the current target or deadline isn't realistic. This goes to your manager for review.</div>
+    <div class="field-wrap"><label class="field">Reason</label><textarea id="rq_reason" placeholder="e.g. dependency on another team, unrealistic target..."></textarea></div>
+    <div class="grid g2">
+      <div class="field-wrap"><label class="field">Proposed deadline</label><input id="rq_deadline" type="date"></div>
+      <div class="field-wrap"><label class="field">Proposed realistic target</label><input id="rq_target" placeholder="e.g. reduce scope to..."></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn secondary" onclick="renderTaskDetailModal()">Back</button>
+      <button class="btn" onclick="submitReassignRequest()">Submit request</button>
+    </div>
+  `);
+}
+async function submitReassignRequest(){
+  const t = curT();
+  const reason = document.getElementById('rq_reason').value.trim();
+  if(!reason){ showToast('Please enter a reason'); return; }
+  t.status='Reassignment Requested';
+  t.rejection = {reason, proposedDeadline: document.getElementById('rq_deadline').value, proposedTarget: document.getElementById('rq_target').value};
+  await saveDB(); showToast('Request sent to your manager'); renderTaskDetailModal(); renderView();
+}
+async function approveReassignment(){
+  const t = curT();
+  if(t.rejection.proposedDeadline) t.deadline = t.rejection.proposedDeadline;
+  t.status='In Progress'; t.rejection=null;
+  await saveDB(); showToast('Reassignment approved — new deadline applied'); renderTaskDetailModal(); renderView();
+}
+async function rejectReassignment(){
+  const t = curT(); t.status='Assigned'; t.rejection=null;
+  await saveDB(); showToast('Request rejected — original terms stand'); renderTaskDetailModal(); renderView();
+}
+async function cancelTask(){
+  const t = curT(); t.status='Cancelled';
+  await saveDB(); showToast('Task cancelled'); closeModal(); renderView();
+}
+
+/* ---------- ATTENDANCE (policy v2) ---------- */
+function attendanceStatusBadgeClass(status){
+  if(status==='FULL_DAY') return 'teal';
+  if(status==='HALF_DAY') return 'amber';
+  return 'gray'; // PENDING_CHECKOUT
+}
+function renderAttendance(){
+  const people = visibleEmployeesForAttendanceLeave();
+  const isManagerOrHr = ['Manager','HR','Director'].includes(emp(currentUserId).role);
+  const rows = DB.attendance.filter(a=> people.some(p=>p.id===a.employeeId)).slice().reverse();
+  return `
+    <div class="grid g3" style="margin-bottom:18px;">
+      <div class="card"><div class="lbl" style="font-size:11px;color:var(--slate);text-transform:uppercase;">Required attendance window</div><div style="margin-top:6px;font-size:14px;">9 hours from check-in (8h work + 1h break)</div></div>
+      <div class="card"><div class="lbl" style="font-size:11px;color:var(--slate);text-transform:uppercase;">Check-in time</div><div style="margin-top:6px;font-size:14px;">Any time — no Late marking</div></div>
+      <div class="card"><div class="lbl" style="font-size:11px;color:var(--slate);text-transform:uppercase;">Weekly off</div><div style="margin-top:6px;font-size:14px;">Sunday only</div></div>
+    </div>
+    <div class="card" style="padding:0;">
+      <table>
+        <thead><tr>
+          <th>Employee</th><th>Date</th><th>Check-in</th><th>Required checkout</th><th>Actual checkout</th>
+          <th>Elapsed</th><th>Status</th>${isManagerOrHr?'<th>Checkout evidence</th>':''}
+        </tr></thead>
+        <tbody>
+          ${rows.length? rows.map(a=>`
+            <tr>
+              <td>${empName(a.employeeId)}</td>
+              <td class="mono">${a.date}</td>
+              <td class="mono">${kolkataTime(a.checkInAt)}</td>
+              <td class="mono">${kolkataTime(a.requiredCheckoutAt)}</td>
+              <td class="mono">${a.checkOutAt? kolkataTime(a.checkOutAt) : '—'}</td>
+              <td class="mono">${a.actualElapsedMinutes!=null? Math.floor(a.actualElapsedMinutes/60)+'h '+(a.actualElapsedMinutes%60)+'m' : '—'}</td>
+              <td><span class="tag ${attendanceStatusBadgeClass(a.finalStatus)}">${a.finalStatus.replace('_',' ')}</span></td>
+              ${isManagerOrHr? `<td>${a.checkOutAt? (a.checkoutImageCaptured?'📷 captured':'—')+' · '+(a.checkoutLat? a.checkoutLat.toFixed(3)+', '+a.checkoutLng.toFixed(3) : '—') : '—'}</td>`:''}
+            </tr>`).join('') : `<tr><td colspan="${isManagerOrHr?8:7}"><div class="empty">No attendance records yet.</div></td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* ---------- LEAVE ---------- */
+function renderLeave(){
+  const u = emp(currentUserId);
+  const people = visibleEmployeesForAttendanceLeave();
+  const canApprove = perm().isManager || perm().isHR || perm().isDirector;
+  const list = DB.leaves.filter(l=> people.some(p=>p.id===l.employeeId)).slice().reverse();
+  return `
+    <div class="grid g3" style="margin-bottom:18px;">
+      <div class="card kpi flag-teal"><div class="num">${u.casualLeave}</div><div class="lbl">Casual Leave Balance</div></div>
+      <div class="card kpi flag-teal"><div class="num">${u.sickLeave}</div><div class="lbl">Sick Leave Balance</div></div>
+      <div class="card" style="display:flex;align-items:center;justify-content:center;">
+        <button class="btn" onclick="openLeaveModal()">+ Apply for leave</button>
+      </div>
+    </div>
+    <div class="card" style="padding:0;">
+      <table>
+        <thead><tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th>${canApprove?'<th></th>':''}</tr></thead>
+        <tbody>
+          ${list.length? list.map(l=>`
+            <tr>
+              <td>${empName(l.employeeId)}</td>
+              <td>${l.type}</td>
+              <td class="mono">${l.from}</td>
+              <td class="mono">${l.to}</td>
+              <td>${l.days}</td>
+              <td>${l.reason}</td>
+              <td><span class="tag ${tagClassForStatus(l.status)}">${l.status}</span></td>
+              ${canApprove? `<td>${l.status==='Pending'?`<button class="btn small" onclick="decideLeave('${l.id}','Approved')">Approve</button> <button class="btn small secondary" onclick="decideLeave('${l.id}','Rejected')">Reject</button>`:''}</td>`:''}
+            </tr>`).join('') : `<tr><td colspan="8"><div class="empty">No leave requests yet.</div></td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+function openLeaveModal(){
+  showModal(`
+    <h3>Apply for Leave</h3>
+    <div class="field-wrap"><label class="field">Leave type</label>
+      <select id="lv_type"><option>Casual Leave</option><option>Sick Leave</option><option>Unpaid Leave</option></select></div>
+    <div class="grid g2">
+      <div class="field-wrap"><label class="field">From</label><input id="lv_from" type="date"></div>
+      <div class="field-wrap"><label class="field">To</label><input id="lv_to" type="date"></div>
+    </div>
+    <div class="field-wrap"><label class="field">Reason</label><textarea id="lv_reason"></textarea></div>
+    <div class="modal-foot">
+      <button class="btn secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="submitLeave()">Submit request</button>
+    </div>
+  `);
+}
+async function submitLeave(){
+  const from = document.getElementById('lv_from').value, to = document.getElementById('lv_to').value;
+  if(!from||!to){ showToast('Select both dates'); return; }
+  const days = Math.max(1, Math.round((new Date(to)-new Date(from))/86400000)+1);
+  DB.leaves.push({id:uid('L'), employeeId:currentUserId, type:document.getElementById('lv_type').value, from, to, days,
+    reason:document.getElementById('lv_reason').value, status:'Pending', appliedOn: today()});
+  await saveDB(); closeModal(); showToast('Leave request submitted'); renderView();
+}
+async function decideLeave(id, decision){
+  const l = DB.leaves.find(x=>x.id===id);
+  l.status = decision;
+  if(decision==='Approved'){
+    const e = emp(l.employeeId);
+    if(l.type==='Casual Leave') e.casualLeave = Math.max(0, e.casualLeave - l.days);
+    if(l.type==='Sick Leave') e.sickLeave = Math.max(0, e.sickLeave - l.days);
+  }
+  await saveDB(); showToast('Leave '+decision.toLowerCase()); renderView();
+}
+
+/* ---------- TICKETS ---------- */
+function renderTickets(){
+  const u = emp(currentUserId);
+  const list = (perm().isDirector||perm().isHR||perm().isManager) ? DB.tickets.slice().reverse() : DB.tickets.filter(t=>t.employeeId===u.id).slice().reverse();
+  const canManage = perm().isDirector||perm().isHR||perm().isManager;
+  return `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px;"><button class="btn" onclick="openTicketModal()">+ Raise ticket</button></div>
+    <div class="card" style="padding:0;">
+      <table>
+        <thead><tr><th>Ticket</th><th>Category</th><th>Raised by</th><th>Priority</th><th>Status</th>${canManage?'<th></th>':''}</tr></thead>
+        <tbody>
+          ${list.length? list.map(t=>`
+            <tr>
+              <td><strong>${t.subject}</strong><div class="mono" style="font-size:10.5px;color:var(--slate)">${t.id}</div></td>
+              <td>${t.category}</td>
+              <td>${empName(t.employeeId)}</td>
+              <td><span class="tag ${t.priority==='High'?'rose':'gray'}">${t.priority}</span></td>
+              <td><span class="tag ${tagClassForStatus(t.status)}">${t.status}</span></td>
+              ${canManage? `<td>${t.status!=='Closed'?`<select onchange="advanceTicket('${t.id}',this.value)"><option value="">Update…</option><option>In Progress</option><option>Resolved</option><option>Closed</option><option>Escalated</option></select>`:''}</td>`:''}
+            </tr>`).join('') : `<tr><td colspan="6"><div class="empty">No tickets raised.</div></td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+function openTicketModal(){
+  showModal(`
+    <h3>Raise a Ticket</h3>
+    <div class="field-wrap"><label class="field">Category</label>
+      <select id="tk_cat"><option>Task reassignment</option><option>Unrealistic deadline</option><option>Attendance correction</option><option>Salary issue</option><option>Leave issue</option><option>IT support</option><option>HR grievance</option><option>Other</option></select></div>
+    <div class="field-wrap"><label class="field">Subject</label><input id="tk_subject"></div>
+    <div class="field-wrap"><label class="field">Description</label><textarea id="tk_desc"></textarea></div>
+    <div class="field-wrap"><label class="field">Priority</label><select id="tk_priority"><option>Medium</option><option>High</option><option>Low</option></select></div>
+    <div class="modal-foot">
+      <button class="btn secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="submitTicket()">Submit ticket</button>
+    </div>
+  `);
+}
+async function submitTicket(){
+  const subject = document.getElementById('tk_subject').value.trim();
+  if(!subject){ showToast('Enter a subject'); return; }
+  DB.tickets.push({id:uid('TK'), employeeId:currentUserId, category:document.getElementById('tk_cat').value, subject,
+    description:document.getElementById('tk_desc').value, priority:document.getElementById('tk_priority').value,
+    dept: emp(currentUserId).dept, status:'Open', createdDate: today(), resolution:''});
+  await saveDB(); closeModal(); showToast('Ticket raised'); renderView();
+}
+async function advanceTicket(id, status){
+  if(!status) return;
+  const t = DB.tickets.find(x=>x.id===id); t.status = status;
+  await saveDB(); showToast('Ticket updated'); renderView();
+}
+
+/* ---------- CALENDAR ---------- */
+function renderCalendar(){
+  const list = DB.calendarEvents.slice().sort((a,b)=> a.date.localeCompare(b.date));
+  return `
+    ${perm().canAssignTasks ? `<div style="display:flex;justify-content:flex-end;margin-bottom:14px;"><button class="btn" onclick="openEventModal()">+ Add event</button></div>`:''}
+    <div class="card" style="padding:0;">
+      <table>
+        <thead><tr><th>Date</th><th>Title</th><th>Type</th><th>Branch</th></tr></thead>
+        <tbody>
+          ${list.length? list.map(e=>`
+            <tr><td class="mono">${e.date}</td><td>${e.title}</td><td><span class="tag ${e.type==='Holiday'?'rose':'teal'}">${e.type}</span></td><td>${e.branch}</td></tr>
+          `).join('') : `<tr><td colspan="4"><div class="empty">No events yet.</div></td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+function openEventModal(){
+  showModal(`
+    <h3>Add Calendar Event</h3>
+    <div class="field-wrap"><label class="field">Title</label><input id="ev_title"></div>
+    <div class="grid g2">
+      <div class="field-wrap"><label class="field">Date</label><input id="ev_date" type="date"></div>
+      <div class="field-wrap"><label class="field">Type</label><select id="ev_type"><option>Meeting</option><option>Holiday</option><option>Training</option><option>Deadline</option><option>Announcement</option></select></div>
+    </div>
+    <div class="field-wrap"><label class="field">Branch</label><input id="ev_branch" value="All"></div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitEvent()">Add event</button></div>
+  `);
+}
+async function submitEvent(){
+  const title = document.getElementById('ev_title').value.trim(), date = document.getElementById('ev_date').value;
+  if(!title||!date){ showToast('Title and date required'); return; }
+  DB.calendarEvents.push({id:uid('C'), title, date, type:document.getElementById('ev_type').value, branch:document.getElementById('ev_branch').value});
+  await saveDB(); closeModal(); showToast('Event added'); renderView();
+}
+
+/* ---------- NOTIFICATIONS ---------- */
+function renderNotifications(){
+  const mine = DB.notifications.filter(targetsMe).slice().reverse();
+  return `
+    ${perm().canAssignTasks ? `<div style="display:flex;justify-content:flex-end;margin-bottom:14px;"><button class="btn" onclick="openNotifModal()">+ Send notification</button></div>`:''}
+    <div class="card" style="padding:0;">
+      ${mine.length? mine.map(n=>`
+        <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+          <div>
+            <span class="tag gray">${n.category}</span>
+            <div style="margin-top:6px;font-size:13.5px;">${n.message}</div>
+            <div class="mono" style="font-size:10.5px;color:var(--slate);margin-top:5px;">From ${empName(n.from)} · ${n.date}</div>
+          </div>
+          <div>${n.readBy.includes(currentUserId)? `<span class="tag teal">Read</span>` : `<button class="btn small secondary" onclick="markRead('${n.id}')">Mark read</button>`}</div>
+        </div>
+      `).join('') : `<div class="empty">No notifications.</div>`}
+    </div>
+  `;
+}
+function openNotifModal(){
+  showModal(`
+    <h3>Send Notification</h3>
+    <div class="field-wrap"><label class="field">Send to</label>
+      <select id="nt_target"><option value="all">Everyone</option><option value="managers">Managers only</option><option value="hr">HR team only</option></select></div>
+    <div class="field-wrap"><label class="field">Category</label>
+      <select id="nt_cat"><option>Announcement</option><option>Policy update</option><option>Holiday notice</option><option>Meeting</option><option>Warning</option><option>Emergency</option></select></div>
+    <div class="field-wrap"><label class="field">Message</label><textarea id="nt_msg"></textarea></div>
+    <div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitNotif()">Send</button></div>
+  `);
+}
+async function submitNotif(){
+  const msg = document.getElementById('nt_msg').value.trim();
+  if(!msg){ showToast('Enter a message'); return; }
+  DB.notifications.push({id:uid('N'), from:currentUserId, target:document.getElementById('nt_target').value, category:document.getElementById('nt_cat').value, message:msg, date:today(), readBy:[]});
+  await saveDB(); closeModal(); showToast('Notification sent'); renderView();
+}
+async function markRead(id){
+  const n = DB.notifications.find(x=>x.id===id); n.readBy.push(currentUserId);
+  await saveDB(); renderShell();
+}
+
+/* ---------- PAYROLL ---------- */
+function renderPayroll(){
+  const u = emp(currentUserId);
+  if(perm().isEmployee){
+    return payrollLedgerHTML(u, true);
+  }
+  const list = perm().isManager ? teamOf(u.id) : DB.employees;
+  return `
+    <div class="card" style="padding:0;">
+      <table>
+        <thead><tr><th>Employee</th><th>${perm().canSeeAllSalary?'Fixed (80%)':'Performance component'}</th>${perm().canSeeAllSalary?'<th>Performance (20%)</th>':''}<th>Deductions</th><th>Incentives</th>${perm().canSeeAllSalary?'<th>Net Payable</th>':''}<th></th></tr></thead>
+        <tbody>
+          ${list.map(e=>{
+            const s = computeSalary(e);
+            return `<tr>
+              <td>${e.name}</td>
+              <td class="mono">${perm().canSeeAllSalary? fmtMoney(s.fixed) : fmtMoney(s.perfBase)}</td>
+              ${perm().canSeeAllSalary? `<td class="mono">${fmtMoney(s.perfBase)}</td>`:''}
+              <td class="mono" style="color:var(--rose)">${s.deductions? '-'+fmtMoney(s.deductions):'—'}</td>
+              <td class="mono" style="color:var(--teal-dark)">${s.incentives? '+'+fmtMoney(s.incentives):'—'}</td>
+              ${perm().canSeeAllSalary? `<td class="mono"><strong>${fmtMoney(s.net)}</strong></td>`:''}
+              <td><button class="btn small secondary" onclick="viewLedger('${e.id}')">View</button></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="lock-note" style="margin-top:14px;">Managers see the performance component and incentive/deduction recommendations only. Complete salary, bank and statutory details remain visible to Director, HR and the employee themself.</div>
+  `;
+}
+function viewLedger(id){ showModal(payrollLedgerHTML(emp(id), false, true)); }
+function payrollLedgerHTML(e, asPage, inModal){
+  const s = computeSalary(e);
+  const body = `
+    ${!asPage? `<h3>${e.name}'s Salary</h3><div class="sub">${e.designation} · ${e.dept}</div>` : ''}
+    <div class="grid g3" style="margin-bottom:16px;">
+      <div class="card kpi flag-teal"><div class="num">${fmtMoney(e.salary)}</div><div class="lbl">Monthly Salary</div></div>
+      <div class="card kpi flag-rose"><div class="num">${s.deductions? fmtMoney(s.deductions):'₹0'}</div><div class="lbl">Task Deductions</div></div>
+      <div class="card kpi flag-amber"><div class="num">${s.incentives? fmtMoney(s.incentives):'₹0'}</div><div class="lbl">Incentives</div></div>
+    </div>
+    <div class="split-bar">
+      <div class="fixed" style="width:80%"></div><div class="perf" style="width:20%"></div>
+    </div>
+    <div class="split-legend" style="margin-bottom:16px;">
+      <span><span class="sw" style="background:var(--ink-2)"></span>Fixed 80% — ${fmtMoney(s.fixed)}</span>
+      <span><span class="sw" style="background:var(--amber)"></span>Performance 20% — ${fmtMoney(s.perfBase)}</span>
+    </div>
+    <div class="card">
+      <div class="ledger-line"><span>Fixed salary</span><span class="amt">${fmtMoney(s.fixed)}</span></div>
+      <div class="ledger-line"><span>Performance component (before deductions)</span><span class="amt">${fmtMoney(s.perfBase)}</span></div>
+      <div class="ledger-line"><span>Task deductions (5% of performance component per late task)</span><span class="amt" style="color:var(--rose)">-${fmtMoney(s.deductions)}</span></div>
+      <div class="ledger-line"><span>Approved incentives</span><span class="amt" style="color:var(--teal-dark)">+${fmtMoney(s.incentives)}</span></div>
+      <div class="ledger-line total"><span>Net payable (before statutory deductions)</span><span class="amt">${fmtMoney(s.net)}</span></div>
+    </div>
+    <div class="lock-note">Maximum task-based deduction is capped at the full performance component (20% of salary). The fixed 80% is never affected by task delays.</div>
+    ${inModal? `<div class="modal-foot"><button class="btn secondary" onclick="closeModal()">Close</button></div>`:''}
+  `;
+  return body;
+}
+
+/* ---------- APPROVALS (Director only) ---------- */
+function renderApprovals(){
+  const pending = DB.tasks.filter(t=> (t.deduction&&t.deduction.status==='Pending Director Approval') || (t.incentive&&t.incentive.status==='Pending Director Approval'));
+  if(!pending.length) return `<div class="card"><div class="empty"><div class="big">✓</div>Nothing pending your approval right now.</div></div>`;
+  return `<div class="card" style="padding:0;">
+    <table>
+      <thead><tr><th>Task</th><th>Employee</th><th>Type</th><th>Amount</th><th>Reason</th><th></th></tr></thead>
+      <tbody>
+        ${pending.map(t=>{
+          const rows=[];
+          if(t.deduction&&t.deduction.status==='Pending Director Approval') rows.push({kind:'deduction',amt:t.deduction.amount,reason:t.deduction.reason});
+          if(t.incentive&&t.incentive.status==='Pending Director Approval') rows.push({kind:'incentive',amt:t.incentive.amount,reason:t.incentive.reason});
+          return rows.map(r=>`
+            <tr>
+              <td><strong>${t.title}</strong><div class="mono" style="font-size:10.5px;color:var(--slate)">${t.id}</div></td>
+              <td>${empName(t.assignedTo)}</td>
+              <td><span class="tag ${r.kind==='deduction'?'rose':'amber'}">${r.kind==='deduction'?'Deduction':'Incentive'}</span></td>
+              <td class="mono">${fmtMoney(r.amt)}</td>
+              <td>${r.reason}</td>
+              <td><button class="btn small" onclick="openTaskDetail('${t.id}')">Review</button></td>
+            </tr>`).join('');
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ===================== MODAL ===================== */
+function showModal(html){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="overlay" onclick="if(event.target===this) closeModal()">
+      <div class="modal">
+        <span class="close-x" onclick="closeModal()">×</span>
+        ${html}
+      </div>
+    </div>`;
+}
+function closeModal(){ document.getElementById('modalRoot').innerHTML=''; currentTaskDetail=null; }
+
+/* ===================== INIT ===================== */
+(async function init(){
+  await loadDB();
+  currentUserId = DB.employees[0].id; // start as Director
+  renderShell();
+  DB.attendance.filter(a=>!a.checkOutAt).forEach(scheduleReminders);
+})();
+</script>
+</body>
+</html>
