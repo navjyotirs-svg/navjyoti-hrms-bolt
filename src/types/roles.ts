@@ -23,8 +23,50 @@ export type Permission =
   | 'role.assign'
   | 'reporting_line.manage'
   | 'audit.read'
+  | 'employee.profile.read_self'
+  | 'employee.profile.read_team'
+  | 'employee.profile.read_all'
+  | 'employee.profile.update_self'
+  | 'employee.profile.update_all'
+  | 'employee.document.upload_self'
+  | 'employee.document.read_self'
+  | 'employee.document.manage'
+  | 'employee.onboarding.manage'
+  | 'employee.transfer.manage'
+  | 'employee.status.manage'
+  | 'employee.offboarding.manage'
+  | 'employee.profile.view_sensitive'
 
 export type AccountStatus = 'active' | 'pending_activation' | 'disabled'
+
+export type EmploymentStatus =
+  | 'invited'
+  | 'pending_activation'
+  | 'active'
+  | 'on_probation'
+  | 'confirmed'
+  | 'transferred'
+  | 'suspended'
+  | 'notice_period'
+  | 'resigned'
+  | 'terminated'
+  | 'inactive'
+  | 'offboarded'
+
+export const EMPLOYMENT_STATUS_LABELS: Record<EmploymentStatus, string> = {
+  invited: 'Invited',
+  pending_activation: 'Pending Activation',
+  active: 'Active',
+  on_probation: 'On Probation',
+  confirmed: 'Confirmed',
+  transferred: 'Transferred',
+  suspended: 'Suspended',
+  notice_period: 'Notice Period',
+  resigned: 'Resigned',
+  terminated: 'Terminated',
+  inactive: 'Inactive',
+  offboarded: 'Offboarded',
+}
 
 export interface RoleDefinition {
   code: Role
@@ -63,6 +105,19 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'role.assign': 'Assign Roles',
   'reporting_line.manage': 'Manage Reporting Lines',
   'audit.read': 'View Audit Trail',
+  'employee.profile.read_self': 'View Own Profile Details',
+  'employee.profile.read_team': 'View Team Profiles',
+  'employee.profile.read_all': 'View All Profiles',
+  'employee.profile.update_self': 'Update Own Profile',
+  'employee.profile.update_all': 'Update Employee Profiles',
+  'employee.document.upload_self': 'Upload Own Documents',
+  'employee.document.read_self': 'Read Own Documents',
+  'employee.document.manage': 'Manage Documents',
+  'employee.onboarding.manage': 'Manage Onboarding',
+  'employee.transfer.manage': 'Manage Transfers',
+  'employee.status.manage': 'Manage Employment Status',
+  'employee.offboarding.manage': 'Manage Offboarding',
+  'employee.profile.view_sensitive': 'View Sensitive Fields',
 }
 
 export type NavItem = {
@@ -101,13 +156,13 @@ export const NAV_ITEMS: NavItem[] = [
     id: 'employees',
     label: 'Employees',
     icon: 'M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-2a4 4 0 10-8 4 4 0 000 8z',
-    permissions: ['employee.read_self', 'employee.read_team', 'employee.read_all'],
+    permissions: ['employee.read_self', 'employee.read_team', 'employee.read_all', 'employee.profile.read_self', 'employee.profile.read_team', 'employee.profile.read_all'],
   },
   {
     id: 'hierarchy',
     label: 'Reporting Hierarchy',
     icon: 'M5 3v4M3 5h4M6 21v-4M4 19h4M13 3l4 4M17 3l-4 4M13 21l4-4M17 21l-4-4',
-    permissions: ['employee.read_team', 'employee.read_all', 'reporting_line.manage'],
+    permissions: ['employee.read_team', 'employee.read_all', 'reporting_line.manage', 'employee.profile.read_team', 'employee.profile.read_all'],
   },
   {
     id: 'roles',
@@ -136,3 +191,40 @@ export function navItemsForPermissions(permissions: Permission[]): NavItem[] {
       item.permissions.some((p) => permissions.includes(p))
   )
 }
+
+export const SENSITIVE_FIELDS = [
+  'date_of_birth',
+  'personal_email',
+  'mobile_number',
+  'alternate_mobile_number',
+  'current_address',
+  'permanent_address',
+  'emergency_contact_name',
+  'emergency_contact_relation',
+  'emergency_contact_phone',
+  'gender',
+] as const
+
+export const SELF_SERVICE_FIELDS = [
+  'preferred_name',
+  'personal_email',
+  'mobile_number',
+  'alternate_mobile_number',
+  'current_address',
+  'permanent_address',
+  'emergency_contact_name',
+  'emergency_contact_relation',
+  'emergency_contact_phone',
+  'profile_photo_reference',
+] as const
+
+export const APPROVED_MIME_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+] as const
+
+export const APPROVED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png']
+
+export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10MB

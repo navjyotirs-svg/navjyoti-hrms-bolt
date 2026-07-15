@@ -82,13 +82,13 @@ function AppRoutes() {
           <PermissionRoute permissions={['department.read']}><DepartmentManagementPage /></PermissionRoute>
         } />
         <Route path="/employees" element={
-          <PermissionRoute permissions={['employee.read_self', 'employee.read_team', 'employee.read_all']}><EmployeeDirectoryPage /></PermissionRoute>
+          <PermissionRoute permissions={['employee.read_self', 'employee.read_team', 'employee.read_all', 'employee.profile.read_self', 'employee.profile.read_team', 'employee.profile.read_all']}><EmployeeDirectoryPage /></PermissionRoute>
         } />
         <Route path="/employees/add" element={
           <PermissionRoute permissions={['employee.create']}><AddEmployeePage /></PermissionRoute>
         } />
         <Route path="/employees/:id" element={
-          <PermissionRoute permissions={['employee.read_self', 'employee.read_team', 'employee.read_all']}><EmployeeProfilePage /></PermissionRoute>
+          <PermissionRoute permissions={['employee.read_self', 'employee.read_team', 'employee.read_all', 'employee.profile.read_self', 'employee.profile.read_team', 'employee.profile.read_all']}><EmployeeProfilePage /></PermissionRoute>
         } />
         <Route path="/hierarchy" element={
           <PermissionRoute permissions={['employee.read_team', 'employee.read_all', 'reporting_line.manage']}><ReportingHierarchyPage /></PermissionRoute>

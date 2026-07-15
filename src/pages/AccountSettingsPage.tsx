@@ -1,12 +1,58 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '@/auth/AuthContext'
 import { ROLE_LABELS } from '@/types/roles'
 import { supabase } from '@/lib/supabase'
 import '@/styles/shared.css'
 
+const SELF_SERVICE_FIELDS = [
+  'preferred_name',
+  'personal_email',
+  'mobile_number',
+  'alternate_mobile_number',
+  'current_address',
+  'permanent_address',
+  'emergency_contact_name',
+  'emergency_contact_relation',
+  'emergency_contact_phone',
+] as const
+
+type SelfService = Record<(typeof SELF_SERVICE_FIELDS)[number], string>
+
+interface EmployeeRecord extends SelfService {
+  id: string
+  employee_code: string
+  full_name: string
+  designation: string | null
+  work_email: string
+  employment_status: string
+  joining_date: string
+  branch_id: string | null
+  department_id: string | null
+  organization_id: string
+  reporting_manager_id: string | null
+}
+
+const EMPTY_SELF: SelfService = {
+  preferred_name: '',
+  personal_email: '',
+  mobile_number: '',
+  alternate_mobile_number: '',
+  current_address: '',
+  permanent_address: '',
+  emergency_contact_name: '',
+  emergency_contact_relation: '',
+  emergency_contact_phone: '',
+}
+
 export function AccountSettingsPage() {
-  const { profile, updatePassword, refreshProfile } = useAuth()
-  const [fullName, setFullName] = useState(profile?.full_name ?? '')
+  const { profile, updatePassword } = useAuth()
+  const [emp, setEmp] = useState<EmployeeRecord | null>(null)
+  const [self, setSelf] = useState<SelfService>(EMPTY_SELF)
+  const [branchName, setBranchName] = useState<string | null>(null)
+  const [deptName, setDeptName] = useState<string | null>(null)
+  const [orgName, setOrgName] = useState<string | null>(null)
+  const [managerName, setManagerName] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileError, setProfileError] = useState<string | null>(null)
   const [profileSuccess, setProfileSuccess] = useState(false)
@@ -17,22 +63,67 @@ export function AccountSettingsPage() {
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSuccess, setPasswordSuccess] = useState(false)
 
+  useEffect(() => {
+    if (!profile?.id) return
+    let cancelled = false
+    ;(async () => {
+      const { data, error } = await supabase
+        .from('employees')
+        .select('id, employee_code, full_name, designation, work_email, employment_status, joining_date, branch_id, department_id, organization_id, reporting_manager_id, preferred_name, personal_email, mobile_number, alternate_mobile_number, current_address, permanent_address, emergency_contact_name, emergency_contact_relation, emergency_contact_phone')
+        .eq('user_id', profile.id)
+        .maybeSingle()
+      if (cancelled) return
+      if (error || !data) {
+        setProfileError(error?.message ?? 'Employee record not found')
+        setLoading(false)
+        return
+      }
+      const e = data as EmployeeRecord
+      setEmp(e)
+      setSelf({
+        preferred_name: e.preferred_name ?? '',
+        personal_email: e.personal_email ?? '',
+        mobile_number: e.mobile_number ?? '',
+        alternate_mobile_number: e.alternate_mobile_number ?? '',
+        current_address: e.current_address ?? '',
+        permanent_address: e.permanent_address ?? '',
+        emergency_contact_name: e.emergency_contact_name ?? '',
+        emergency_contact_relation: e.emergency_contact_relation ?? '',
+        emergency_contact_phone: e.emergency_contact_phone ?? '',
+      })
+      const [b, d, o] = await Promise.all([
+        e.branch_id ? supabase.from('branches').select('name').eq('id', e.branch_id).maybeSingle() : Promise.resolve({ data: null }),
+        e.department_id ? supabase.from('departments').select('name').eq('id', e.department_id).maybeSingle() : Promise.resolve({ data: null }),
+        supabase.from('organizations').select('name').eq('id', e.organization_id).maybeSingle(),
+      ])
+      if (cancelled) return
+      setBranchName((b.data as { name: string } | null)?.name ?? null)
+      setDeptName((d.data as { name: string } | null)?.name ?? null)
+      setOrgName((o.data as { name: string } | null)?.name ?? null)
+      if (e.reporting_manager_id) {
+        const { data: mgr } = await supabase.from('employees').select('full_name').eq('id', e.reporting_manager_id).maybeSingle()
+        if (!cancelled) setManagerName((mgr as { full_name: string } | null)?.full_name ?? null)
+      }
+      setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [profile?.id])
+
   async function handleProfileUpdate(e: FormEvent) {
     e.preventDefault()
     setProfileError(null)
     setProfileSuccess(false)
+    if (!emp) return
     setSavingProfile(true)
-
     const { error } = await supabase
-      .from('user_profiles')
-      .update({ full_name: fullName, updated_at: new Date().toISOString() })
-      .eq('id', profile!.id)
-
+      .from('employees')
+      .update({ ...self, updated_at: new Date().toISOString() })
+      .eq('id', emp.id)
+      .eq('user_id', profile!.id)
     if (error) {
       setProfileError(error.message ?? 'Failed to update profile')
     } else {
       setProfileSuccess(true)
-      await refreshProfile()
     }
     setSavingProfile(false)
   }
@@ -41,29 +132,43 @@ export function AccountSettingsPage() {
     e.preventDefault()
     setPasswordError(null)
     setPasswordSuccess(false)
-
-    if (newPassword !== confirmPassword) {
-      setPasswordError('Passwords do not match')
-      return
-    }
-    if (newPassword.length < 6) {
-      setPasswordError('Password must be at least 6 characters')
-      return
-    }
-
+    if (newPassword !== confirmPassword) { setPasswordError('Passwords do not match'); return }
+    if (newPassword.length < 6) { setPasswordError('Password must be at least 6 characters'); return }
     setSavingPassword(true)
     const { error } = await updatePassword(newPassword)
-    if (error) {
-      setPasswordError(error)
-    } else {
-      setPasswordSuccess(true)
-      setNewPassword('')
-      setConfirmPassword('')
-    }
+    if (error) { setPasswordError(error) } else { setPasswordSuccess(true); setNewPassword(''); setConfirmPassword('') }
     setSavingPassword(false)
   }
 
   if (!profile) return null
+  if (loading) return <div className="page"><div className="card"><div className="card-body">Loading…</div></div></div>
+
+  const readonlyFields: { label: string; value: string | null }[] = [
+    { label: 'Full Name', value: emp?.full_name ?? null },
+    { label: 'Work Email', value: emp?.work_email ?? null },
+    { label: 'Role', value: profile.role ? ROLE_LABELS[profile.role] : null },
+    { label: 'Status', value: profile.status },
+    { label: 'Employee Code', value: emp?.employee_code ?? null },
+    { label: 'Designation', value: emp?.designation ?? null },
+    { label: 'Organization', value: orgName },
+    { label: 'Branch', value: branchName },
+    { label: 'Department', value: deptName },
+    { label: 'Reporting Manager', value: managerName },
+    { label: 'Joining Date', value: emp?.joining_date ?? null },
+    { label: 'Employment Status', value: emp?.employment_status ?? null },
+  ]
+
+  const selfFields: { key: keyof SelfService; label: string }[] = [
+    { key: 'preferred_name', label: 'Preferred Name' },
+    { key: 'personal_email', label: 'Personal Email' },
+    { key: 'mobile_number', label: 'Mobile Number' },
+    { key: 'alternate_mobile_number', label: 'Alternate Mobile' },
+    { key: 'current_address', label: 'Current Address' },
+    { key: 'permanent_address', label: 'Permanent Address' },
+    { key: 'emergency_contact_name', label: 'Emergency Contact Name' },
+    { key: 'emergency_contact_relation', label: 'Emergency Contact Relation' },
+    { key: 'emergency_contact_phone', label: 'Emergency Contact Phone' },
+  ]
 
   return (
     <div className="page">
@@ -78,22 +183,18 @@ export function AccountSettingsPage() {
           {profileSuccess && <div className="form-success" style={{ marginBottom: 'var(--space-4)' }}>Profile updated successfully.</div>}
           <form onSubmit={handleProfileUpdate}>
             <div className="form-grid">
-              <div className="form-field">
-                <label htmlFor="fullName">Full Name</label>
-                <input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} />
-              </div>
-              <div className="form-field">
-                <label>Email</label>
-                <input value={profile.email} disabled style={{ opacity: 0.6 }} />
-              </div>
-              <div className="form-field">
-                <label>Role</label>
-                <input value={profile.role ? ROLE_LABELS[profile.role] : '—'} disabled style={{ opacity: 0.6 }} />
-              </div>
-              <div className="form-field">
-                <label>Status</label>
-                <input value={profile.status} disabled style={{ opacity: 0.6 }} />
-              </div>
+              {readonlyFields.map((f) => (
+                <div className="form-field" key={f.label}>
+                  <label>{f.label}</label>
+                  <input value={f.value ?? '—'} disabled style={{ opacity: 0.6 }} readOnly />
+                </div>
+              ))}
+              {selfFields.map((f) => (
+                <div className="form-field" key={f.key}>
+                  <label htmlFor={f.key}>{f.label}</label>
+                  <input id={f.key} value={self[f.key]} onChange={(e) => setSelf({ ...self, [f.key]: e.target.value })} />
+                </div>
+              ))}
             </div>
             <div className="form-actions">
               <button type="submit" className="btn" disabled={savingProfile}>

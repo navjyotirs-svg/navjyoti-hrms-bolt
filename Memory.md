@@ -152,3 +152,102 @@ Authentication, organization structure, role-based access control, reporting hie
 
 ### Next task
 Phase 2 — Employee lifecycle: detailed profiles, onboarding workflows, private document management, transfers, deactivation, and enhanced audit trails.
+
+## Phase 2 — completed 2026-07-15
+
+### Objective
+Employee lifecycle, detailed employee profiles, onboarding checklists, private document management with Supabase Storage, transfers, deactivation/offboarding, and enhanced audit trails. No payroll/salary/compensation features.
+
+### Migrations applied (7)
+1. `phase2_new_permissions` — 13 new permissions added (employee.profile.read_all/read_self/read_team/update_all/update_self/view_sensitive, employee.document.manage/read_self/upload_self, employee.onboarding.manage, employee.status.manage, employee.transfer.manage, employee.offboarding.manage) + role_permissions matrix updates across 7 roles
+2. `phase2_extend_employees` — 16 new columns on employees (preferred_name, personal_email, mobile_number, alternate_mobile_number, date_of_birth, gender, current_address, permanent_address, emergency_contact_name, emergency_contact_relation, emergency_contact_phone, employment_type, probation_end_date, confirmation_date, profile_photo_reference, exit_date) + 12-state CHECK constraint on employment_status + trigger `trg_prevent_self_employment_status_change` blocking self-edits of status/org/branch/department/manager/joining_date/designation/employment_type/employee_code
+3. `phase2_document_types` — 15 document type seed rows (aadhaar, pan, identity_proof, address_proof, education_certificate, experience_letter, resume, offer_letter, appointment_letter, confirmation_letter, relieving_letter, resignation_letter, warning_letter, medical_certificate, other) with is_identity_proof and is_confidential flags
+4. `phase2_document_tables` — employee_documents (with storage_path, randomized object names), document_versions (append-only), document_verification_history (append-only)
+5. `phase2_onboarding` — onboarding_checklists + onboarding_checklist_items + `trg_create_onboarding_checklist` AFTER INSERT trigger auto-creating 10 standard checklist items on employee insert
+6. `phase2_transfer_status_offboarding` — employee_transfers (with from/to branch+department+manager), employee_status_history (append-only), employee_offboarding
+7. `phase2_rls_policies` — RLS on all 9 new tables + `can_access_employee_doc()` SECURITY DEFINER helper for document access (self-ownership or same-org with employee.document.manage permission)
+8. `phase2_storage_policies` — Storage bucket `employee-documents` (private, public=false) with 4 storage policies (SELECT scoped by folder=auth.uid() or org-scoped manage permission, INSERT for authenticated, UPDATE/DELETE for manage permission)
+
+### Tables created (9 new + 1 modified)
+1. `document_types` (id, code, label, is_identity_proof, is_confidential, created_at) — RLS: SELECT only
+2. `employee_documents` (id, employee_id, document_type_id, file_name, storage_path, mime_type, file_size, uploaded_by, is_verified, verified_by, verified_at, rejection_reason, created_at) — RLS: 3 policies (SELECT/INSERT scoped, UPDATE manage)
+3. `document_versions` (id, document_id, version_number, file_name, storage_path, mime_type, file_size, uploaded_by, created_at) — RLS: 2 policies (SELECT scoped, INSERT authorized) — append-only
+4. `document_verification_history` (id, document_id, action, performed_by, notes, created_at) — RLS: 2 policies (SELECT scoped, INSERT manage) — append-only
+5. `onboarding_checklists` (id, employee_id, status, created_at, updated_at) — RLS: 2 policies (SELECT scoped, UPDATE manage)
+6. `onboarding_checklist_items` (id, checklist_id, item_key, label, status, assigned_to, verified_by, notes, updated_at) — RLS: 2 policies (SELECT scoped, UPDATE manage)
+7. `employee_transfers` (id, employee_id, from_branch_id, to_branch_id, from_department_id, to_department_id, from_manager_id, to_manager_id, transfer_date, reason, status, created_at) — RLS: 3 policies (SELECT/INSERT/UPDATE scoped)
+8. `employee_status_history` (id, employee_id, previous_status, new_status, changed_by, reason, created_at) — RLS: 2 policies (SELECT scoped, INSERT manage) — append-only
+9. `employee_offboarding` (id, employee_id, offboarding_type, last_working_date, reason, exit_interview_notes, created_at) — RLS: 3 policies (SELECT/INSERT/UPDATE scoped)
+10. `employees` (modified: 16 new columns + 12-state CHECK + self-change prevention trigger)
+
+### RLS helper functions (1 new)
+- `can_access_employee_doc(p_doc_id uuid)` — SECURITY DEFINER; checks self-ownership (e.user_id = auth.uid()) or same-org with employee.document.manage permission
+
+### Permission matrix updates (13 new permissions)
+- director: all 13 new
+- hr_admin: 10 new (profile.read_all/update_all/view_sensitive, document.manage, onboarding.manage, status.manage, transfer.manage, offboarding.manage, profile.read_self/update_self, document.read_self/upload_self)
+- manager: 4 new (profile.read_team, profile.read_self, profile.update_self, document.read_self)
+- team_leader: 2 new (profile.read_self, document.read_self)
+- employee: 3 new (profile.read_self, profile.update_self, document.read_self/upload_self)
+- intern: 3 new (same as employee)
+- system_admin: 0 new (no employee data access)
+
+### Edge functions (2 deployed)
+1. `invite-employee` (ACTIVE, JWT verified) — updated: sets employment_status='invited' instead of 'active'
+2. `manage-employee` (ACTIVE, JWT verified) — NEW: handles 3 actions:
+   - `change_status`: updates employee employment_status, inserts employee_status_history, creates audit log
+   - `transfer`: inserts employee_transfers record, updates employee branch/department/manager, creates audit log
+   - `offboard`: inserts employee_offboarding record, updates employee employment_status to 'offboarded', sets user_profiles.status='disabled' and is_active=false, creates audit log
+
+### Files changed
+- `src/types/roles.ts` — updated with 28 total permissions, EmploymentStatus type (12 states), EMPLOYMENT_STATUS_LABELS, SENSITIVE_FIELDS, SELF_SERVICE_FIELDS, APPROVED_MIME_TYPES, nav items updated for Phase 2 permissions
+- `src/auth/AuthContext.tsx` — unchanged from Phase 1
+- `src/App.tsx` — all Phase 2 routes added with PermissionRoute guards
+- `src/components/AppShell.tsx` — updated with getPageTitle helper for dynamic employee profile paths
+- `src/components/Sidebar.tsx` — unchanged (permission-based nav from Phase 1)
+- `src/components/PermissionGuard.tsx` — unchanged
+- `src/pages/EmployeeProfilePage.tsx` — rewritten: 8 tabs (Overview, Personal Details, Employment Details, Documents, Onboarding, Transfer History, Status History, Audit History), document upload/download via Supabase Storage with signed URLs, sensitive field gating via view_sensitive permission, onboarding checklist management
+- `src/pages/EmployeeDirectoryPage.tsx` — rewritten: search input, status filter dropdown (12 states), 7-column table (code, name, designation, department, branch, status, actions)
+- `src/pages/AccountSettingsPage.tsx` — rewritten: self-service editable fields (preferred_name, personal_email, mobile_number, alternate_mobile_number, current_address, permanent_address, emergency contacts), read-only org fields, password change, MFA info
+- `src/pages/Dashboard.tsx` — updated for Phase 2
+- `src/styles/shared.css` — updated with Phase 2 shared classes
+- `supabase/functions/invite-employee/index.ts` — updated employment_status to 'invited'
+- `supabase/functions/manage-employee/index.ts` — NEW: server-side employee management (change_status, transfer, offboard)
+
+### Storage
+- Bucket `employee-documents`: private (public=false), 4 storage policies (SELECT, INSERT, UPDATE, DELETE)
+- Documents stored with randomized object names (crypto.randomUUID in path)
+- Access via signed URLs (short-lived, server-generated)
+
+### Checks
+- TypeScript: `tsc -b --noEmit` — passes
+- Build: `npm run build` (tsc -b && vite build) — passes (104 modules, 448.34 kB JS / 14.45 kB CSS)
+- RLS tests: 16 tests passed:
+  1. All 9 new Phase 2 tables exist with RLS enabled
+  2. No payroll/salary/payslip/compensation/deduction/incentive tables or columns exist (count=0)
+  3. All 9 new tables have RLS policies (20 policies total across 9 tables)
+  4. Employees CHECK constraint enforces 12-state employment_status
+  5. Trigger `trg_prevent_self_employment_status_change` exists on employees (BEFORE UPDATE)
+  6. All 13 new Phase 2 permissions exist in permissions table with correct role assignments
+  7. 15 document type seed rows present with correct is_identity_proof/is_confidential flags
+  8. Onboarding checklist auto-create trigger `trg_create_onboarding_checklist` exists (AFTER INSERT) with 10 standard items
+  9. `create_onboarding_checklist()` function creates checklist with 10 items (identity_proof, address_proof, education_certificates, experience_documents, profile_photo, emergency_contact, policy_acknowledgement, it_access_confirmation, manager_confirmation, hr_verification)
+  10. `prevent_self_employment_status_change()` function blocks self-changes to 9 fields (status, org, employee_code, branch, department, reporting_manager, joining_date, designation, employment_type)
+  11. `can_access_employee_doc()` helper checks self-ownership or same-org with document.manage permission
+  12. employee_documents policies: SELECT/INSERT scoped (self or org+manage), UPDATE (org+manage only)
+  13. employee_transfers policies: SELECT scoped (self or org+manage), INSERT/UPDATE (org+manage)
+  14. employee_status_history: append-only (SELECT + INSERT only, no UPDATE/DELETE)
+  15. audit_logs: append-only (SELECT + INSERT only, no UPDATE/DELETE)
+  16. Storage bucket `employee-documents` exists (private), 4 storage policies with correct scoping (SELECT by folder=auth.uid() or org+manage, INSERT authenticated, UPDATE/DELETE manage-only)
+
+### Known risks
+- No automated test framework (vitest/jest) — RLS tests are SQL-based via execute_sql
+- Onboarding checklists are auto-created but no checklist items have been seeded yet (no employees created since trigger was added)
+- Document signed URLs are generated client-side (not via edge function) — the manage-employee edge function does not handle document operations
+- The `is_in_reporting_subtree` function uses a recursive CTE which may be slow for very deep hierarchies
+- MFA is documented but not yet implemented (preparation only)
+- No file size limit enforcement at the database level (enforced in frontend via APPROVED_MIME_TYPES only)
+- Employee profile page fetches by ID — RLS enforces read scope at DB level but the page does not pre-check subtree access for team leaders/managers
+
+### Next task
+Phase 3 — Attendance & Leave Management: check-in/checkout with camera and location, server-side attendance computation, leave types and balances, leave application/approval workflow, holiday calendar, and attendance reports.

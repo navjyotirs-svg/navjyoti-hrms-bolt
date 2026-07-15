@@ -200,7 +200,7 @@ Deno.serve(async (req: Request) => {
         designation: body.designation || null,
         work_email: body.work_email,
         work_mode: body.work_mode || "Office",
-        employment_status: "active",
+        employment_status: "invited",
         joining_date: body.joining_date,
         is_active: true,
       })

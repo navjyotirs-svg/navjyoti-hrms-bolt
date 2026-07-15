@@ -18,10 +18,16 @@ const PAGE_TITLES: Record<string, string> = {
   '/settings': 'Account Settings',
 }
 
+function getPageTitle(pathname: string): string {
+  if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname]
+  if (pathname.startsWith('/employees/')) return 'Employee Profile'
+  return 'Dashboard'
+}
+
 export function AppShell() {
   const location = useLocation()
   const { profile } = useAuth()
-  const title = PAGE_TITLES[location.pathname] ?? 'Dashboard'
+  const title = getPageTitle(location.pathname)
 
   if (profile?.status === 'pending_activation') {
     return <PendingActivationPage />

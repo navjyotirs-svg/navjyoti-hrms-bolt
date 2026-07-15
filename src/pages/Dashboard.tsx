@@ -22,7 +22,7 @@ export function Dashboard() {
 
       <div className="dashboard-grid">
         <div className="dashboard-card">
-          <div className="dashboard-card-num mono">Phase 1</div>
+          <div className="dashboard-card-num mono">Phase 2</div>
           <div className="dashboard-card-lbl">Current Phase</div>
         </div>
         <div className="dashboard-card">
@@ -30,8 +30,8 @@ export function Dashboard() {
           <div className="dashboard-card-lbl">Active Permissions</div>
         </div>
         <div className="dashboard-card">
-          <div className="dashboard-card-num mono">RBAC</div>
-          <div className="dashboard-card-lbl">Authorization</div>
+          <div className="dashboard-card-num mono">Lifecycle</div>
+          <div className="dashboard-card-lbl">Employee Management</div>
         </div>
         <div className="dashboard-card">
           <div className="dashboard-card-num mono">Active</div>
@@ -69,8 +69,9 @@ export function Dashboard() {
         <h3 className="dashboard-section-title">What's Next</h3>
         <div className="dashboard-card">
           <p className="dashboard-next-text">
-            Phase 2 will add full employee lifecycle: detailed profiles, onboarding workflows,
-            private document management, transfers, deactivation, and enhanced audit trails.
+            Phase 3 will add attendance with server check-in, +540 minute rule,
+            camera/location evidence, private storage, corrections, cron reminders,
+            and realtime alerts.
           </p>
         </div>
       </div>
