@@ -1,15 +1,15 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
-import { navItemsForRole, ROLE_LABELS } from '@/types/roles'
+import { navItemsForPermissions, ROLE_LABELS } from '@/types/roles'
 import '@/styles/shell.css'
 
 export function Sidebar() {
-  const { profile, signOut } = useAuth()
+  const { profile, permissions, signOut } = useAuth()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  const items = navItemsForRole(profile?.role ?? null)
+  const items = navItemsForPermissions(permissions)
 
   async function handleSignOut() {
     await signOut()
