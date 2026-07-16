@@ -189,7 +189,7 @@ export function Dashboard() {
 
     load()
     return () => { cancelled = true }
-  }, [profile?.id, canReadAll, canCheckIn, canReadAudit, canReadEmployees, canReadOrg])
+  }, [profile?.id, profile?.organization_id, permissions.length, canReadAll, canCheckIn, canReadAudit, canReadEmployees, canReadOrg])
 
   const greeting = profile?.full_name ?? profile?.email
   const roleLabel = profile?.role ? ROLE_LABELS[profile.role] : ''

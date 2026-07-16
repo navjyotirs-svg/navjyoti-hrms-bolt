@@ -5,15 +5,22 @@ import { navItemsForPermissions, NAV_ITEMS, ROLE_LABELS } from '@/types/roles'
 import '@/styles/shell.css'
 
 export function Sidebar() {
-  const { profile, permissions, signOut } = useAuth()
+  const { profile, permissions, signOut, refreshProfile } = useAuth()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [reloading, setReloading] = useState(false)
 
   const items = navItemsForPermissions(permissions)
 
   async function handleSignOut() {
     await signOut()
     navigate('/login')
+  }
+
+  async function handleReload() {
+    setReloading(true)
+    await refreshProfile()
+    setReloading(false)
   }
 
   function closeMobile() {
@@ -76,6 +83,8 @@ export function Sidebar() {
             permCount={permissions.length}
             orgId={profile?.organization_id}
             hiddenItems={NAV_ITEMS.filter((n) => n.permissions.length > 0 && !n.permissions.some((p) => permissions.includes(p as typeof permissions[number])))}
+            onReload={handleReload}
+            reloading={reloading}
           />
         )}
 
@@ -92,11 +101,13 @@ export function Sidebar() {
   )
 }
 
-function DevDiagnostics({ role, permCount, orgId, hiddenItems }: {
+function DevDiagnostics({ role, permCount, orgId, hiddenItems, onReload, reloading }: {
   role: string | null | undefined
   permCount: number
   orgId: string | null | undefined
   hiddenItems: { id: string; label: string; permissions: string[] }[]
+  onReload: () => void
+  reloading: boolean
 }) {
   return (
     <div style={{ padding: '8px 16px', fontSize: '11px', color: 'var(--slate)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
@@ -114,6 +125,14 @@ function DevDiagnostics({ role, permCount, orgId, hiddenItems }: {
           ))}
         </div>
       )}
+      <button
+        onClick={onReload}
+        disabled={reloading}
+        type="button"
+        style={{ marginTop: '6px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: '4px', background: 'transparent' }}
+      >
+        {reloading ? 'Reloading…' : 'Reload permissions'}
+      </button>
     </div>
   )
 }

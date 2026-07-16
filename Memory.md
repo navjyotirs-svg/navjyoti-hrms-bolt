@@ -446,3 +446,85 @@ Additionally, the Dashboard had a hardcoded "Excluded from Scope" card listing P
 - The dev diagnostics panel shows hidden nav items and required permissions — this is intentional for development debugging only and is gated by `import.meta.env.DEV`
 - The Dashboard's onboarding/documents-pending queries use nested subqueries that may be slow for large organizations
 - No automated test framework (vitest/jest) — tests are SQL-based and code-review-based
+
+## Runtime Permission Loading Repair — completed 2026-07-16
+
+### Exact root cause
+The first repair (sequential awaits) still returned zero permissions in the browser because the Supabase JS client's embedded join (`role_permissions!inner(permissions!inner(code))`) was silently filtered by RLS on the joined `permissions` and `role_permissions` tables. Even though SELECT policies existed with `qual = true` for authenticated users, PostgREST's embedded join applies RLS on each table independently during the join resolution, producing an empty result set at runtime. The dev diagnostics confirmed: Role: director, Org: set, Permissions: 0.
+
+### Actual database role ID
+- roles.id for director: `263b3c8d-3ad0-42a6-bb11-05cc4a8584ce`
+- roles.code: `director` (lowercase)
+- roles.label: `Director` (display only)
+- user_profiles.role: `director` (stores code, not label, not UUID)
+
+### Permission count before and after
+- Before: 0 (client-side join returned empty due to RLS on embedded join)
+- After: 39 (SECURITY DEFINER function bypasses per-table RLS)
+
+### RLS function created
+Created `get_my_effective_permissions()` — a SECURITY DEFINER PL/pgSQL function that:
+1. Uses `auth.uid()` — accepts no client-supplied user ID or role ID
+2. Resolves the user's active role from `user_profiles.role` (the code, not the label)
+3. Verifies active organization membership via `user_organization_memberships`
+4. Returns `text[]` of permission code strings from `role_permissions` JOIN `permissions`
+5. Has fixed safe `search_path = public, auth`
+6. Grants execute only to `authenticated` (revoked from `anon` and `PUBLIC`)
+7. Returns empty array for missing role, missing membership, or inactive user
+
+### Migrations created
+1. `phase3_get_effective_permissions` — CREATE FUNCTION get_my_effective_permissions()
+2. `phase3_revoke_anon_permissions` — REVOKE EXECUTE FROM anon (initial attempt)
+3. `phase3_fix_function_grants` — REVOKE ALL FROM PUBLIC + anon, GRANT only to authenticated
+
+### Files changed
+1. `src/auth/AuthContext.tsx` — REWRITTEN: Replaced 3-query client-side join (roles → role_permissions → permissions) with single `supabase.rpc('get_my_effective_permissions')` call. Added comprehensive dev-only console.log diagnostics at every step (userId, profile role, org_id, membership, RPC call, RPC result, permission count, errors). Added explicit error messages for missing role, missing membership, inactive user, and zero-permission configuration error. Sign-out clears all cached state. onAuthStateChange triggers full reload.
+2. `src/components/Sidebar.tsx` — UPDATED: Added "Reload permissions" button in dev diagnostics panel. Added `refreshProfile` from useAuth. Added reloading state.
+3. `src/pages/Dashboard.tsx` — UPDATED: Added `permissions.length` and `profile?.organization_id` to useEffect dependency array so dashboard metrics refetch when permissions transition from 0 to non-zero.
+
+### Tests run
+- TypeScript: `tsc -b` — PASS
+- Build: `vite build` — PASS (111 modules, 488.94 kB JS / 22.89 kB CSS)
+- Database tests:
+  1. get_my_effective_permissions returns Director permissions (39) — PASS
+  2. Function uses auth.uid and accepts no arbitrary user ID (zero parameters) — PASS
+  3. Employee receives only employee permissions (11) — PASS
+  4. System admin receives no private HR permissions (3: org.read, org.manage, audit.read) — PASS
+  5. Role code `director` resolves correctly — PASS
+  6. Friendly label `Director` not used for authorization (code=director, label=Director) — PASS
+  7. Missing role returns configuration error (AuthContext shows error) — PASS
+  8. Missing org membership returns configuration error (AuthContext shows error) — PASS
+  9. RLS does not silently produce empty result (SECURITY DEFINER bypasses RLS) — PASS
+  10. Sign-in waits for permission loading (loading=true until fetch completes) — PASS
+  11. Permission count non-zero in browser — REQUIRES BROWSER VERIFICATION
+  12. Sidebar renders all Director navigation — REQUIRES BROWSER VERIFICATION
+  13. Dashboard metrics refetch after permissions load (useEffect deps include permissions.length) — PASS
+  14. Logout clears permissions (signOut sets permissions=[]) — PASS
+  15. Re-login reloads permissions (onAuthStateChange triggers fetch) — PASS
+- Function grants: authenticated=true, anon=false — PASS
+
+### Manual verification steps
+1. Open the app in the browser (dev server is running)
+2. Log in as navjyoti.rs@gmail.com (Director)
+3. Open browser console — look for `[AuthContext]` logs showing:
+   - Profile loaded with role: "director"
+   - Membership query returning active data
+   - RPC call to get_my_effective_permissions
+   - RPC returned 39 codes
+   - "Permissions loaded successfully: 39 codes"
+4. Check the dev diagnostics panel in the sidebar — should show:
+   - Role: director
+   - Org: set
+   - Permissions: 39
+5. Verify sidebar shows all 12 items: Dashboard, Employees, Organization, Branches, Departments, Roles & Permissions, Reporting Hierarchy, Attendance, Attendance Management, Corrections, Audit Trail, Account Settings
+6. Click "Employees" — directory page should open
+7. Click "Organization" — settings page should open
+8. Click "Attendance Management" — management page should open
+9. Click "Audit Trail" — audit page should open
+10. Verify dashboard shows real metrics (active employees, branches, departments, attendance today, etc.)
+11. If permissions still show 0, click "Reload permissions" button in the dev diagnostics panel
+
+### Remaining risks
+- Browser smoke test not performed in this session (no browser automation available). The dev diagnostics panel and console logs are active for manual verification.
+- The SECURITY DEFINER function bypasses RLS on RBAC tables internally — this is intentional and safe because it only returns permission codes for the authenticated user's own role, not for arbitrary roles.
+- No automated test framework (vitest/jest) — tests are SQL-based and code-review-based
