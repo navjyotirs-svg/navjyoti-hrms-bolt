@@ -47,6 +47,27 @@ export type Permission =
   | 'attendance.evidence_read_self'
   | 'attendance.evidence_read_all'
   | 'attendance.report_read'
+  | 'leave.request_self'
+  | 'leave.read_self'
+  | 'leave.read_team'
+  | 'leave.read_all'
+  | 'leave.review_manager'
+  | 'leave.approve_hr'
+  | 'leave.override_director'
+  | 'leave.cancel_self'
+  | 'leave.cancel_manage'
+  | 'leave.balance_read_self'
+  | 'leave.balance_read_all'
+  | 'leave.balance_adjust'
+  | 'leave.policy_manage'
+  | 'leave.document_upload_self'
+  | 'leave.document_read_manage'
+  | 'calendar.read'
+  | 'calendar.event_create'
+  | 'calendar.event_update'
+  | 'calendar.event_delete'
+  | 'calendar.holiday_manage'
+  | 'calendar.branch_manage'
 
 export type AttendanceStatus = 'PENDING_CHECKOUT' | 'FULL_DAY' | 'HALF_DAY'
 
@@ -55,6 +76,85 @@ export const ATTENDANCE_STATUS_LABELS: Record<AttendanceStatus, string> = {
   FULL_DAY: 'Full Day',
   HALF_DAY: 'Half Day',
 }
+
+export type LeaveStatus =
+  | 'DRAFT'
+  | 'PENDING_MANAGER'
+  | 'PENDING_HR'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'CANCELLED'
+  | 'WITHDRAWN'
+
+export const LEAVE_STATUS_LABELS: Record<LeaveStatus, string> = {
+  DRAFT: 'Draft',
+  PENDING_MANAGER: 'Pending Manager',
+  PENDING_HR: 'Pending HR',
+  APPROVED: 'Approved',
+  REJECTED: 'Rejected',
+  CANCELLED: 'Cancelled',
+  WITHDRAWN: 'Withdrawn',
+}
+
+export type LeaveTransactionType =
+  | 'OPENING_BALANCE'
+  | 'MONTHLY_ACCRUAL'
+  | 'LEAVE_RESERVED'
+  | 'LEAVE_USED'
+  | 'LEAVE_CANCELLED_RESTORED'
+  | 'MANUAL_ADJUSTMENT'
+  | 'CARRY_FORWARD'
+  | 'EXPIRY'
+  | 'REVERSAL'
+
+export const LEAVE_TRANSACTION_LABELS: Record<LeaveTransactionType, string> = {
+  OPENING_BALANCE: 'Opening Balance',
+  MONTHLY_ACCRUAL: 'Monthly Accrual',
+  LEAVE_RESERVED: 'Leave Reserved',
+  LEAVE_USED: 'Leave Used',
+  LEAVE_CANCELLED_RESTORED: 'Restored (Cancellation)',
+  MANUAL_ADJUSTMENT: 'Manual Adjustment',
+  CARRY_FORWARD: 'Carry Forward',
+  EXPIRY: 'Expired',
+  REVERSAL: 'Reversal',
+}
+
+export type CalendarEventType =
+  | 'PUBLIC_HOLIDAY'
+  | 'COMPANY_HOLIDAY'
+  | 'BRANCH_HOLIDAY'
+  | 'WORKING_DAY_OVERRIDE'
+  | 'WEEKLY_OFF'
+  | 'COMPANY_EVENT'
+  | 'MEETING'
+  | 'TRAINING'
+  | 'ANNOUNCEMENT'
+  | 'OTHER'
+
+export const CALENDAR_EVENT_LABELS: Record<CalendarEventType, string> = {
+  PUBLIC_HOLIDAY: 'Public Holiday',
+  COMPANY_HOLIDAY: 'Company Holiday',
+  BRANCH_HOLIDAY: 'Branch Holiday',
+  WORKING_DAY_OVERRIDE: 'Working Day Override',
+  WEEKLY_OFF: 'Weekly Off',
+  COMPANY_EVENT: 'Company Event',
+  MEETING: 'Meeting',
+  TRAINING: 'Training',
+  ANNOUNCEMENT: 'Announcement',
+  OTHER: 'Other',
+}
+
+export const LEAVE_APPROVED_MIME_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+] as const
+
+export const LEAVE_APPROVED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.webp']
+
+export const LEAVE_MAX_FILE_BYTES = 10 * 1024 * 1024
 
 export type CorrectionType =
   | 'missed_check_in'
@@ -187,6 +287,27 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'attendance.evidence_read_self': 'Read Own Attendance Evidence',
   'attendance.evidence_read_all': 'Read All Attendance Evidence',
   'attendance.report_read': 'Read Attendance Reports',
+  'leave.request_self': 'Request Own Leave',
+  'leave.read_self': 'Read Own Leave',
+  'leave.read_team': 'Read Team Leave',
+  'leave.read_all': 'Read All Leave',
+  'leave.review_manager': 'Review as Manager',
+  'leave.approve_hr': 'Approve as HR',
+  'leave.override_director': 'Director Override',
+  'leave.cancel_self': 'Cancel Own Leave',
+  'leave.cancel_manage': 'Manage Cancellations',
+  'leave.balance_read_self': 'Read Own Balances',
+  'leave.balance_read_all': 'Read All Balances',
+  'leave.balance_adjust': 'Adjust Balances',
+  'leave.policy_manage': 'Manage Leave Policy',
+  'leave.document_upload_self': 'Upload Leave Documents',
+  'leave.document_read_manage': 'Read Leave Documents',
+  'calendar.read': 'View Calendar',
+  'calendar.event_create': 'Create Calendar Events',
+  'calendar.event_update': 'Update Calendar Events',
+  'calendar.event_delete': 'Delete Calendar Events',
+  'calendar.holiday_manage': 'Manage Holidays',
+  'calendar.branch_manage': 'Manage Branch Calendars',
 }
 
 export type NavItem = {
@@ -262,6 +383,36 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Corrections',
     icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
     permissions: ['attendance.correct_request_self', 'attendance.correct_manage'],
+  },
+  {
+    id: 'my-leave',
+    label: 'My Leave',
+    icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
+    permissions: ['leave.read_self', 'leave.request_self'],
+  },
+  {
+    id: 'team-leave',
+    label: 'Team Leave',
+    icon: 'M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-2a4 4 0 10-8 4 4 0 000 8z',
+    permissions: ['leave.read_team', 'leave.review_manager'],
+  },
+  {
+    id: 'leave-management',
+    label: 'Leave Management',
+    icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+    permissions: ['leave.read_all', 'leave.approve_hr', 'leave.balance_read_all', 'leave.policy_manage'],
+  },
+  {
+    id: 'calendar',
+    label: 'Company Calendar',
+    icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
+    permissions: ['calendar.read'],
+  },
+  {
+    id: 'holidays',
+    label: 'Holiday Management',
+    icon: 'M5 3v4M3 5h4M6 21v-4M4 19h4M13 3l4 4M17 3l-4 4M13 21l4-4M17 21l-4-4',
+    permissions: ['calendar.holiday_manage'],
   },
   {
     id: 'settings',

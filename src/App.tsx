@@ -23,6 +23,11 @@ import { AccountSettingsPage } from '@/pages/AccountSettingsPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { AttendanceManagementPage } from '@/pages/AttendanceManagementPage'
 import { AttendanceCorrectionsPage } from '@/pages/AttendanceCorrectionsPage'
+import { MyLeavePage } from '@/pages/MyLeavePage'
+import { TeamLeavePage } from '@/pages/TeamLeavePage'
+import { LeaveManagementPage } from '@/pages/LeaveManagementPage'
+import { CompanyCalendarPage } from '@/pages/CompanyCalendarPage'
+import { HolidayManagementPage } from '@/pages/HolidayManagementPage'
 import type { ReactNode } from 'react'
 import type { Permission } from '@/types/roles'
 
@@ -155,6 +160,21 @@ function AppRoutes() {
         } />
         <Route path="/attendance-corrections" element={
           <PermissionRoute permissions={['attendance.correct_request_self', 'attendance.correct_manage']}><AttendanceCorrectionsPage /></PermissionRoute>
+        } />
+        <Route path="/my-leave" element={
+          <PermissionRoute permissions={['leave.read_self', 'leave.request_self']}><MyLeavePage /></PermissionRoute>
+        } />
+        <Route path="/team-leave" element={
+          <PermissionRoute permissions={['leave.read_team', 'leave.review_manager']}><TeamLeavePage /></PermissionRoute>
+        } />
+        <Route path="/leave-management" element={
+          <PermissionRoute permissions={['leave.read_all', 'leave.approve_hr', 'leave.balance_read_all', 'leave.policy_manage']}><LeaveManagementPage /></PermissionRoute>
+        } />
+        <Route path="/calendar" element={
+          <PermissionRoute permissions={['calendar.read']}><CompanyCalendarPage /></PermissionRoute>
+        } />
+        <Route path="/holidays" element={
+          <PermissionRoute permissions={['calendar.holiday_manage']}><HolidayManagementPage /></PermissionRoute>
         } />
         <Route path="/settings" element={<AccountSettingsPage />} />
       </Route>

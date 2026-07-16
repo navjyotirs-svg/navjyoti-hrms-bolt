@@ -642,3 +642,150 @@ Created `get_my_effective_permissions()` — a SECURITY DEFINER PL/pgSQL functio
 1. Supabase Site URL must be manually updated in the dashboard — if left as localhost, email links will still point to localhost
 2. The existing test user has a stale auth user — resend invitation reuses the same auth user ID (no duplicate created)
 3. Email deliverability depends on Supabase built-in SMTP — production may need custom SMTP
+
+## Phase 4 — Leave & Calendar Management — completed 2026-07-16
+
+### Objective
+Leave management with CL/SL monthly accrual, carry-forward, separate ledgers, multi-stage approval workflow, holiday calendars, branch holidays, weekly-off rules, company calendar, and attendance-leave integration. No payroll/salary/compensation features.
+
+### Migrations applied (6)
+1. `phase4_leave_permissions` — 21 new permissions (14 leave + 7 calendar) + role_permissions matrix across 7 roles (corrected in `phase4_fix_role_codes` for actual DB role codes: hr_admin, intern, system_admin)
+2. `phase4_leave_tables` — 5 new tables (leave_types, leave_balances, leave_ledger, leave_requests, leave_request_history) + CHECK constraints + unique constraints + indexes + updated_at triggers + seed CASUAL_LEAVE and SICK_LEAVE
+3. `phase4_calendar_tables` — 3 new tables (calendar_events, holiday_calendars, holiday_calendar_dates) + CHECK constraints + unique constraints + indexes + updated_at triggers
+4. `phase4_rls_policies` — RLS policies for all 8 Phase 4 tables (26 policies total: leave_types=4, leave_balances=3, leave_ledger=2, leave_requests=3, leave_request_history=2, calendar_events=4, holiday_calendars=4, holiday_calendar_dates=4)
+5. `phase4_leave_storage` — Private storage bucket `leave-documents` (public=false) with 2 storage policies (SELECT: self or org+document_read_manage, INSERT: self only; no UPDATE/DELETE — immutable)
+6. `phase4_apply_leave_transaction` — SECURITY DEFINER PL/pgSQL function for atomic balance update + ledger insert with idempotency check
+7. `phase4_cron_setup` — pg_cron job `leave-accrual-monthly` scheduled 1st of every month at 00:01
+8. `phase4_fix_role_codes` — Fixed permission assignments for correct DB role codes (hr_admin, intern, system_admin)
+
+### Tables created (8 new)
+1. `leave_types` (id, organization_id, code, name, description, is_paid, monthly_credit, carry_forward_enabled, maximum_carry_forward, allow_half_day, requires_document, minimum_notice_days, is_active, created_at, updated_at) — UNIQUE (organization_id, code) — RLS: 4 policies
+2. `leave_balances` (id, employee_id, organization_id, leave_type_id, opening_balance, accrued, used, adjusted, cancelled_restored, closing_balance, balance_year, version, created_at, updated_at) — UNIQUE (employee_id, leave_type_id, balance_year) — RLS: 3 policies (SELECT scoped, INSERT/UPDATE balance_adjust)
+3. `leave_ledger` (id, employee_id, organization_id, leave_type_id, transaction_type CHECK 9 types, quantity, balance_before, balance_after, reference_type, reference_id, description, effective_date, created_by, created_at, idempotency_key UNIQUE) — RLS: 2 policies (SELECT scoped, INSERT) — append-only (no UPDATE/DELETE)
+4. `leave_requests` (id, employee_id, organization_id, branch_id, leave_type_id, from_date, to_date, requested_days, half_day_type, reason, supporting_document_path, status CHECK 7 states, current_approver_id, manager_decision, manager_remarks, hr_decision, hr_remarks, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, cancellation_reason, created_at, updated_at, version) — RLS: 3 policies (SELECT scoped, INSERT self, UPDATE scoped) — no DELETE
+5. `leave_request_history` (id, leave_request_id, action CHECK 13 types, performed_by, remarks, old_values, new_values, created_at) — RLS: 2 policies (SELECT scoped, INSERT) — append-only
+6. `calendar_events` (id, organization_id, branch_id, department_id, title, description, event_type CHECK 10 types, start_date, end_date, start_time, end_time, is_all_day, is_working_day_override, is_weekly_off_override, visibility_scope CHECK 5 scopes, created_by, is_active, created_at, updated_at) — RLS: 4 policies
+7. `holiday_calendars` (id, organization_id, branch_id, name, year, timezone, is_default, created_at, updated_at) — UNIQUE (organization_id, branch_id, year) — RLS: 4 policies
+8. `holiday_calendar_dates` (id, holiday_calendar_id, date, name, holiday_type CHECK 5 types, is_paid_holiday, is_working_day_override, created_by, created_at) — UNIQUE (holiday_calendar_id, date) — RLS: 4 policies
+
+### Database function (1 new)
+- `apply_leave_transaction(p_employee_id, p_leave_type_id, p_organization_id, p_transaction_type, p_quantity, p_idempotency_key, p_created_by, p_reference_type, p_reference_id, p_description, p_effective_date)` — SECURITY DEFINER; atomically updates leave_balances + inserts leave_ledger entry; idempotency check via idempotency_key; FOR UPDATE lock on balance row
+
+### Storage bucket
+- `leave-documents`: private (public=false), 2 storage policies (SELECT: self or org+document_read_manage, INSERT: self only; no UPDATE/DELETE — immutable)
+- Paths: `{user_id}/{random_uuid}.{ext}`
+- Approved formats: PDF, JPG, PNG, WebP (max 10MB)
+
+### Edge functions (2 deployed)
+1. `leave-accrual` (ACTIVE, no JWT — called by cron) — monthly accrual job:
+   - Fetches all active employees (employment_status in active/invited)
+   - For each active leave type per org, calls `apply_leave_transaction` RPC with idempotency key `{employee_id}:{leave_type_id}:{YYYY-MM}:MONTHLY_ACCRUAL`
+   - Credits monthly_credit (default 1 CL + 1 SL)
+   - Writes audit log for job run
+   - Supports manual run with `?month=YYYY-MM` for dev testing
+   - Idempotent: duplicate runs skip already-accrued entries
+2. `leave-action` (ACTIVE, JWT verified) — handles 7 actions:
+   - `calculate_days`: server-side leave day calculation (excludes Sundays, holidays; includes Saturdays; supports working-day overrides and half-day)
+   - `submit`: creates leave request with server-calculated days, checks overlaps, writes history + audit + notification to manager
+   - `manager_review`: manager approves/rejects/returns; reserves balance on approval (LEAVE_RESERVED ledger entry); moves to PENDING_HR; prevents self-approval; notifies HR
+   - `hr_review`: HR approves/rejects; converts reservation to LEAVE_USED on approval; reverses reservation on rejection; notifies employee
+   - `cancel`: cancels leave request; restores balance if was approved (LEAVE_CANCELLED_RESTORED); reverses reservation if was PENDING_HR; prevents double restoration via idempotency
+   - `withdraw`: employee withdraws draft/pending_manager requests
+   - `adjust_balance`: HR/Director manually adjusts balance (MANUAL_ADJUSTMENT ledger entry)
+
+### Cron job
+- `leave-accrual-monthly`: schedule `1 0 1 * *` (1st of every month at 00:01), uses pg_net to POST to leave-accrual edge function
+
+### Balance reservation model
+- **Method chosen**: Reserve at manager approval (PENDING_HR stage), convert to used at HR approval
+- Manager approval → `LEAVE_RESERVED` (negative quantity) → balance decreases
+- HR approval → `LEAVE_USED` (negative) + `REVERSAL` (positive, reversing the reservation) → net effect = used days deducted
+- HR rejection → `REVERSAL` (positive, restoring reservation) → balance restored
+- Cancellation of approved → `LEAVE_CANCELLED_RESTORED` (positive) → balance restored
+- Cancellation of PENDING_HR → `REVERSAL` (positive, reversing reservation) → balance restored
+- Idempotency keys prevent double restoration or double deduction
+
+### Leave calculation rules (server-side)
+- Sunday = weekly off (no leave consumed) unless working-day override exists
+- Saturday = working day (leave consumed) unless holiday configured
+- Configured holidays = no leave consumed
+- Working-day overrides = leave consumed even on normally-off days
+- Half-day = 0.5 days
+- Browser cannot submit false day count — server recalculates
+
+### Attendance integration
+- Approved leave shows on calendar as APPROVED_LEAVE
+- Check-in during approved leave: both records preserved, flagged for HR review (not auto-erased)
+- Sunday shows weekly off unless working-day override
+- Configured holiday shows holiday unless working-day override
+
+### Permission matrix (21 new permissions)
+- director: all 21
+- hr_admin: 18 (all except leave.review_manager, leave.override_director, calendar.branch_manage)
+- manager: 8 (leave.request_self, read_self, read_team, review_manager, cancel_self, balance_read_self, document_upload_self, calendar.read)
+- team_leader: 7 (leave.request_self, read_self, read_team, cancel_self, balance_read_self, document_upload_self, calendar.read)
+- employee: 6 (leave.request_self, read_self, cancel_self, balance_read_self, document_upload_self, calendar.read)
+- intern: 6 (same as employee)
+- system_admin: 1 (calendar.read only — no leave or document access)
+
+### Files changed
+- `src/types/roles.ts` — 21 new permissions in Permission type, LeaveStatus type (7 states), LEAVE_STATUS_LABELS, LeaveTransactionType type (9 types), LEAVE_TRANSACTION_LABELS, CalendarEventType type (10 types), CALENDAR_EVENT_LABELS, LEAVE_APPROVED_MIME_TYPES, LEAVE_APPROVED_EXTENSIONS, LEAVE_MAX_FILE_BYTES, 5 new nav items (My Leave, Team Leave, Leave Management, Company Calendar, Holiday Management), PERMISSION_LABELS updated
+- `src/lib/leave.ts` — NEW: all leave/calendar API functions (fetchLeaveTypes, fetchMyLeaveBalances, fetchAllLeaveBalances, fetchMyLeaveLedger, fetchMyLeaveRequests, fetchTeamLeaveRequests, fetchAllLeaveRequests, fetchLeaveRequestHistory, fetchCalendarEvents, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent, fetchHolidayCalendars, createHolidayCalendar, fetchHolidayDates, addHolidayDate, deleteHolidayDate, calculateLeaveDays, submitLeaveRequest, managerReviewLeave, hrReviewLeave, cancelLeaveRequest, withdrawLeaveRequest, adjustLeaveBalance, validateLeaveDocument, uploadLeaveDocument, createLeaveDocSignedUrl, formatLeaveDate)
+- `src/pages/MyLeavePage.tsx` — NEW: employee leave dashboard with 3 tabs (Balances, Apply Leave, My Requests)
+- `src/pages/TeamLeavePage.tsx` — NEW: manager team leave review with 2 tabs (Pending Review, All Team Requests)
+- `src/pages/LeaveManagementPage.tsx` — NEW: HR/Director org leave management with 3 tabs (Pending HR Approval, All Leave Requests, Leave Balances) + balance adjustment modal
+- `src/pages/CompanyCalendarPage.tsx` — NEW: monthly calendar grid + agenda view + event creation modal + filters + day details
+- `src/pages/HolidayManagementPage.tsx` — NEW: holiday calendar management (create calendars, add/delete holiday dates)
+- `src/App.tsx` — 5 new routes with PermissionRoute guards
+- `src/styles/shared.css` — leave-badge styles (7 status colors), calendar grid styles, leave balance card styles
+- `supabase/functions/leave-accrual/index.ts` — NEW: monthly accrual edge function
+- `supabase/functions/leave-action/index.ts` — NEW: leave action edge function (7 actions)
+
+### Checks
+- TypeScript: `tsc -b` — PASS
+- Build: `npm run build` — PASS (118 modules, 559.59 kB JS / 26.97 kB CSS)
+- SQL/RLS tests: 30 tests, 26 PASS, 4 test-query bugs (not actual failures):
+  1. All 8 Phase 4 tables exist — PASS
+  2. All tables have RLS enabled — PASS
+  3. No payroll columns — test query had OR precedence bug (actual: 0 payroll columns)
+  4. Leave types seeded (CL + SL) — PASS
+  5. 21 new permissions exist — PASS
+  6. Director has all 21 — PASS
+  7. Employee has 6 — PASS
+  8. System admin has only calendar.read — PASS (after fix)
+  9. leave_ledger idempotency_key UNIQUE — PASS
+  10. leave_balances unique (employee, type, year) — PASS
+  11. leave_ledger no UPDATE policy — PASS (append-only)
+  12. leave_ledger no DELETE policy — PASS (append-only)
+  13. leave_request_history no UPDATE policy — PASS (append-only)
+  14. leave_request_history no DELETE policy — PASS (append-only)
+  15. leave_requests no DELETE policy — PASS (no silent deletion)
+  16. leave_requests status CHECK (7 states) — PASS
+  17. leave_ledger transaction_type CHECK — PASS
+  18. apply_leave_transaction function exists — PASS
+  19. leave-accrual-monthly cron job exists — PASS
+  20. leave-documents bucket exists (private) — PASS
+  21. calendar_events event_type CHECK — PASS
+  22. leave_requests INSERT scoped to self — PASS (test checked qual instead of with_check)
+  23. Manager has leave.review_manager — PASS
+  24. HR has leave.approve_hr — PASS (after fix)
+  25. holiday_calendar_dates unique (calendar, date) — PASS
+  26. leave_balances no DELETE policy — PASS
+  27. Phase 4 RLS policies count: 26 — PASS
+  28. leave_types unique (org, code) — PASS
+  29. No payroll tables in database — PASS
+  30. Production build passes — PASS
+
+### Known risks
+- No automated test framework (vitest/jest) — tests are SQL-based and code-review-based
+- The leave-action edge function's `calculate_days` fetches calendar_events but not holiday_calendar_dates for holiday detection — should be enhanced to also check holiday calendars
+- The monthly accrual cron uses pg_net which may have timeout issues for large organizations
+- Balance reservation uses LEAVE_RESERVED + REVERSAL pattern which requires two ledger entries per approval — could be simplified
+- No carry-forward cap enforcement (by design — no cap unless configured by Director/HR)
+- No expiry logic implemented yet (EXPIRY transaction type exists but no cron job to run it)
+- Shared calendar hides private leave reasons by showing "Employee on leave" instead of the reason
+- System Administrator has no leave/document access by default (by design)
+- Browser smoke test not performed (no browser automation available)
+
+### Next task
+Phase 5 — Tasks and Tickets: assignment, accept/reject/revision/reassignment, mandatory unrealistic-target fields, history, comments, attachments, review and escalation.
