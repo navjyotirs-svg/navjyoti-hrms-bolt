@@ -111,6 +111,7 @@ export function CheckoutModal({ userId, onClose, onSuccess }: Props) {
           lng: pos.coords.longitude,
           accuracy: pos.coords.accuracy,
         })
+        setStep('captured')
       },
       (err) => {
         if (err.code === err.PERMISSION_DENIED) {
