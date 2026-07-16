@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from 'react'
 import { Outlet, useLocation, Navigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
@@ -15,6 +16,9 @@ const PAGE_TITLES: Record<string, string> = {
   '/hierarchy': 'Reporting Hierarchy',
   '/roles': 'Roles & Permissions',
   '/audit': 'Audit Trail',
+  '/attendance': 'My Attendance',
+  '/attendance-management': 'Attendance Management',
+  '/attendance-corrections': 'Corrections',
   '/settings': 'Account Settings',
 }
 
@@ -24,10 +28,26 @@ function getPageTitle(pathname: string): string {
   return 'Dashboard'
 }
 
+const SOUND_PREF_KEY = 'navjyoti_notif_sound_enabled'
+
 export function AppShell() {
   const location = useLocation()
   const { profile } = useAuth()
   const title = getPageTitle(location.pathname)
+  const [soundEnabled, setSoundEnabled] = useState(false)
+
+  useEffect(() => {
+    const stored = localStorage.getItem(SOUND_PREF_KEY)
+    setSoundEnabled(stored === 'true')
+  }, [])
+
+  const toggleSound = useCallback(() => {
+    setSoundEnabled((prev) => {
+      const next = !prev
+      localStorage.setItem(SOUND_PREF_KEY, String(next))
+      return next
+    })
+  }, [])
 
   if (profile?.status === 'pending_activation') {
     return <PendingActivationPage />
@@ -41,9 +61,9 @@ export function AppShell() {
     <div className="app-layout">
       <Sidebar />
       <div className="app-main">
-        <Topbar title={title} />
+        <Topbar title={title} soundEnabled={soundEnabled} />
         <main className="app-content">
-          <Outlet />
+          <Outlet context={{ soundEnabled, toggleSound }} />
         </main>
       </div>
     </div>

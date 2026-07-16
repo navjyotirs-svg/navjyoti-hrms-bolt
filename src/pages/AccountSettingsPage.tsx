@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '@/auth/AuthContext'
+import { useOutletContext } from 'react-router-dom'
 import { ROLE_LABELS } from '@/types/roles'
 import { supabase } from '@/lib/supabase'
 import '@/styles/shared.css'
@@ -46,6 +47,7 @@ const EMPTY_SELF: SelfService = {
 
 export function AccountSettingsPage() {
   const { profile, updatePassword } = useAuth()
+  const { soundEnabled, toggleSound } = useOutletContext<{ soundEnabled: boolean; toggleSound: () => void }>()
   const [emp, setEmp] = useState<EmployeeRecord | null>(null)
   const [self, setSelf] = useState<SelfService>(EMPTY_SELF)
   const [branchName, setBranchName] = useState<string | null>(null)
@@ -227,6 +229,30 @@ export function AccountSettingsPage() {
               </button>
             </div>
           </form>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header">Notification Preferences</div>
+        <div className="card-body">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-2) 0' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '13.5px' }}>Enable Notification Sound</div>
+              <div style={{ fontSize: '12px', color: 'var(--slate)', marginTop: '2px' }}>
+                Play a sound alert for attendance reminders. Sound only plays when the browser tab is open.
+              </div>
+            </div>
+            <button
+              className={`btn btn-sm ${soundEnabled ? '' : 'btn-secondary'}`}
+              onClick={toggleSound}
+              type="button"
+            >
+              {soundEnabled ? 'Enabled' : 'Disabled'}
+            </button>
+          </div>
+          <p style={{ fontSize: '12px', color: 'var(--slate)', marginTop: 'var(--space-3)', lineHeight: 1.5 }}>
+            Note: Browser autoplay restrictions may prevent sound before interaction. If the tab is open and sound is enabled, a clear alert will play for attendance reminders. Sound does not play when the browser is fully closed.
+          </p>
         </div>
       </div>
 

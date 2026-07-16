@@ -18,6 +18,9 @@ import { RolePermissionPage } from '@/pages/RolePermissionPage'
 import { ReportingHierarchyPage } from '@/pages/ReportingHierarchyPage'
 import { AuditTrailPage } from '@/pages/AuditTrailPage'
 import { AccountSettingsPage } from '@/pages/AccountSettingsPage'
+import { AttendancePage } from '@/pages/AttendancePage'
+import { AttendanceManagementPage } from '@/pages/AttendanceManagementPage'
+import { AttendanceCorrectionsPage } from '@/pages/AttendanceCorrectionsPage'
 import type { ReactNode } from 'react'
 import type { Permission } from '@/types/roles'
 
@@ -98,6 +101,15 @@ function AppRoutes() {
         } />
         <Route path="/audit" element={
           <PermissionRoute permissions={['audit.read']}><AuditTrailPage /></PermissionRoute>
+        } />
+        <Route path="/attendance" element={
+          <PermissionRoute permissions={['attendance.read_self', 'attendance.check_in_self']}><AttendancePage /></PermissionRoute>
+        } />
+        <Route path="/attendance-management" element={
+          <PermissionRoute permissions={['attendance.read_all', 'attendance.correct_manage', 'attendance.report_read']}><AttendanceManagementPage /></PermissionRoute>
+        } />
+        <Route path="/attendance-corrections" element={
+          <PermissionRoute permissions={['attendance.correct_request_self', 'attendance.correct_manage']}><AttendanceCorrectionsPage /></PermissionRoute>
         } />
         <Route path="/settings" element={<AccountSettingsPage />} />
       </Route>

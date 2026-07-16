@@ -250,4 +250,142 @@ Employee lifecycle, detailed employee profiles, onboarding checklists, private d
 - Employee profile page fetches by ID — RLS enforces read scope at DB level but the page does not pre-check subtree access for team leaders/managers
 
 ### Next task
-Phase 3 — Attendance & Leave Management: check-in/checkout with camera and location, server-side attendance computation, leave types and balances, leave application/approval workflow, holiday calendar, and attendance reports.
+Phase 3 — Attendance, Checkout Evidence, Attendance Corrections, Server-Side Reminders and Realtime Notifications.
+
+## Phase 3 — completed 2026-07-16
+
+### Objective
+Attendance check-in/checkout with camera and location evidence, server-side attendance computation using the 540-minute rule (480 work + 60 break), attendance corrections with approval workflow, server-side scheduled reminders via cron, and realtime notification delivery via Supabase realtime. No payroll/salary/compensation features. Leave and Calendar are Phase 4 (not implemented).
+
+### Migrations applied (6)
+1. `phase3_attendance_permissions` — 11 new permissions (attendance.check_in_self, attendance.check_out_self, attendance.read_self, attendance.read_team, attendance.read_all, attendance.correct_request_self, attendance.correct_manage, attendance.evidence_upload_self, attendance.evidence_read_self, attendance.evidence_read_all, attendance.report_read) + role_permissions matrix (director/hr_admin: all 11; manager: read_team/read_self/correct_manage/report_read; team_leader: read_self/read_team; employee/intern: check_in_self/check_out_self/read_self/correct_request_self/evidence_upload_self/evidence_read_self; system_admin: none)
+2. `phase3_attendance_tables` — 4 new tables (attendance_records, attendance_evidence, attendance_corrections, attendance_history) + CHECK constraints (3-state final_status, 2-state evidence_type, 7-type correction_type, 4-state correction status, 8-type history event_type) + unique partial index preventing duplicate active check-in + updated_at triggers
+3. `phase3_notifications` — notifications table with dedup_key UNIQUE constraint for idempotent reminders, RLS (SELECT/INSERT/UPDATE own only, no DELETE)
+4. `phase3_attendance_rls` — RLS policies for all 4 attendance tables (attendance_records: SELECT/INSERT/UPDATE; attendance_evidence: SELECT/INSERT only — immutable; attendance_corrections: SELECT/INSERT/UPDATE; attendance_history: SELECT/INSERT only — append-only)
+5. `phase3_attendance_storage` — Private storage bucket `attendance-evidence` (public=false) with 2 storage policies (SELECT: self path or org+evidence_read_all; INSERT: self path only; no UPDATE/DELETE — immutable evidence)
+6. `phase3_cron_setup` — pg_cron + pg_net extensions enabled, cron job `attendance-scheduler-every-minute` scheduled every minute to call the attendance-scheduler edge function
+
+### Tables created (5 new)
+1. `attendance_records` (id, employee_id, organization_id, branch_id, attendance_date, check_in_at, required_checkout_at, check_out_at, required_work_minutes default 480, required_break_minutes default 60, required_total_minutes default 540, actual_elapsed_minutes, final_status CHECK PENDING_CHECKOUT/FULL_DAY/HALF_DAY, status_reason, pre_checkout_reminder_sent_at, checkout_ready_reminder_sent_at, created_at, updated_at, created_by, corrected_at, corrected_by, correction_version default 0) — RLS: 3 policies (SELECT scoped, INSERT self, UPDATE correct_manage)
+2. `attendance_evidence` (id, attendance_record_id, employee_id, evidence_type CHECK CHECK_IN_PHOTO/CHECK_OUT_PHOTO, storage_path, mime_type, file_size_bytes, latitude, longitude, location_accuracy, captured_at, uploaded_at, created_by) — RLS: 2 policies (SELECT scoped, INSERT self) — immutable (no UPDATE/DELETE)
+3. `attendance_corrections` (id, attendance_record_id, employee_id, requested_by, correction_type CHECK 7 types, requested_check_in_at, requested_check_out_at, reason, supporting_document_path, status CHECK PENDING/APPROVED/REJECTED/CANCELLED, reviewed_by, reviewer_remarks, reviewed_at, created_at, updated_at) — RLS: 3 policies (SELECT scoped, INSERT self, UPDATE correct_manage)
+4. `attendance_history` (id, attendance_record_id, employee_id, event_type CHECK 8 types, event_data jsonb, performed_by, created_at) — RLS: 2 policies (SELECT scoped, INSERT authorized) — append-only (no UPDATE/DELETE)
+5. `notifications` (id, recipient_id, notification_type, title, message, priority CHECK low/normal/high, dedup_key UNIQUE, metadata jsonb, is_read default false, created_at) — RLS: 3 policies (SELECT own, INSERT own, UPDATE own) — no DELETE
+
+### Storage bucket
+- `attendance-evidence`: private (public=false), 2 storage policies (SELECT: self path or org+evidence_read_all; INSERT: self path only)
+- Paths: `{user_id}/{random_uuid}.{ext}`
+- Approved formats: JPG, JPEG, PNG, WebP (max 10MB)
+- No public URLs; signed URLs (60s) for authorized viewing
+- No base64 in PostgreSQL
+
+### Edge functions (3 deployed)
+1. `attendance-action` (ACTIVE, JWT verified) — handles check_in and check_out:
+   - check_in: resolves employee from JWT, verifies active status, rejects duplicates, uses server UTC now(), calculates required_checkout_at = check_in_at + 540 minutes (or test mode minutes), inserts attendance_records + attendance_history + audit_logs, returns server-computed values
+   - check_out: validates evidence ownership (path starts with caller user_id), validates MIME type and file size, finds active PENDING_CHECKOUT record, calculates elapsed minutes, sets FULL_DAY or HALF_DAY, creates attendance_evidence + attendance_history (3 entries: evidence_upload, check_out, status_calculated) + audit_logs
+   - Browser never submits check_in_at, required_checkout_at, final_status, or elapsed_minutes as authoritative values
+2. `attendance-scheduler` (ACTIVE, no JWT — called by cron) — runs every minute via pg_cron:
+   - Queries PENDING_CHECKOUT records without checkout
+   - Pre-checkout reminder: sent at required_checkout_at - 2 minutes (configurable via ATTENDANCE_PRE_ALERT_MINUTES)
+   - Checkout-ready reminder: sent at required_checkout_at
+   - Idempotency: dedup_key = `{record_id}:{reminder_type}` with UNIQUE constraint in notifications table
+   - Updates pre_checkout_reminder_sent_at / checkout_ready_reminder_sent_at on the attendance record
+   - Skips records where checkout already completed
+3. `attendance-correction` (ACTIVE, JWT verified) — handles request_correction and review_correction:
+   - request_correction: validates ownership, creates PENDING correction, writes attendance_history + audit_logs
+   - review_correction (APPROVED): preserves original values in history, applies corrected values, increments correction_version, recalculates status server-side, writes attendance_history (correction_approved + record_recalculated) + audit_logs
+   - review_correction (REJECTED): writes attendance_history (correction_rejected) + audit_logs
+   - Cross-organization access denied
+
+### Cron job
+- `attendance-scheduler-every-minute`: schedule `* * * * *` (every minute), active
+- Uses pg_net to POST to the attendance-scheduler edge function
+
+### Realtime notification channel
+- Frontend subscribes to `notifications` table filtered by `recipient_id=eq.{userId}` via Supabase realtime
+- On new notification: increments bell count, shows toast for high-priority, plays sound if enabled
+- Reconnect-safe: fetches unread notifications on reconnect
+- Subscription stopped on logout (channel removed in useEffect cleanup)
+
+### Attendance policy (confirmed)
+- Employee may check in at any time; no Late marking
+- required_checkout_at = check_in_at + 540 minutes (480 work + 60 break)
+- final_status: PENDING_CHECKOUT (before checkout), FULL_DAY (checkout at >= 540 elapsed), HALF_DAY (checkout < 540 elapsed)
+- Missing checkout remains PENDING_CHECKOUT until authorized correction
+- No LATE, ABSENT, or SHORT_ATTENDANCE for employees with check-in records
+
+### Development test mode
+- Server environment variables: ATTENDANCE_TEST_MODE=true, ATTENDANCE_TOTAL_MINUTES=5, ATTENDANCE_PRE_ALERT_MINUTES=2
+- Disabled by default; production always uses 540 minutes
+- Server rejects test mode when in production (DENO_DEPLOYMENT_ID check)
+- VITE_ATTENDANCE_TEST_MODE does not control server truth
+
+### Files changed
+- `src/types/roles.ts` — 11 new attendance permissions, AttendanceStatus type, ATTENDANCE_STATUS_LABELS, CorrectionType, CORRECTION_TYPE_LABELS, CorrectionStatus, CORRECTION_STATUS_LABELS, ATTENDANCE_APPROVED_MIME_TYPES, ATTENDANCE_APPROVED_EXTENSIONS, ATTENDANCE_MAX_PHOTO_BYTES, 3 new nav items (My Attendance, Attendance Management, Corrections)
+- `src/lib/attendance.ts` — NEW: attendance utility functions (checkIn, checkOut, requestCorrection, reviewCorrection, fetchTodayAttendance, fetchAttendanceHistory, fetchAttendanceEvidence, fetchCorrections, fetchAllCorrections, fetchUnreadNotifications, fetchUnreadNotificationCount, markNotificationRead, markAllNotificationsRead, validateEvidenceFile, uploadAttendanceEvidence, createEvidenceSignedUrl, formatTimeRemaining, formatTimestamp, formatDate)
+- `src/components/NotificationBell.tsx` — NEW: realtime notification bell with Supabase realtime subscription, toast for high-priority, sound playback (Web Audio API), reconnect-safe unread fetch, duplicate popup prevention
+- `src/components/CheckoutModal.tsx` — NEW: camera + location capture modal with getUserMedia, geolocation, photo capture via canvas, private storage upload, edge function checkout call, error handling for NotAllowedError/NotFoundError/NotReadableError/SecurityError/geolocation denied/timeout
+- `src/pages/AttendancePage.tsx` — NEW: employee attendance dashboard with 3 tabs (Today, History, Corrections), check-in button, live timer, checkout button, correction request modal
+- `src/pages/AttendanceManagementPage.tsx` — NEW: HR/Director attendance view with search, status filter, date filter, 11-column table, evidence viewing with permission control
+- `src/pages/AttendanceCorrectionsPage.tsx` — NEW: correction requests list with approve/reject for HR/Director, own corrections for employees
+- `src/styles/attendance.css` — NEW: attendance-specific styles (tabs, status grid, timer, badges, checkout modal, notification bell, toast, test mode banner)
+- `src/App.tsx` — 3 new routes added with PermissionRoute guards
+- `src/components/Topbar.tsx` — updated with NotificationBell component
+- `src/components/AppShell.tsx` — updated with soundEnabled state (localStorage), toggleSound function passed via outlet context, getPageTitle for attendance routes
+- `src/pages/Dashboard.tsx` — updated with today's attendance card, organization overview for HR/Director
+- `src/pages/AccountSettingsPage.tsx` — updated with notification sound enable/disable toggle
+- `supabase/functions/attendance-action/index.ts` — NEW: check-in/checkout edge function
+- `supabase/functions/attendance-scheduler/index.ts` — NEW: cron scheduler edge function
+- `supabase/functions/attendance-correction/index.ts` — NEW: correction request/review edge function
+
+### Checks
+- TypeScript: `tsc -b --noEmit` — passes
+- Build: `npm run build` (tsc -b && vite build) — passes (111 modules, 484.02 kB JS / 22.89 kB CSS)
+- RLS tests: 24 tests passed:
+  1. All 5 Phase 3 tables exist with RLS enabled (attendance_records, attendance_evidence, attendance_corrections, attendance_history, notifications)
+  2. No payroll/salary/payslip/compensation/deduction/incentive columns in Phase 3 tables (count=0)
+  3. attendance_records final_status CHECK enforces 3 states only (PENDING_CHECKOUT, FULL_DAY, HALF_DAY)
+  4. Unique partial index idx_attendance_unique_active prevents duplicate active check-in per employee per date
+  5. attendance_evidence evidence_type CHECK enforces CHECK_IN_PHOTO and CHECK_OUT_PHOTO only
+  6. attendance_corrections correction_type CHECK enforces 7 types, status CHECK enforces 4 states
+  7. attendance_history event_type CHECK enforces 8 types (append-only)
+  8. All 11 Phase 3 permissions exist with correct role assignments (director/hr_admin: 11, manager: 4, team_leader: 2, employee/intern: 6, system_admin: 0)
+  9. attendance_records RLS: 3 policies (SELECT scoped, INSERT self, UPDATE correct_manage)
+  10. attendance_evidence RLS: 2 policies (SELECT scoped, INSERT self) — immutable (no UPDATE/DELETE)
+  11. attendance_history RLS: 2 policies (SELECT scoped, INSERT authorized) — append-only (no UPDATE/DELETE)
+  12. notifications RLS: 3 policies (SELECT own, INSERT own, UPDATE own) — no DELETE
+  13. notifications dedup_key has UNIQUE constraint for idempotent reminders
+  14. attendance-evidence storage bucket exists (private, public=false)
+  15. attendance-evidence storage policies: SELECT + INSERT only (no UPDATE/DELETE — immutable)
+  16. attendance_corrections RLS: 3 policies (SELECT scoped, INSERT self, UPDATE correct_manage)
+  17. required_total_minutes default is 540, required_work_minutes default is 480, required_break_minutes default is 60
+  18. No LATE, ABSENT, or SHORT_ATTENDANCE in final_status CHECK constraint
+  19. Cron job `attendance-scheduler-every-minute` exists and is active (schedule: every minute)
+  20. attendance_records has correction_version column (default 0) for correction tracking
+  21. attendance_records has pre_checkout_reminder_sent_at and checkout_ready_reminder_sent_at columns
+  22. attendance_evidence has latitude, longitude, location_accuracy columns
+  23. notifications has priority (default 'normal'), is_read (default false), dedup_key columns
+  24. Total policy count: attendance_records=3, attendance_evidence=2, attendance_corrections=3, attendance_history=2, notifications=3 (13 total)
+
+### Known browser limitations
+- Camera requires secure context (HTTPS or localhost) — will fail on HTTP
+- Geolocation requires secure context and user permission
+- Browser autoplay restrictions prevent sound before user interaction
+- Camera tracks must be explicitly stopped to avoid resource leaks
+- Notifications only work while tab is open — no push notifications (requires service worker + push API, not in scope)
+- getUserMedia must be called from a direct user click event (not programmatically)
+- Geolocation may time out in poor GPS/network conditions
+
+### Known risks
+- No automated test framework (vitest/jest) — RLS tests are SQL-based via execute_sql
+- Edge function test mode relies on DENO_DEPLOYMENT_ID env var which may not be set in all Supabase environments
+- Cron job uses pg_net which requires the extension to be available (confirmed installed)
+- Realtime subscription may have a brief delay between notification insert and client receipt
+- No file size limit enforcement at the storage policy level (enforced in frontend + edge function)
+- Manager view shows attendance summary but not photos/coordinates (by design — no evidence_read_all permission)
+- System Administrator has no attendance evidence access by default (by design)
+- Correction approval recalculation uses server UTC timestamps, not client timezone
+- The cron job calls the edge function without authentication (verify_jwt=false) — the scheduler is designed to be called by pg_cron only, not by end users
+
+### Next task
+Phase 4 — Leave & Calendar Management: leave types and balances, leave application/approval workflow, holiday calendar, branch holidays, Sunday weekly off, and attendance-leave integration.

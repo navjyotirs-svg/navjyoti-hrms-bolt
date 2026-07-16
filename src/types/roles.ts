@@ -36,6 +36,64 @@ export type Permission =
   | 'employee.status.manage'
   | 'employee.offboarding.manage'
   | 'employee.profile.view_sensitive'
+  | 'attendance.check_in_self'
+  | 'attendance.check_out_self'
+  | 'attendance.read_self'
+  | 'attendance.read_team'
+  | 'attendance.read_all'
+  | 'attendance.correct_request_self'
+  | 'attendance.correct_manage'
+  | 'attendance.evidence_upload_self'
+  | 'attendance.evidence_read_self'
+  | 'attendance.evidence_read_all'
+  | 'attendance.report_read'
+
+export type AttendanceStatus = 'PENDING_CHECKOUT' | 'FULL_DAY' | 'HALF_DAY'
+
+export const ATTENDANCE_STATUS_LABELS: Record<AttendanceStatus, string> = {
+  PENDING_CHECKOUT: 'Pending Checkout',
+  FULL_DAY: 'Full Day',
+  HALF_DAY: 'Half Day',
+}
+
+export type CorrectionType =
+  | 'missed_check_in'
+  | 'missed_checkout'
+  | 'technical_problem'
+  | 'camera_problem'
+  | 'location_problem'
+  | 'official_field_duty'
+  | 'other'
+
+export const CORRECTION_TYPE_LABELS: Record<CorrectionType, string> = {
+  missed_check_in: 'Missed Check-In',
+  missed_checkout: 'Missed Checkout',
+  technical_problem: 'Technical Problem',
+  camera_problem: 'Camera Problem',
+  location_problem: 'Location Problem',
+  official_field_duty: 'Official Field Duty',
+  other: 'Other',
+}
+
+export type CorrectionStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'
+
+export const CORRECTION_STATUS_LABELS: Record<CorrectionStatus, string> = {
+  PENDING: 'Pending',
+  APPROVED: 'Approved',
+  REJECTED: 'Rejected',
+  CANCELLED: 'Cancelled',
+}
+
+export const ATTENDANCE_APPROVED_MIME_TYPES = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+] as const
+
+export const ATTENDANCE_APPROVED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
+
+export const ATTENDANCE_MAX_PHOTO_BYTES = 10 * 1024 * 1024
 
 export type AccountStatus = 'active' | 'pending_activation' | 'disabled'
 
@@ -118,6 +176,17 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'employee.status.manage': 'Manage Employment Status',
   'employee.offboarding.manage': 'Manage Offboarding',
   'employee.profile.view_sensitive': 'View Sensitive Fields',
+  'attendance.check_in_self': 'Check In Self',
+  'attendance.check_out_self': 'Check Out Self',
+  'attendance.read_self': 'Read Own Attendance',
+  'attendance.read_team': 'Read Team Attendance',
+  'attendance.read_all': 'Read All Attendance',
+  'attendance.correct_request_self': 'Request Attendance Correction',
+  'attendance.correct_manage': 'Manage Attendance Corrections',
+  'attendance.evidence_upload_self': 'Upload Attendance Evidence',
+  'attendance.evidence_read_self': 'Read Own Attendance Evidence',
+  'attendance.evidence_read_all': 'Read All Attendance Evidence',
+  'attendance.report_read': 'Read Attendance Reports',
 }
 
 export type NavItem = {
@@ -175,6 +244,24 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Audit Trail',
     icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
     permissions: ['audit.read'],
+  },
+  {
+    id: 'attendance',
+    label: 'My Attendance',
+    icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+    permissions: ['attendance.read_self', 'attendance.check_in_self'],
+  },
+  {
+    id: 'attendance-management',
+    label: 'Attendance Management',
+    icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+    permissions: ['attendance.read_all', 'attendance.correct_manage', 'attendance.report_read'],
+  },
+  {
+    id: 'attendance-corrections',
+    label: 'Corrections',
+    icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
+    permissions: ['attendance.correct_request_self', 'attendance.correct_manage'],
   },
   {
     id: 'settings',
