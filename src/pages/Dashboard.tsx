@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '@/auth/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { ATTENDANCE_STATUS_LABELS, ROLE_LABELS, type AttendanceStatus } from '@/types/roles'
-import { formatTimeRemaining, formatTimestamp } from '@/lib/attendance'
+import { formatTimeRemaining, formatTimestamp, checkIn, fetchTodayAttendance } from '@/lib/attendance'
+import { CheckoutModal } from '@/components/CheckoutModal'
 import '@/styles/dashboard.css'
 
 export function Dashboard() {
@@ -25,9 +26,14 @@ export function Dashboard() {
   const [todayAttendance, setTodayAttendance] = useState<{ check_in_at: string; required_checkout_at: string; final_status: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [checkingIn, setCheckingIn] = useState(false)
+  const [showCheckout, setShowCheckout] = useState(false)
+  const [attendanceError, setAttendanceError] = useState<string | null>(null)
+  const [attendanceSuccess, setAttendanceSuccess] = useState<string | null>(null)
 
   const canReadAll = permissions.includes('attendance.read_all')
   const canCheckIn = permissions.includes('attendance.check_in_self')
+  const canCheckOut = permissions.includes('attendance.check_out_self')
   const canReadAudit = permissions.includes('audit.read')
   const canReadEmployees = permissions.includes('employee.read_all') || permissions.includes('employee.read_team')
   const canReadOrg = permissions.includes('organization.read')
@@ -194,6 +200,60 @@ export function Dashboard() {
   const greeting = profile?.full_name ?? profile?.email
   const roleLabel = profile?.role ? ROLE_LABELS[profile.role] : ''
 
+  const handleDashboardCheckIn = useCallback(async () => {
+    setAttendanceError(null)
+    setAttendanceSuccess(null)
+    setCheckingIn(true)
+    try {
+      await checkIn()
+      setAttendanceSuccess('Checked in successfully!')
+      // Reload today's attendance
+      if (profile?.id) {
+        const { data: emp } = await supabase
+          .from('employees')
+          .select('id')
+          .eq('user_id', profile.id)
+          .maybeSingle()
+        const empId = (emp as { id: string } | null)?.id
+        if (empId) {
+          const rec = await fetchTodayAttendance(empId)
+          setTodayAttendance(rec ? {
+            check_in_at: rec.check_in_at,
+            required_checkout_at: rec.required_checkout_at,
+            final_status: rec.final_status,
+          } : null)
+        }
+      }
+    } catch (e) {
+      setAttendanceError((e as Error).message)
+    }
+    setCheckingIn(false)
+  }, [profile?.id])
+
+  function handleDashboardCheckoutSuccess(result: { final_status: string; elapsed_minutes: number }) {
+    setShowCheckout(false)
+    setAttendanceSuccess(`Checked out! Status: ${ATTENDANCE_STATUS_LABELS[result.final_status as AttendanceStatus] ?? result.final_status}`)
+    // Reload today's attendance
+    if (profile?.id) {
+      ;(async () => {
+        const { data: emp } = await supabase
+          .from('employees')
+          .select('id')
+          .eq('user_id', profile!.id)
+          .maybeSingle()
+        const empId = (emp as { id: string } | null)?.id
+        if (empId) {
+          const rec = await fetchTodayAttendance(empId)
+          setTodayAttendance(rec ? {
+            check_in_at: rec.check_in_at,
+            required_checkout_at: rec.required_checkout_at,
+            final_status: rec.final_status,
+          } : null)
+        }
+      })()
+    }
+  }
+
   if (loading) {
     return <div className="dashboard"><div className="loading-state">Loading dashboard…</div></div>
   }
@@ -215,6 +275,8 @@ export function Dashboard() {
         <div className="dashboard-section">
           <h3 className="dashboard-section-title">Today's Attendance</h3>
           <div className="card dashboard-status-card">
+            {attendanceError && <div className="form-error" style={{ marginBottom: '12px' }}>{attendanceError}</div>}
+            {attendanceSuccess && <div className="form-success" style={{ marginBottom: '12px' }}>{attendanceSuccess}</div>}
             {todayAttendance ? (
               <>
                 <div className="dashboard-status-row">
@@ -234,18 +296,30 @@ export function Dashboard() {
                   </span>
                 </div>
                 {todayAttendance.final_status === 'PENDING_CHECKOUT' && (
-                  <div className="dashboard-status-row">
-                    <span className="dashboard-status-label">Time Remaining</span>
-                    <span className="dashboard-status-value mono" style={{ fontWeight: 700 }}>
-                      {formatTimeRemaining(todayAttendance.required_checkout_at)}
-                    </span>
-                  </div>
+                  <>
+                    <div className="dashboard-status-row">
+                      <span className="dashboard-status-label">Time Remaining</span>
+                      <span className="dashboard-status-value mono" style={{ fontWeight: 700 }}>
+                        {formatTimeRemaining(todayAttendance.required_checkout_at)}
+                      </span>
+                    </div>
+                    {canCheckOut && (
+                      <button className="btn btn-checkout" style={{ marginTop: '12px', width: '100%' }} onClick={() => setShowCheckout(true)}>
+                        Check Out
+                      </button>
+                    )}
+                  </>
                 )}
               </>
             ) : (
-              <div className="dashboard-status-row">
-                <span className="dashboard-status-label">No check-in yet today</span>
-              </div>
+              <>
+                <div className="dashboard-status-row">
+                  <span className="dashboard-status-label">No check-in yet today</span>
+                </div>
+                <button className="btn btn-checkin" style={{ marginTop: '12px', width: '100%' }} onClick={handleDashboardCheckIn} disabled={checkingIn}>
+                  {checkingIn ? 'Checking in…' : 'Check In'}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -301,6 +375,14 @@ export function Dashboard() {
             ))}
           </div>
         </div>
+      )}
+
+      {showCheckout && (
+        <CheckoutModal
+          userId={profile!.id}
+          onClose={() => setShowCheckout(false)}
+          onSuccess={handleDashboardCheckoutSuccess}
+        />
       )}
     </div>
   )

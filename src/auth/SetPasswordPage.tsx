@@ -79,31 +79,7 @@ export function SetPasswordPage() {
       return
     }
 
-    // Activate the user profile and employee record via the manage-employee function
-    try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const accessToken = sessionData.session?.access_token
-      if (!accessToken) throw new Error('No session')
-
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-      const response = await fetch(`${supabaseUrl}/functions/v1/invite-employee`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ action: 'activate_account' }),
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        console.error('Activation failed:', data.error)
-      }
-    } catch (err) {
-      console.error('Account activation error:', err)
-    }
-
+    // Account is already active from invite time — just set the password
     setSuccess(true)
     setSubmitting(false)
 

@@ -206,15 +206,15 @@ async function handleInvite(
 
   const userId = inviteData.user.id;
 
-  // Create user_profile
+  // Create user_profile — active immediately at invite time
   const { error: profileInsertError } = await admin.from("user_profiles").insert({
     id: userId,
     email: body.work_email,
     full_name: body.full_name,
     role: body.role,
     organization_id: orgId,
-    status: "pending_activation",
-    is_active: false,
+    status: "active",
+    is_active: true,
   });
 
   if (profileInsertError) {
@@ -234,7 +234,7 @@ async function handleInvite(
       designation: body.designation || null,
       work_email: body.work_email,
       work_mode: body.work_mode || "Office",
-      employment_status: "invited",
+      employment_status: "active",
       joining_date: body.joining_date,
       is_active: true,
     })
