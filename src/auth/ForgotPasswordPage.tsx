@@ -3,12 +3,15 @@ import { Link } from 'react-router-dom'
 import { useAuth } from './AuthContext'
 import '@/styles/auth.css'
 
+const COOLDOWN_SECONDS = 30
+
 export function ForgotPasswordPage() {
   const { resetPassword } = useAuth()
   const [email, setEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [cooldown, setCooldown] = useState(0)
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -21,6 +24,16 @@ export function ForgotPasswordPage() {
       setError(error)
     } else {
       setSuccess(true)
+      setCooldown(COOLDOWN_SECONDS)
+      const timer = setInterval(() => {
+        setCooldown((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer)
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
     }
     setSubmitting(false)
   }
@@ -36,7 +49,7 @@ export function ForgotPasswordPage() {
         {success ? (
           <div className="auth-form">
             <div className="form-success">
-              Password reset link sent. Check your email inbox.
+              If an account exists for this email, a password reset link has been sent.
             </div>
             <Link to="/login" className="auth-link" style={{ display: 'block', textAlign: 'center', marginTop: 'var(--space-4)' }}>
               Back to sign in
@@ -58,8 +71,8 @@ export function ForgotPasswordPage() {
 
             {error && <div className="auth-error">{error}</div>}
 
-            <button type="submit" className="auth-submit" disabled={submitting}>
-              {submitting ? 'Please wait…' : 'Send Reset Link'}
+            <button type="submit" className="auth-submit" disabled={submitting || cooldown > 0}>
+              {submitting ? 'Please wait…' : cooldown > 0 ? `Wait ${cooldown}s` : 'Send Reset Link'}
             </button>
           </form>
         )}

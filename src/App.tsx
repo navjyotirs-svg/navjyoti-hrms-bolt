@@ -1,8 +1,10 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import { AuthProvider, useAuth } from '@/auth/AuthContext'
 import { LoginPage } from '@/auth/LoginPage'
 import { ForgotPasswordPage } from '@/auth/ForgotPasswordPage'
 import { ResetPasswordPage } from '@/auth/ResetPasswordPage'
+import { SetPasswordPage } from '@/auth/SetPasswordPage'
 import { UnauthorizedPage } from '@/auth/UnauthorizedPage'
 import { AppShell } from '@/components/AppShell'
 import { PermissionGuard } from '@/components/PermissionGuard'
@@ -50,6 +52,47 @@ function PermissionRoute({ permissions, children }: { permissions: Permission[];
   )
 }
 
+function AuthCallbackRedirect() {
+  const navigate = useNavigate()
+  const { session } = useAuth()
+
+  useEffect(() => {
+    // After the OAuth callback, the Supabase client exchanges the code for a session.
+    // If the session is a recovery/invite session, the user needs to set a password.
+    // If it's a normal session, redirect to dashboard.
+    if (session) {
+      // Check if this is a recovery flow by looking at the URL hash or query params
+      const hash = window.location.hash
+      const params = new URLSearchParams(window.location.search)
+      const type = params.get('type') || (hash.includes('type=recovery') ? 'recovery' : null)
+
+      if (type === 'recovery') {
+        navigate('/reset-password', { replace: true })
+      } else if (hash.includes('type=invite') || hash.includes('type=signup')) {
+        navigate('/set-password', { replace: true })
+      } else {
+        navigate('/', { replace: true })
+      }
+    } else {
+      // Wait briefly for session to be established, then redirect to set-password
+      setTimeout(() => {
+        const hash = window.location.hash
+        if (hash.includes('type=recovery')) {
+          navigate('/reset-password', { replace: true })
+        } else {
+          navigate('/set-password', { replace: true })
+        }
+      }, 1500)
+    }
+  }, [session, navigate])
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+      <p style={{ color: 'var(--slate)', fontSize: '14px' }}>Processing authentication…</p>
+    </div>
+  )
+}
+
 function AppRoutes() {
   const { session, loading } = useAuth()
 
@@ -66,6 +109,8 @@ function AppRoutes() {
       <Route path="/login" element={session ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/set-password" element={<SetPasswordPage />} />
+      <Route path="/auth/callback" element={<AuthCallbackRedirect />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
       <Route
         element={

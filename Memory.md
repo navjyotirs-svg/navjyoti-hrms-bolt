@@ -578,3 +578,67 @@ Created `get_my_effective_permissions()` — a SECURITY DEFINER PL/pgSQL functio
 11. [ ] Log back in — permissions reload automatically
 12. [ ] Resize browser to small laptop height — sidebar nav scrolls independently, footer stays visible
 13. [ ] Open production build (npm run build && npm run preview) — no diagnostics panel or toggle visible
+
+## Auth Invitation & Password Recovery Fix — completed 2026-07-16
+
+### Root causes
+1. **Temporary-password failure**: invite-employee used auth.admin.createUser() without a password and without sending an invitation email. Auth user had no way to set a password — login returned "Invalid login credentials."
+2. **localhost reset link**: Supabase project Site URL was set to http://localhost:3000 in the dashboard, overriding redirectTo in password-reset emails. Mobile got ERR_CONNECTION_REFUSED.
+
+### Fix
+- Replaced createUser() with auth.admin.inviteUserByEmail() — sends secure invitation email with redirect to /set-password. No temporary password created or displayed.
+- Added APP_URL env var support in edge functions (defaults to https://navjyotirs-svg-navjy-hpxl.bolt.host).
+- Created /set-password route: detects invite session, password form, activates profile + employee on success, signs out, redirects to /login.
+- Repaired /reset-password route: detects recovery session, password reset form, signs out, redirects to /login.
+- Created /auth/callback route: processes auth callback, redirects to /set-password, /reset-password, or /.
+- Updated ForgotPasswordPage: neutral response, 30s cooldown.
+- Updated LoginPage: friendly error messages for invalid credentials, pending activation, disabled accounts.
+- Updated AddEmployeePage: success message "An invitation email has been sent…" — no temporary password displayed.
+- Added Resend Invitation button in EmployeeDirectoryPage for invited employees.
+- Added activate_account action in invite-employee function — called from SetPasswordPage after password creation.
+- Added resend_invitation action in invite-employee function — rate-limited to 1 minute.
+
+### Functions redeployed
+- invite-employee (complete rewrite: inviteUserByEmail, activate_account, resend_invitation)
+
+### Routes created or repaired
+- /set-password (new), /reset-password (repaired), /auth/callback (new)
+
+### Files changed
+- supabase/functions/invite-employee/index.ts — rewritten
+- src/auth/SetPasswordPage.tsx — new
+- src/auth/ResetPasswordPage.tsx — rewritten
+- src/auth/ForgotPasswordPage.tsx — rewritten
+- src/auth/LoginPage.tsx — rewritten
+- src/App.tsx — added routes + AuthCallbackRedirect
+- src/pages/AddEmployeePage.tsx — success message instead of redirect
+- src/pages/EmployeeDirectoryPage.tsx — added Resend Invitation button
+
+### Supabase URL settings required manually (Dashboard > Authentication > URL Configuration)
+- Site URL: https://navjyotirs-svg-navjy-hpxl.bolt.host
+- Redirect URLs:
+  - https://navjyotirs-svg-navjy-hpxl.bolt.host/**
+  - https://navjyotirs-svg-navjy-hpxl.bolt.host/set-password
+  - https://navjyotirs-svg-navjy-hpxl.bolt.host/reset-password
+  - https://navjyotirs-svg-navjy-hpxl.bolt.host/auth/callback
+  - http://localhost:5173/** (local dev)
+  - http://localhost:5173/set-password
+  - http://localhost:5173/reset-password
+  - http://localhost:5173/auth/callback
+
+### Existing test user status
+- sharmarohit6641@gmail.com: auth user exists, email_confirmed_at set, profile pending_activation, employee invited. No password ever set. Use Resend Invitation button to trigger new invite email.
+
+### Security verification
+- No service-role key in frontend files (grep confirmed)
+- No temporary passwords generated, displayed, or logged
+- No auth tokens logged
+- Organization scope validated in all server functions
+- Cross-organization invitation denied
+
+### Production build: PASS (112 modules, 499.58 kB JS / 23.90 kB CSS)
+
+### Remaining risks
+1. Supabase Site URL must be manually updated in the dashboard — if left as localhost, email links will still point to localhost
+2. The existing test user has a stale auth user — resend invitation reuses the same auth user ID (no duplicate created)
+3. Email deliverability depends on Supabase built-in SMTP — production may need custom SMTP

@@ -17,6 +17,7 @@ export function AddEmployeePage() {
   const [managers, setManagers] = useState<Manager[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   const [fullName, setFullName] = useState('')
   const [workEmail, setWorkEmail] = useState('')
@@ -86,7 +87,8 @@ export function AddEmployeePage() {
         setError(data.error || 'Failed to invite employee')
         setSubmitting(false)
       } else {
-        navigate('/employees')
+        setSuccessMessage('An invitation email has been sent. The employee must open the secure invitation link and create a password.')
+        setSubmitting(false)
       }
     } catch {
       setError('Network error — please try again')
@@ -103,6 +105,17 @@ export function AddEmployeePage() {
       <div className="card">
         <div className="card-body">
           {error && <div className="form-error" style={{ marginBottom: 'var(--space-4)' }}>{error}</div>}
+          {successMessage && (
+            <div className="form-success" style={{ marginBottom: 'var(--space-4)' }}>
+              {successMessage}
+              <div style={{ marginTop: 'var(--space-3)' }}>
+                <button type="button" className="btn btn-sm" onClick={() => navigate('/employees')}>
+                  Back to Employees
+                </button>
+              </div>
+            </div>
+          )}
+          {!successMessage && (
           <form onSubmit={handleSubmit}>
             <div className="form-grid">
               <div className="form-field">
@@ -171,6 +184,7 @@ export function AddEmployeePage() {
               </button>
             </div>
           </form>
+          )}
         </div>
       </div>
     </div>

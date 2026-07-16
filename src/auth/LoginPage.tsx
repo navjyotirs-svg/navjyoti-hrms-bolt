@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { supabase } from '@/lib/supabase'
 import { useAuth } from './AuthContext'
 import '@/styles/auth.css'
 
@@ -18,9 +19,32 @@ export function LoginPage() {
 
     const { error } = await signIn(email, password)
     if (error) {
-      setError(error)
+      const msg = error.toLowerCase()
+      if (msg.includes('invalid login credentials')) {
+        setError('Invalid email or password.')
+      } else if (msg.includes('email not confirmed')) {
+        setError('Your account setup is incomplete. Please open the invitation email and create your password.')
+      } else if (msg.includes('disabled') || msg.includes('inactive')) {
+        setError('Your account is inactive. Please contact HR.')
+      } else {
+        setError('Unable to sign in. Please try again or contact your administrator.')
+      }
       setSubmitting(false)
     } else {
+      // Check if the user profile is pending activation
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('status')
+        .eq('email', email)
+        .maybeSingle()
+
+      if (profile?.status === 'pending_activation') {
+        setError('Your account setup is incomplete. Please open the invitation email and create your password.')
+        await supabase.auth.signOut()
+        setSubmitting(false)
+        return
+      }
+
       navigate('/')
     }
   }
