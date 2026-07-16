@@ -23,9 +23,8 @@ Deno.serve(async (req: Request) => {
     });
 
     const now = new Date();
-    const preAlertMinutes = parseInt(Deno.env.get("ATTENDANCE_PRE_ALERT_MINUTES") ?? String(PRE_ALERT_MINUTES), 10);
-
-    // Find all PENDING_CHECKOUT records that need reminders
+    const config = await loadAttendanceConfig(admin);
+    const preAlertMinutes = config.preAlertMinutes;
     const { data: records, error } = await admin
       .from("attendance_records")
       .select(`
@@ -64,7 +63,7 @@ Deno.serve(async (req: Request) => {
             recipient_id: emp.user_id,
             notification_type: "ATTENDANCE_PRE_CHECKOUT",
             title: "Checkout Approaching",
-            message: "Your checkout time is approaching in 2 minutes. Please get ready to check out and ensure your daily report is submitted.",
+            message: `Your checkout time is approaching in ${preAlertMinutes} minute${preAlertMinutes === 1 ? "" : "s"}. Please get ready to check out and ensure your daily report is submitted.`,
             priority: "high",
             dedup_key: dedupKey,
             metadata: {
@@ -121,6 +120,26 @@ Deno.serve(async (req: Request) => {
     return jsonError(500, message);
   }
 });
+
+async function loadAttendanceConfig(admin: ReturnType<typeof createClient>): Promise<{
+  testMode: boolean;
+  isProduction: boolean;
+  totalMinutes: number;
+  preAlertMinutes: number;
+}> {
+  const { data, error } = await admin.rpc("get_attendance_config");
+  if (error || !data) {
+    return { testMode: false, isProduction: false, totalMinutes: 540, preAlertMinutes: 2 };
+  }
+
+  const cfg = data as Record<string, string>;
+  const testMode = cfg["ATTENDANCE_TEST_MODE"] === "true";
+  const isProduction = cfg["SUPABASE_ENV"] === "production";
+  const totalMinutes = parseInt(cfg["ATTENDANCE_TOTAL_MINUTES"] ?? "540", 10);
+  const preAlertMinutes = parseInt(cfg["ATTENDANCE_PRE_ALERT_MINUTES"] ?? "2", 10);
+
+  return { testMode, isProduction, totalMinutes, preAlertMinutes };
+}
 
 function jsonResponse(status: number, data: unknown): Response {
   return new Response(JSON.stringify(data), {

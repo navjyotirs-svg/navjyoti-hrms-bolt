@@ -87,12 +87,14 @@ Deno.serve(async (req: Request) => {
       return jsonError(403, "Employee is not active and cannot record attendance");
     }
 
+    // Read attendance config from vault secrets (stored in database, not Deno.env)
+    const config = await loadAttendanceConfig(admin);
+
     // Check test mode (server environment only)
-    const testMode = Deno.env.get("ATTENDANCE_TEST_MODE") === "true";
-    const isProduction = Deno.env.get("DENO_DEPLOYMENT_ID") !== undefined && !testMode;
-    const totalMinutes = testMode && !isProduction
-      ? parseInt(Deno.env.get("ATTENDANCE_TOTAL_MINUTES") ?? "540", 10)
-      : REQUIRED_TOTAL_MINUTES;
+    // Production is detected via SUPABASE_ENV=production secret.
+    // Test mode is rejected when SUPABASE_ENV is "production" regardless of ATTENDANCE_TEST_MODE.
+    const testMode = config.testMode && !config.isProduction;
+    const totalMinutes = testMode ? config.totalMinutes : REQUIRED_TOTAL_MINUTES;
 
     const body: AttendanceRequest = await req.json();
 
@@ -108,6 +110,26 @@ Deno.serve(async (req: Request) => {
     return jsonError(500, message);
   }
 });
+
+async function loadAttendanceConfig(admin: ReturnType<typeof createClient>): Promise<{
+  testMode: boolean;
+  isProduction: boolean;
+  totalMinutes: number;
+  preAlertMinutes: number;
+}> {
+  const { data, error } = await admin.rpc("get_attendance_config");
+  if (error || !data) {
+    return { testMode: false, isProduction: false, totalMinutes: 540, preAlertMinutes: 2 };
+  }
+
+  const cfg = data as Record<string, string>;
+  const testMode = cfg["ATTENDANCE_TEST_MODE"] === "true";
+  const isProduction = cfg["SUPABASE_ENV"] === "production";
+  const totalMinutes = parseInt(cfg["ATTENDANCE_TOTAL_MINUTES"] ?? "540", 10);
+  const preAlertMinutes = parseInt(cfg["ATTENDANCE_PRE_ALERT_MINUTES"] ?? "2", 10);
+
+  return { testMode, isProduction, totalMinutes, preAlertMinutes };
+}
 
 async function handleCheckIn(
   admin: ReturnType<typeof createClient>,
