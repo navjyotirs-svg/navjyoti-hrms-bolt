@@ -165,7 +165,7 @@ function AppRoutes() {
           <PermissionRoute permissions={['leave.read_self', 'leave.request_self']}><MyLeavePage /></PermissionRoute>
         } />
         <Route path="/team-leave" element={
-          <PermissionRoute permissions={['leave.read_team', 'leave.review_manager']}><TeamLeavePage /></PermissionRoute>
+          <PermissionRoute permissions={['leave.read_team', 'leave.review_manager', 'leave.read_all']}><TeamLeavePage /></PermissionRoute>
         } />
         <Route path="/leave-management" element={
           <PermissionRoute permissions={['leave.read_all', 'leave.approve_hr', 'leave.balance_read_all', 'leave.policy_manage']}><LeaveManagementPage /></PermissionRoute>

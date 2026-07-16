@@ -394,7 +394,7 @@ export const NAV_ITEMS: NavItem[] = [
     id: 'team-leave',
     label: 'Team Leave',
     icon: 'M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-2a4 4 0 10-8 4 4 0 000 8z',
-    permissions: ['leave.read_team', 'leave.review_manager'],
+    permissions: ['leave.read_team', 'leave.review_manager', 'leave.read_all'],
   },
   {
     id: 'leave-management',
