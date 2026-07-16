@@ -22,7 +22,9 @@ export function EmployeeDirectoryPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [resending, setResending] = useState<string | null>(null)
   const [resendMessage, setResendMessage] = useState<string | null>(null)
+  const [activating, setActivating] = useState<string | null>(null)
   const canCreate = permissions.includes('employee.create')
+  const canManageStatus = permissions.includes('employee.status.manage')
 
   useEffect(() => {
     const orgId = profile?.organization_id
@@ -99,6 +101,48 @@ export function EmployeeDirectoryPage() {
     setResending(null)
   }
 
+  async function handleActivate(employeeId: string) {
+    setActivating(employeeId)
+    setResendMessage(null)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) throw new Error('No session')
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-employee`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          action: 'change_status',
+          employee_id: employeeId,
+          new_status: 'active',
+          reason: 'Manually activated by administrator',
+        }),
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        setResendMessage(data.error || 'Failed to activate employee')
+      } else {
+        setResendMessage('Employee activated successfully.')
+        setEmployees((prev) =>
+          prev.map((e) =>
+            e.id === employeeId
+              ? { ...e, employment_status: 'active', is_active: true }
+              : e
+          )
+        )
+      }
+    } catch (err) {
+      setResendMessage(err instanceof Error ? err.message : 'Failed to activate employee')
+    }
+    setActivating(null)
+  }
+
   return (
     <div className="page">
       <div className="page-header">
@@ -158,6 +202,17 @@ export function EmployeeDirectoryPage() {
                           onClick={() => handleResend(e.id, e.work_email ?? '')}
                         >
                           {resending === e.id ? 'Sending…' : 'Resend Invitation'}
+                        </button>
+                      )}
+                      {canManageStatus && e.employment_status === 'invited' && (
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          disabled={activating === e.id}
+                          onClick={() => handleActivate(e.id)}
+                          style={{ marginLeft: canCreate && e.employment_status === 'invited' ? 'var(--space-2)' : 0 }}
+                        >
+                          {activating === e.id ? 'Activating…' : 'Activate'}
                         </button>
                       )}
                     </td>
