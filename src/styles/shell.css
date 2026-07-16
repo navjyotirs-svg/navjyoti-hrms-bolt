@@ -86,6 +86,7 @@
   margin-top: 8px;
   font-size: 11px;
   color: var(--rail-dim);
+  flex-shrink: 0;
 }
 
 .sidebar-foot-label {
@@ -118,6 +119,69 @@
 
 .sidebar-signout:hover {
   background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.sidebar-diagnostics {
+  flex-shrink: 0;
+  padding: 0 12px 4px;
+}
+
+.sidebar-diagnostics-toggle {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--rail-dim);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  width: 100%;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sidebar-diagnostics-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.sidebar-diagnostics-panel {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--rail-dim);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  margin-top: 4px;
+  line-height: 1.6;
+}
+
+.sidebar-diagnostics-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.sidebar-diagnostics-hidden {
+  margin-top: 4px;
+}
+
+.sidebar-diagnostics-hidden-item {
+  padding-left: 8px;
+  word-break: break-word;
+}
+
+.sidebar-diagnostics-reload {
+  margin-top: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--rail-dim);
+  width: 100%;
+}
+
+.sidebar-diagnostics-reload:hover {
+  background: rgba(255, 255, 255, 0.06);
   color: #fff;
 }
 

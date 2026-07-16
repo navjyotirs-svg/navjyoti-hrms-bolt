@@ -9,6 +9,7 @@ export function Sidebar() {
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [reloading, setReloading] = useState(false)
+  const [showDiagnostics, setShowDiagnostics] = useState(false)
 
   const items = navItemsForPermissions(permissions)
 
@@ -78,14 +79,25 @@ export function Sidebar() {
         </nav>
 
         {import.meta.env.DEV && (
-          <DevDiagnostics
-            role={profile?.role}
-            permCount={permissions.length}
-            orgId={profile?.organization_id}
-            hiddenItems={NAV_ITEMS.filter((n) => n.permissions.length > 0 && !n.permissions.some((p) => permissions.includes(p as typeof permissions[number])))}
-            onReload={handleReload}
-            reloading={reloading}
-          />
+          <div className="sidebar-diagnostics">
+            <button
+              type="button"
+              className="sidebar-diagnostics-toggle"
+              onClick={() => setShowDiagnostics(!showDiagnostics)}
+            >
+              {showDiagnostics ? 'Hide' : 'Show'} permission diagnostics
+            </button>
+            {showDiagnostics && (
+              <DevDiagnostics
+                role={profile?.role}
+                permCount={permissions.length}
+                orgId={profile?.organization_id}
+                hiddenItems={NAV_ITEMS.filter((n) => n.permissions.length > 0 && !n.permissions.some((p) => permissions.includes(p as typeof permissions[number])))}
+                onReload={handleReload}
+                reloading={reloading}
+              />
+            )}
+          </div>
         )}
 
         <div className="sidebar-foot">
@@ -110,16 +122,16 @@ function DevDiagnostics({ role, permCount, orgId, hiddenItems, onReload, reloadi
   reloading: boolean
 }) {
   return (
-    <div style={{ padding: '8px 16px', fontSize: '11px', color: 'var(--slate)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
-      <div style={{ fontWeight: 600, marginBottom: '4px' }}>DEV DIAGNOSTICS</div>
+    <div className="sidebar-diagnostics-panel">
+      <div className="sidebar-diagnostics-title">DEV DIAGNOSTICS</div>
       <div>Role: {role ?? 'none'}</div>
       <div>Org: {orgId ? 'set' : 'MISSING'}</div>
       <div>Permissions: {permCount}</div>
       {hiddenItems.length > 0 && (
-        <div style={{ marginTop: '4px' }}>
-          <div style={{ fontWeight: 600 }}>Hidden nav:</div>
+        <div className="sidebar-diagnostics-hidden">
+          <div className="sidebar-diagnostics-title">Hidden nav:</div>
           {hiddenItems.map((h) => (
-            <div key={h.id} style={{ paddingLeft: '8px' }}>
+            <div key={h.id} className="sidebar-diagnostics-hidden-item">
               {h.label} — needs: {h.permissions.join(', ')}
             </div>
           ))}
@@ -129,7 +141,7 @@ function DevDiagnostics({ role, permCount, orgId, hiddenItems, onReload, reloadi
         onClick={onReload}
         disabled={reloading}
         type="button"
-        style={{ marginTop: '6px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: '4px', background: 'transparent' }}
+        className="sidebar-diagnostics-reload"
       >
         {reloading ? 'Reloading…' : 'Reload permissions'}
       </button>

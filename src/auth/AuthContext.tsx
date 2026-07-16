@@ -34,6 +34,10 @@ function devLog(label: string, ...args: unknown[]) {
   if (DEV) console.log(`[AuthContext] ${label}`, ...args)
 }
 
+function logError(label: string, message: string) {
+  console.error(`[AuthContext] ${label}: ${message}`)
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
@@ -45,7 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfileError(null)
     devLog('fetchProfileAndPermissions start, userId:', userId)
 
-    // Step 1: Load user profile
     const { data: profileData, error: profileErr } = await supabase
       .from('user_profiles')
       .select('id, email, full_name, role, organization_id, status, is_active')
@@ -53,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .maybeSingle()
 
     if (profileErr) {
-      devLog('Profile query error:', profileErr.code, profileErr.message)
+      logError('Profile query error', profileErr.message)
       setProfileError(`Failed to load profile: ${profileErr.message}`)
       setProfile(null)
       setPermissions([])
@@ -63,7 +66,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     devLog('Profile loaded:', { role: profileData?.role, org_id: profileData?.organization_id, status: profileData?.status, is_active: profileData?.is_active })
 
     if (!profileData) {
-      devLog('Profile not found')
       setProfileError('User profile not found. Please contact your administrator.')
       setProfile(null)
       setPermissions([])
@@ -73,20 +75,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(profileData as UserProfile)
 
     if (!profileData.organization_id) {
-      devLog('Missing organization_id')
       setProfileError('No organization membership found. Please contact your administrator.')
       setPermissions([])
       return
     }
 
     if (!profileData.is_active) {
-      devLog('User is not active')
       setProfileError('Your account is not active. Please contact your administrator.')
       setPermissions([])
       return
     }
 
-    // Step 2: Verify organization membership
     const { data: membership, error: membershipErr } = await supabase
       .from('user_organization_memberships')
       .select('organization_id, is_active')
@@ -97,26 +96,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     devLog('Membership query:', { data: membership, error: membershipErr?.message })
 
     if (membershipErr || !membership) {
-      devLog('No active membership found')
       setProfileError('No active organization membership found. Please contact your administrator.')
       setPermissions([])
       return
     }
 
     if (!membership.is_active) {
-      devLog('Membership is not active')
       setProfileError('Your organization membership is not active. Please contact your administrator.')
       setPermissions([])
       return
     }
 
-    // Step 3: Load effective permissions via SECURITY DEFINER function
     devLog('Calling get_my_effective_permissions() RPC...')
     const { data: permCodes, error: permErr } = await supabase
       .rpc('get_my_effective_permissions')
 
     if (permErr) {
-      devLog('RPC error:', permErr.code, permErr.message)
+      logError('RPC error', permErr.message)
       setProfileError(`Failed to load permissions: ${permErr.message}`)
       setPermissions([])
       return
@@ -125,7 +121,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     devLog('RPC returned:', { codes: permCodes, count: permCodes?.length ?? 0 })
 
     if (!permCodes || permCodes.length === 0) {
-      devLog('RPC returned zero permissions — configuration error')
       setProfileError('Your account role is active, but no permissions are assigned. Please contact the system administrator.')
       setPermissions([])
       return
@@ -177,7 +172,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       mounted = false
-      devLog('AuthProvider unmounting, unsubscribing auth listener')
       listener.subscription.unsubscribe()
     }
   }, [fetchProfileAndPermissions])
@@ -188,7 +182,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
-    devLog('Sign out — clearing all cached state')
     await supabase.auth.signOut()
     setProfile(null)
     setPermissions([])

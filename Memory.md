@@ -528,3 +528,53 @@ Created `get_my_effective_permissions()` — a SECURITY DEFINER PL/pgSQL functio
 - Browser smoke test not performed in this session (no browser automation available). The dev diagnostics panel and console logs are active for manual verification.
 - The SECURITY DEFINER function bypasses RLS on RBAC tables internally — this is intentional and safe because it only returns permission codes for the authenticated user's own role, not for arbitrary roles.
 - No automated test framework (vitest/jest) — tests are SQL-based and code-review-based
+
+## Phase 1-3 Browser-Readiness Cleanup — completed 2026-07-16
+
+### Runtime verification (confirmed by user)
+- Director permissions: 39 (non-zero, loaded via get_my_effective_permissions RPC)
+- Organization membership: resolved
+- Sidebar navigation: working — all Director items visible
+- Protected pages: opening correctly
+
+### Changes made
+1. `src/auth/AuthContext.tsx` — Removed all `console.log` diagnostic calls from production path. `devLog()` only fires when `import.meta.env.DEV` is true. Added `logError()` for safe error logging that runs in all environments (errors only, no sensitive data). Removed redundant `devLog` call on unmount.
+2. `src/components/Sidebar.tsx` — Diagnostics panel now hidden by default. Added "Show permission diagnostics" toggle button (dev-only, gated by `import.meta.env.DEV`). Reload permissions button only visible when diagnostics panel is expanded. No diagnostics render in production builds.
+3. `src/styles/shell.css` — Added CSS for diagnostics toggle, panel, hidden items, and reload button. Added `flex-shrink: 0` to sidebar footer so it stays fixed at the bottom while the nav section scrolls independently. Added `flex-shrink: 0` to diagnostics container.
+
+### Production build verification
+- `npm run build` (tsc -b && vite build): PASS (111 modules, 488.97 kB JS / 23.90 kB CSS)
+- Grep of dist/ for "DEV DIAGNOSTICS", "Show permission diagnostics", "Reload permissions": zero matches — no diagnostics in production output
+- `import.meta.env.DEV` is statically replaced with `false` by Vite in production, so all dev-only code paths are tree-shaken out
+
+### Auto-reload verification (code review)
+- Login: `onAuthStateChange` fires with new session → `fetchProfileAndPermissions` runs → loading=true until complete → permissions loaded
+- Role/membership changes: `refreshProfile()` calls `fetchProfileAndPermissions` → full reload of profile + permissions
+- Sign-out: `signOut()` calls `supabase.auth.signOut()` (triggers onAuthStateChange with null) AND explicitly sets profile=null, permissions=[], profileError=null
+- No infinite loops: `fetchProfileAndPermissions` is a `useCallback` with stable deps, `onAuthStateChange` subscription is stable
+
+### Sidebar scrolling
+- `.sidebar-nav` has `flex: 1` and `overflow-y: auto` — scrolls independently when content exceeds viewport
+- `.sidebar-foot` and `.sidebar-diagnostics` have `flex-shrink: 0` — stay fixed at bottom
+- Works correctly on smaller laptop screens
+
+### Role-specific issues
+- No Employee or Manager test users exist in the database yet — only the Director user (navjyoti.rs@gmail.com). Employee and Manager navigation cannot be browser-tested until test users are created.
+- Employee role has 11 permissions (self-service attendance, documents, profile)
+- Manager role has permissions for org/branch/department read, team employee read, attendance management, corrections
+- System admin has 3 permissions (org read/manage, audit read) — no HR permissions by default
+
+### Manual UAT checklist
+1. [x] Log in as Director (navjyoti.rs@gmail.com) — permissions load as 39
+2. [ ] Verify sidebar shows: Dashboard, Employees, Organization, Branches, Departments, Roles & Permissions, Reporting Hierarchy, Attendance, Attendance Management, Corrections, Audit Trail, Account Settings
+3. [ ] Open Employees page — directory loads
+4. [ ] Open Organization page — settings load
+5. [ ] Open Attendance Management — management view loads
+6. [ ] Open Audit Trail — audit logs load
+7. [ ] Dashboard shows real metrics (active employees, branches, departments, attendance today)
+8. [ ] Click "Show permission diagnostics" in sidebar — panel expands showing role, org, permission count
+9. [ ] Click "Reload permissions" — permissions refresh
+10. [ ] Sign out — redirects to login, all cached state cleared
+11. [ ] Log back in — permissions reload automatically
+12. [ ] Resize browser to small laptop height — sidebar nav scrolls independently, footer stays visible
+13. [ ] Open production build (npm run build && npm run preview) — no diagnostics panel or toggle visible
