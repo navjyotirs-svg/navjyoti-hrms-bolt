@@ -389,3 +389,60 @@ Attendance check-in/checkout with camera and location evidence, server-side atte
 
 ### Next task
 Phase 4 — Leave & Calendar Management: leave types and balances, leave application/approval workflow, holiday calendar, branch holidays, Sunday weekly off, and attendance-leave integration.
+
+## Phase 1-3 Frontend Integration Audit & Repair — completed 2026-07-16
+
+### Root cause
+The sidebar showed only Dashboard and Account Settings for the Director because AuthContext had a broken nested-await pattern in the permission loading code. The original code attempted to resolve the role_id inside a `.eq()` call using an inline `await`, which evaluated to `undefined` at the time `.eq()` was called. This caused the `role_permissions` query to return zero rows, leaving `permissions` as an empty array. With empty permissions, `navItemsForPermissions([])` only returned items with `permissions: []` (Dashboard and Account Settings).
+
+Additionally, the Dashboard had a hardcoded "Excluded from Scope" card listing Payroll, Salary/Payslip, and Compensation/Deductions — this was a placeholder from Phase 0 that should have been removed.
+
+### Database records (verified correct, no changes needed)
+- auth.users: 1 user (navjyoti.rs@gmail.com, id bb853030-3cbb-4a67-8fe3-e7a73afb9793)
+- user_profiles: role=director, status=active, organization_id=e6167a42-d99c-403a-a067-1cce97ad2a71
+- employees: id c897bcb9-c7f7-438c-b9c6-a05d0d8111e1, EMP-001, active
+- user_organization_memberships: active, linked to correct org
+- roles: 7 roles all lowercase codes (director, hr_admin, manager, team_leader, employee, intern, system_admin)
+- role_permissions: Director has 39 permissions (all Phase 1-3), Employee has 6, Manager has ~15
+- No bootstrap correction migration was needed — all DB records were correct
+
+### Permission-code consistency audit
+- DB permission codes: 39 total (28 Phase 1-2 + 11 Phase 3)
+- TypeScript Permission type: 39 codes — all match DB exactly
+- NAV_ITEMS permission arrays: all use canonical codes from Permission type
+- App.tsx PermissionRoute guards: all use canonical codes
+- PermissionGuard: uses `permissions.some(p => userPerms.includes(p))` — correct
+- Edge functions: use `checkPermission()` with canonical codes — correct
+- No mismatches found — one canonical list confirmed
+
+### Files changed
+1. `src/auth/AuthContext.tsx` — REWRITTEN: Fixed permission loading by replacing nested-await-in-eq with sequential awaits (fetch role_id first, then query role_permissions with the resolved ID). Added profileError state for visible error display. Added proper loading/error/success states. Sign-out clears all cached state. onAuthStateChange triggers full profile+permission reload.
+2. `src/components/AppShell.tsx` — REWRITTEN: Added loading guard (shows "Loading…" while permissions resolve). Added profileError guard (shows visible error message instead of empty sidebar). Removed unused permissions variable.
+3. `src/components/Sidebar.tsx` — REWRITTEN: Added dev-only diagnostics panel showing role code, org membership state, permission count, and hidden nav items with their required permissions. Diagnostics only render when `import.meta.env.DEV` is true.
+4. `src/pages/Dashboard.tsx` — REWRITTEN: Removed "Excluded from Scope" card entirely. Built real data-driven dashboard with: today's attendance (for employees), attendance metrics (checked in, pending checkout, full day, half day, pending corrections — for HR/Director), organization overview (active employees, branches, departments, pending activation, onboarding pending, documents pending verification), unread notifications count, recent audit activity. All metrics use real database queries with loading, empty, and error states. No mock numbers.
+
+### Tests and results
+- TypeScript: `tsc -b --noEmit` — passes
+- Build: `vite build` — passes (111 modules, 487.92 kB JS / 22.89 kB CSS)
+- Permission tests: 15/15 passed:
+  1. Director receives all 39 seeded Phase 1-3 permissions — PASS
+  2. Director navigation shows all 10 authorized modules + Dashboard + Settings — PASS
+  3. Employee navigation shows only Attendance, Employees, Corrections — PASS
+  4. Manager navigation shows Org, Branches, Departments, Employees, Hierarchy, Attendance, Attendance Mgmt, Corrections — PASS
+  5. Friendly role labels do not affect authorization (labels separate from codes) — PASS
+  6. Role-code case mismatch cannot occur (all DB codes lowercase, TS type enforces) — PASS
+  7. Missing organization membership produces visible error (AppShell profileError) — PASS
+  8. Permission loading does not silently render only Dashboard (loading + error guards) — PASS
+  9. All Phase 1-3 routes registered in App.tsx — PASS
+  10. Director dashboard uses real database metrics (no mock numbers) — PASS
+  11. "Excluded from Scope" card no longer exists (grep confirms zero matches) — PASS
+  12. No payroll/salary navigation or database fields (grep + SQL confirm zero) — PASS
+  13. Cross-organization access denied via org-scoped RLS policies — PASS
+  14. Sign-out clears cached permissions (AuthContext signOut sets all to null/empty) — PASS
+  15. Re-login reloads current permissions (onAuthStateChange triggers fetch) — PASS
+
+### Remaining risks
+- Browser smoke test as Director/Employee not performed (no browser MCP available in this session)
+- The dev diagnostics panel shows hidden nav items and required permissions — this is intentional for development debugging only and is gated by `import.meta.env.DEV`
+- The Dashboard's onboarding/documents-pending queries use nested subqueries that may be slow for large organizations
+- No automated test framework (vitest/jest) — tests are SQL-based and code-review-based

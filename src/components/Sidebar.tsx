@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
-import { navItemsForPermissions, ROLE_LABELS } from '@/types/roles'
+import { navItemsForPermissions, NAV_ITEMS, ROLE_LABELS } from '@/types/roles'
 import '@/styles/shell.css'
 
 export function Sidebar() {
@@ -70,6 +70,15 @@ export function Sidebar() {
           ))}
         </nav>
 
+        {import.meta.env.DEV && (
+          <DevDiagnostics
+            role={profile?.role}
+            permCount={permissions.length}
+            orgId={profile?.organization_id}
+            hiddenItems={NAV_ITEMS.filter((n) => n.permissions.length > 0 && !n.permissions.some((p) => permissions.includes(p as typeof permissions[number])))}
+          />
+        )}
+
         <div className="sidebar-foot">
           <p className="sidebar-foot-label">Signed in as</p>
           <p className="sidebar-foot-name">{profile?.full_name ?? profile?.email}</p>
@@ -80,5 +89,31 @@ export function Sidebar() {
         </div>
       </aside>
     </>
+  )
+}
+
+function DevDiagnostics({ role, permCount, orgId, hiddenItems }: {
+  role: string | null | undefined
+  permCount: number
+  orgId: string | null | undefined
+  hiddenItems: { id: string; label: string; permissions: string[] }[]
+}) {
+  return (
+    <div style={{ padding: '8px 16px', fontSize: '11px', color: 'var(--slate)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ fontWeight: 600, marginBottom: '4px' }}>DEV DIAGNOSTICS</div>
+      <div>Role: {role ?? 'none'}</div>
+      <div>Org: {orgId ? 'set' : 'MISSING'}</div>
+      <div>Permissions: {permCount}</div>
+      {hiddenItems.length > 0 && (
+        <div style={{ marginTop: '4px' }}>
+          <div style={{ fontWeight: 600 }}>Hidden nav:</div>
+          {hiddenItems.map((h) => (
+            <div key={h.id} style={{ paddingLeft: '8px' }}>
+              {h.label} — needs: {h.permissions.join(', ')}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

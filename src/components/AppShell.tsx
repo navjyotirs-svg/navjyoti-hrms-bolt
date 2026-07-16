@@ -32,7 +32,7 @@ const SOUND_PREF_KEY = 'navjyoti_notif_sound_enabled'
 
 export function AppShell() {
   const location = useLocation()
-  const { profile } = useAuth()
+  const { profile, loading, profileError } = useAuth()
   const title = getPageTitle(location.pathname)
   const [soundEnabled, setSoundEnabled] = useState(false)
 
@@ -48,6 +48,25 @@ export function AppShell() {
       return next
     })
   }, [])
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <p style={{ color: 'var(--slate)', fontSize: '14px' }}>Loading…</p>
+      </div>
+    )
+  }
+
+  if (profileError) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '24px' }}>
+        <div style={{ maxWidth: '400px', textAlign: 'center' }}>
+          <p style={{ fontSize: '16px', fontWeight: 600, color: 'var(--ink-text)', marginBottom: '8px' }}>Profile Error</p>
+          <p style={{ fontSize: '13px', color: 'var(--slate)', lineHeight: 1.5 }}>{profileError}</p>
+        </div>
+      </div>
+    )
+  }
 
   if (profile?.status === 'pending_activation') {
     return <PendingActivationPage />
