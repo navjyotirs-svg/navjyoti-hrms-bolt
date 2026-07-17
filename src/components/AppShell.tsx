@@ -20,11 +20,19 @@ const PAGE_TITLES: Record<string, string> = {
   '/attendance-management': 'Attendance Management',
   '/attendance-corrections': 'Corrections',
   '/settings': 'Account Settings',
+  '/my-tasks': 'My Tasks',
+  '/tasks/create': 'Assign Task',
+  '/team-tasks': 'Team Tasks',
+  '/task-review': 'Task Review',
+  '/my-tickets': 'My Tickets',
+  '/ticket-management': 'Ticket Management',
 }
 
 function getPageTitle(pathname: string): string {
   if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname]
   if (pathname.startsWith('/employees/')) return 'Employee Profile'
+  if (pathname.startsWith('/tasks/') && pathname !== '/tasks/create') return 'Task Details'
+  if (pathname.startsWith('/tickets/')) return 'Ticket Details'
   return 'Dashboard'
 }
 

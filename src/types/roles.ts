@@ -68,6 +68,37 @@ export type Permission =
   | 'calendar.event_delete'
   | 'calendar.holiday_manage'
   | 'calendar.branch_manage'
+  | 'task.create'
+  | 'task.assign'
+  | 'task.read_self'
+  | 'task.read_team'
+  | 'task.read_all'
+  | 'task.accept_self'
+  | 'task.request_change_self'
+  | 'task.progress_update_self'
+  | 'task.submit_self'
+  | 'task.review'
+  | 'task.reassign'
+  | 'task.change_deadline'
+  | 'task.cancel'
+  | 'task.comment'
+  | 'task.attachment_upload'
+  | 'task.attachment_read'
+  | 'task.report_read'
+  | 'ticket.create_self'
+  | 'ticket.read_self'
+  | 'ticket.read_team'
+  | 'ticket.read_all'
+  | 'ticket.assign'
+  | 'ticket.update'
+  | 'ticket.resolve'
+  | 'ticket.close'
+  | 'ticket.reopen'
+  | 'ticket.escalate'
+  | 'ticket.comment'
+  | 'ticket.attachment_upload'
+  | 'ticket.attachment_read'
+  | 'ticket.report_read'
 
 export type AttendanceStatus = 'PENDING_CHECKOUT' | 'FULL_DAY' | 'HALF_DAY'
 
@@ -143,6 +174,203 @@ export const CALENDAR_EVENT_LABELS: Record<CalendarEventType, string> = {
   ANNOUNCEMENT: 'Announcement',
   OTHER: 'Other',
 }
+
+// ============================================================
+// Phase 5 — Task and Ticket Types
+// ============================================================
+
+export type TaskStatus =
+  | 'DRAFT'
+  | 'ASSIGNED'
+  | 'ACCEPTANCE_PENDING'
+  | 'REVISION_REQUESTED'
+  | 'REASSIGNMENT_REQUESTED'
+  | 'ACCEPTED'
+  | 'IN_PROGRESS'
+  | 'ON_HOLD'
+  | 'SUBMITTED'
+  | 'REVIEW_REQUIRED'
+  | 'REVISION_REQUIRED'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'REJECTED'
+
+export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  DRAFT: 'Draft',
+  ASSIGNED: 'Assigned',
+  ACCEPTANCE_PENDING: 'Acceptance Pending',
+  REVISION_REQUESTED: 'Revision Requested',
+  REASSIGNMENT_REQUESTED: 'Reassignment Requested',
+  ACCEPTED: 'Accepted',
+  IN_PROGRESS: 'In Progress',
+  ON_HOLD: 'On Hold',
+  SUBMITTED: 'Submitted',
+  REVIEW_REQUIRED: 'Review Required',
+  REVISION_REQUIRED: 'Revision Required',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+  REJECTED: 'Rejected',
+}
+
+export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+
+export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
+  LOW: 'Low',
+  MEDIUM: 'Medium',
+  HIGH: 'High',
+  CRITICAL: 'Critical',
+}
+
+export type TaskType = 'GENERAL' | 'PROJECT' | 'COMPLIANCE' | 'FIELD_ACTIVITY' | 'REPORTING' | 'TRAINING' | 'ADMINISTRATIVE' | 'OTHER'
+
+export const TASK_TYPE_LABELS: Record<TaskType, string> = {
+  GENERAL: 'General',
+  PROJECT: 'Project',
+  COMPLIANCE: 'Compliance',
+  FIELD_ACTIVITY: 'Field Activity',
+  REPORTING: 'Reporting',
+  TRAINING: 'Training',
+  ADMINISTRATIVE: 'Administrative',
+  OTHER: 'Other',
+}
+
+export type CompletionOutcome = 'EARLY' | 'ON_TIME' | 'DELAYED'
+
+export const COMPLETION_OUTCOME_LABELS: Record<CompletionOutcome, string> = {
+  EARLY: 'Early',
+  ON_TIME: 'On Time',
+  DELAYED: 'Delayed',
+}
+
+export type AssignmentType = 'PRIMARY' | 'COLLABORATOR' | 'REVIEWER' | 'OBSERVER'
+
+export const ASSIGNMENT_TYPE_LABELS: Record<AssignmentType, string> = {
+  PRIMARY: 'Primary',
+  COLLABORATOR: 'Collaborator',
+  REVIEWER: 'Reviewer',
+  OBSERVER: 'Observer',
+}
+
+export type TaskRequestType =
+  | 'CLARIFICATION'
+  | 'REVISION'
+  | 'REASSIGNMENT'
+  | 'REJECTION'
+  | 'DEADLINE_EXTENSION'
+  | 'TARGET_CORRECTION'
+  | 'SUPPORT_REQUEST'
+
+export const TASK_REQUEST_TYPE_LABELS: Record<TaskRequestType, string> = {
+  CLARIFICATION: 'Clarification',
+  REVISION: 'Revision',
+  REASSIGNMENT: 'Reassignment',
+  REJECTION: 'Rejection',
+  DEADLINE_EXTENSION: 'Deadline Extension',
+  TARGET_CORRECTION: 'Target Correction',
+  SUPPORT_REQUEST: 'Support Request',
+}
+
+export type TaskRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'RETURNED_FOR_DETAILS' | 'CANCELLED'
+
+export const TASK_REQUEST_STATUS_LABELS: Record<TaskRequestStatus, string> = {
+  PENDING: 'Pending',
+  APPROVED: 'Approved',
+  REJECTED: 'Rejected',
+  RETURNED_FOR_DETAILS: 'Returned for Details',
+  CANCELLED: 'Cancelled',
+}
+
+export type SubmissionReviewStatus = 'PENDING_REVIEW' | 'APPROVED' | 'REVISION_REQUIRED' | 'REJECTED'
+
+export const SUBMISSION_REVIEW_LABELS: Record<SubmissionReviewStatus, string> = {
+  PENDING_REVIEW: 'Pending Review',
+  APPROVED: 'Approved',
+  REVISION_REQUIRED: 'Revision Required',
+  REJECTED: 'Rejected',
+}
+
+export type AttachmentCategory = 'ASSIGNMENT_REFERENCE' | 'PROGRESS_EVIDENCE' | 'SUBMISSION_EVIDENCE' | 'REVIEW_EVIDENCE' | 'OTHER'
+
+export const ATTACHMENT_CATEGORY_LABELS: Record<AttachmentCategory, string> = {
+  ASSIGNMENT_REFERENCE: 'Assignment Reference',
+  PROGRESS_EVIDENCE: 'Progress Evidence',
+  SUBMISSION_EVIDENCE: 'Submission Evidence',
+  REVIEW_EVIDENCE: 'Review Evidence',
+  OTHER: 'Other',
+}
+
+export type DependencyType = 'BLOCKS_START' | 'BLOCKS_COMPLETION' | 'INFORMATIONAL'
+
+export const DEPENDENCY_TYPE_LABELS: Record<DependencyType, string> = {
+  BLOCKS_START: 'Blocks Start',
+  BLOCKS_COMPLETION: 'Blocks Completion',
+  INFORMATIONAL: 'Informational',
+}
+
+// Ticket types
+
+export type TicketCategory =
+  | 'TASK_REASSIGNMENT'
+  | 'UNREALISTIC_DEADLINE'
+  | 'TARGET_CORRECTION'
+  | 'TECHNICAL_ISSUE'
+  | 'ACCESS_REQUEST'
+  | 'RESOURCE_REQUEST'
+  | 'ATTENDANCE_CORRECTION'
+  | 'LEAVE_ISSUE'
+  | 'HR_GRIEVANCE'
+  | 'OTHER'
+
+export const TICKET_CATEGORY_LABELS: Record<TicketCategory, string> = {
+  TASK_REASSIGNMENT: 'Task Reassignment',
+  UNREALISTIC_DEADLINE: 'Unrealistic Deadline',
+  TARGET_CORRECTION: 'Target Correction',
+  TECHNICAL_ISSUE: 'Technical Issue',
+  ACCESS_REQUEST: 'Access Request',
+  RESOURCE_REQUEST: 'Resource Request',
+  ATTENDANCE_CORRECTION: 'Attendance Correction',
+  LEAVE_ISSUE: 'Leave Issue',
+  HR_GRIEVANCE: 'HR Grievance',
+  OTHER: 'Other',
+}
+
+export type TicketStatus =
+  | 'OPEN'
+  | 'ASSIGNED'
+  | 'IN_PROGRESS'
+  | 'WAITING_FOR_EMPLOYEE'
+  | 'WAITING_FOR_MANAGEMENT'
+  | 'RESOLVED'
+  | 'CLOSED'
+  | 'REOPENED'
+  | 'ESCALATED'
+  | 'CANCELLED'
+
+export const TICKET_STATUS_LABELS: Record<TicketStatus, string> = {
+  OPEN: 'Open',
+  ASSIGNED: 'Assigned',
+  IN_PROGRESS: 'In Progress',
+  WAITING_FOR_EMPLOYEE: 'Waiting for Employee',
+  WAITING_FOR_MANAGEMENT: 'Waiting for Management',
+  RESOLVED: 'Resolved',
+  CLOSED: 'Closed',
+  REOPENED: 'Reopened',
+  ESCALATED: 'Escalated',
+  CANCELLED: 'Cancelled',
+}
+
+export const TASK_TICKET_APPROVED_MIME_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+]
+
+export const TASK_TICKET_APPROVED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.docx', '.xlsx', '.csv']
+export const TASK_TICKET_MAX_FILE_BYTES = 10 * 1024 * 1024
 
 export const LEAVE_APPROVED_MIME_TYPES = [
   'application/pdf',
@@ -308,6 +536,37 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'calendar.event_delete': 'Delete Calendar Events',
   'calendar.holiday_manage': 'Manage Holidays',
   'calendar.branch_manage': 'Manage Branch Calendars',
+  'task.create': 'Create Task',
+  'task.assign': 'Assign Task',
+  'task.read_self': 'Read Own Tasks',
+  'task.read_team': 'Read Team Tasks',
+  'task.read_all': 'Read All Tasks',
+  'task.accept_self': 'Accept Task',
+  'task.request_change_self': 'Request Task Change',
+  'task.progress_update_self': 'Update Progress',
+  'task.submit_self': 'Submit Task',
+  'task.review': 'Review Task',
+  'task.reassign': 'Reassign Task',
+  'task.change_deadline': 'Change Deadline',
+  'task.cancel': 'Cancel Task',
+  'task.comment': 'Comment on Task',
+  'task.attachment_upload': 'Upload Task Attachment',
+  'task.attachment_read': 'Read Task Attachment',
+  'task.report_read': 'Read Task Reports',
+  'ticket.create_self': 'Raise Ticket',
+  'ticket.read_self': 'Read Own Tickets',
+  'ticket.read_team': 'Read Team Tickets',
+  'ticket.read_all': 'Read All Tickets',
+  'ticket.assign': 'Assign Ticket',
+  'ticket.update': 'Update Ticket',
+  'ticket.resolve': 'Resolve Ticket',
+  'ticket.close': 'Close Ticket',
+  'ticket.reopen': 'Reopen Ticket',
+  'ticket.escalate': 'Escalate Ticket',
+  'ticket.comment': 'Comment on Ticket',
+  'ticket.attachment_upload': 'Upload Ticket Attachment',
+  'ticket.attachment_read': 'Read Ticket Attachment',
+  'ticket.report_read': 'Read Ticket Reports',
 }
 
 export type NavItem = {
@@ -413,6 +672,42 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Holiday Management',
     icon: 'M5 3v4M3 5h4M6 21v-4M4 19h4M13 3l4 4M17 3l-4 4M13 21l4-4M17 21l-4-4',
     permissions: ['calendar.holiday_manage'],
+  },
+  {
+    id: 'my-tasks',
+    label: 'My Tasks',
+    icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
+    permissions: ['task.read_self', 'task.read_team', 'task.read_all'],
+  },
+  {
+    id: 'create-task',
+    label: 'Assign Task',
+    icon: 'M12 4v16m8-8H4',
+    permissions: ['task.create', 'task.assign'],
+  },
+  {
+    id: 'team-tasks',
+    label: 'Team Tasks',
+    icon: 'M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-2a4 4 0 10-8 4 4 0 000 8z',
+    permissions: ['task.read_team', 'task.read_all', 'task.review'],
+  },
+  {
+    id: 'task-review',
+    label: 'Task Review',
+    icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+    permissions: ['task.review', 'task.read_all'],
+  },
+  {
+    id: 'my-tickets',
+    label: 'My Tickets',
+    icon: 'M15 5h2a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V7a2 2 0 012-2h2m4 0a2 2 0 01-2 2h-2a2 2 0 01-2-2m4 0V3a2 2 0 00-2-2h-4a2 2 0 00-2 2v2',
+    permissions: ['ticket.create_self', 'ticket.read_self', 'ticket.read_team', 'ticket.read_all'],
+  },
+  {
+    id: 'ticket-management',
+    label: 'Ticket Management',
+    icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+    permissions: ['ticket.read_all', 'ticket.assign', 'ticket.escalate', 'ticket.resolve', 'ticket.close'],
   },
   {
     id: 'settings',

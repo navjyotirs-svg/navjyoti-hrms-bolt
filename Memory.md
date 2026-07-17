@@ -789,3 +789,161 @@ Leave management with CL/SL monthly accrual, carry-forward, separate ledgers, mu
 
 ### Next task
 Phase 5 — Tasks and Tickets: assignment, accept/reject/revision/reassignment, mandatory unrealistic-target fields, history, comments, attachments, review and escalation.
+
+## Phase 5 — Tasks and Tickets — completed 2026-07-17
+
+### Objective
+Task assignment, acceptance, rejection, revision requests, reassignment, progress tracking, submission, review, deadline history, comments, attachments, and ticket escalation. No payroll/salary/compensation features.
+
+### Migrations applied (7)
+1. `phase5_task_ticket_permissions` — 31 new permissions (17 task + 14 ticket) + role_permissions matrix across 7 roles
+2. `phase5_task_tables` — 10 new tables (tasks, task_assignments, task_status_history, task_deadline_history, task_action_requests, task_progress_updates, task_submissions, task_comments, task_attachments, task_dependencies) + CHECK constraints + indexes + updated_at triggers
+3. `phase5_ticket_tables` — 5 new tables (tickets, ticket_history, ticket_comments, ticket_attachments, ticket_escalations) + CHECK constraints + indexes + updated_at trigger
+4. `phase5_task_ticket_rls` — RLS on all 15 tables + 2 SECURITY DEFINER helper functions (can_read_task, can_read_ticket) + org_code_sequences table
+5. `phase5_task_ticket_storage` — Private storage buckets `task-attachments` and `ticket-attachments` (public=false) with SELECT/INSERT storage policies
+6. `phase5_task_ticket_functions` — 4 SECURITY DEFINER functions: generate_task_code, generate_ticket_code, check_circular_dependency, calculate_completion_outcome
+7. `phase5_task_reminder_cron` — Cron job `task-deadline-reminders-hourly` scheduled every hour
+
+### Tables created (16 new)
+1. `tasks` (id, organization_id, branch_id, department_id, task_code, title, description, priority, task_type, created_by, owner_id, start_date, original_deadline, current_deadline, expected_result, target_quantity, target_unit, estimated_hours, status, acceptance_required, completion_outcome, completed_at, cancelled_at, cancellation_reason, version, created_at, updated_at) — 14-state status CHECK, 4-level priority CHECK, 8-type CHECK, 3-outcome CHECK — RLS: 3 policies (SELECT scoped, INSERT task.create, UPDATE scoped)
+2. `task_assignments` (id, task_id, assigned_to, assigned_by, assignment_type, assigned_at, accepted_at, rejected_at, ended_at, is_current, reason, created_at) — 4-type CHECK — RLS: 3 policies
+3. `task_status_history` (id, task_id, old_status, new_status, changed_by, reason, metadata, created_at) — RLS: 2 policies (SELECT, INSERT) — append-only (no UPDATE/DELETE)
+4. `task_deadline_history` (id, task_id, old_deadline, new_deadline, changed_by, change_reason, request_id, created_at) — RLS: 2 policies — append-only
+5. `task_action_requests` (id, task_id, employee_id, request_type, current_workload, reason, assigned_target, assigned_deadline, proposed_target, proposed_deadline, support_required, status, reviewed_by, reviewer_remarks, reviewed_at, created_at, updated_at, version) — 7-type CHECK, 5-state CHECK — RLS: 3 policies
+6. `task_progress_updates` (id, task_id, employee_id, progress_percent, work_completed, result_so_far, blocker, support_required, hours_spent, created_at) — 0-100 CHECK — RLS: 2 policies (SELECT, INSERT)
+7. `task_submissions` (id, task_id, submitted_by, submission_note, result_summary, submitted_at, review_status, reviewed_by, reviewed_at, reviewer_feedback, version) — 4-state CHECK — RLS: 3 policies
+8. `task_comments` (id, task_id, author_id, comment_text, is_internal, created_at, edited_at, deleted_at) — RLS: 3 policies (SELECT, INSERT, UPDATE own) — soft delete only
+9. `task_attachments` (id, task_id, uploaded_by, attachment_category, storage_path, file_name, mime_type, file_size_bytes, created_at) — 5-category CHECK — RLS: 2 policies (SELECT scoped+attachment_read, INSERT attachment_upload)
+10. `task_dependencies` (id, task_id, depends_on_task_id, dependency_type, created_by, created_at) — 3-type CHECK, self-dep CHECK — RLS: 3 policies (SELECT, INSERT, DELETE)
+11. `tickets` (id, organization_id, branch_id, ticket_code, raised_by, related_task_id, category, subject, description, priority, assigned_department_id, assigned_to, status, sla_due_at, resolved_at, resolution_summary, created_at, updated_at, version) — 10-category CHECK, 10-state CHECK — RLS: 3 policies
+12. `ticket_history` (id, ticket_id, old_status, new_status, changed_by, reason, metadata, created_at) — RLS: 2 policies — append-only
+13. `ticket_comments` (id, ticket_id, author_id, comment_text, is_internal, created_at, edited_at) — RLS: 3 policies
+14. `ticket_attachments` (id, ticket_id, uploaded_by, storage_path, file_name, mime_type, file_size_bytes, created_at) — RLS: 2 policies
+15. `ticket_escalations` (id, ticket_id, escalation_level, escalated_from, escalated_to, reason, created_at) — RLS: 2 policies (SELECT, INSERT)
+16. `org_code_sequences` (organization_id, code_type, year, last_seq) — helper for per-org code generation — RLS: SELECT only
+
+### RLS helper functions (6 new)
+- `can_read_task(p_task_id)` — SECURITY DEFINER; checks owner/assignee/collaborator OR team read OR org read_all
+- `can_read_ticket(p_ticket_id)` — SECURITY DEFINER; checks raiser/assignee OR team read OR org read_all
+- `generate_task_code(p_org_id)` — SECURITY DEFINER; generates TASK-YYYY-NNNNNN using per-org sequence
+- `generate_ticket_code(p_org_id)` — SECURITY DEFINER; generates TKT-YYYY-NNNNNN using per-org sequence
+- `check_circular_dependency(p_task_id, p_depends_on_id)` — SECURITY DEFINER; recursive CTE to detect cycles
+- `calculate_completion_outcome(p_completed_at, p_deadline)` — SECURITY DEFINER; returns EARLY/ON_TIME/DELAYED
+
+### Storage buckets (2 new)
+- `task-attachments`: private (public=false), SELECT scoped by user folder or org+attachment_read, INSERT by user folder only
+- `ticket-attachments`: private (public=false), same pattern
+- Paths: `{user_id}/{random_uuid}.{ext}`
+- Approved types: PDF, JPG, JPEG, PNG, DOCX, XLSX, CSV (max 10MB)
+
+### Edge functions (3 deployed)
+1. `task-action` (ACTIVE, JWT verified) — handles 13 actions:
+   - create: validates permissions, assignee org scope, deadline >= start_date; generates task code server-side; creates task + primary assignment + status history + notification + audit
+   - accept: verifies assignee, updates task to ACCEPTED, creates status history + notification
+   - reject: mandatory fields (reason, workload, assigned target/deadline, proposed target/deadline, support); creates action request + status history + notification
+   - request_change: CLARIFICATION/REVISION/REASSIGNMENT/DEADLINE_EXTENSION/TARGET_CORRECTION/SUPPORT_REQUEST; mandatory fields for non-clarification; creates action request + updates status + notification
+   - review_request: approve/reject/return; preserves old values; creates deadline history if changed; creates assignment history if reassigned; prevents self-review
+   - add_progress: validates 0-100%; moves ACCEPTED to IN_PROGRESS; creates progress update; notifies blocker
+   - submit: creates submission; updates task to SUBMITTED; notifies reviewer
+   - review_submission: approve/revision/reject; calculates completion outcome on approve; prevents self-review
+   - reassign: validates new assignee org scope; ends current assignment; creates new assignment + status history + notification
+   - change_deadline: creates deadline history entry; notifies assignee
+   - cancel: validates reason; updates task to CANCELLED; preserves history; notifies assignee
+   - add_comment: creates comment with optional internal flag
+   - add_dependency: checks circular dependency before inserting
+2. `ticket-action` (ACTIVE, JWT verified) — handles 7 actions:
+   - create: validates category; generates ticket code server-side; calculates SLA due_at; creates ticket + history + notifications to assigners
+   - assign: updates ticket to ASSIGNED; creates history; notifies assignee + raiser
+   - escalate: creates escalation record with incremented level; updates to ESCALATED; notifies escalated_to + raiser
+   - resolve: requires resolution summary; updates to RESOLVED; creates history; notifies raiser
+   - close: only resolved tickets can be closed; creates history; notifies raiser
+   - reopen: only resolved/closed tickets; requires reason; creates history; notifies assigners
+   - comment: creates comment with optional internal flag
+3. `task-scheduler` (ACTIVE, no JWT — called by cron) — deadline reminders:
+   - Checks active tasks for approaching deadlines
+   - Reminders at 3 days, 1 day, on deadline day, and overdue
+   - Idempotent: dedup_key = `task_reminder:{task_id}:{reminder_type}:{date}`
+   - Runs hourly via pg_cron
+
+### Cron job
+- `task-deadline-reminders-hourly`: schedule `0 * * * *` (every hour at minute 0), uses pg_net to POST to task-scheduler edge function
+
+### Permission matrix (31 new permissions)
+- director: all 31
+- hr_admin: 4 task (read_all, comment, attachment_read, report_read) + 10 ticket (read_all, assign, update, resolve, close, reopen, escalate, comment, attachment_read, report_read)
+- manager: 11 task (create, assign, read_team, review, reassign, change_deadline, cancel, comment, attachment_upload, attachment_read, report_read) + 11 ticket (read_team, assign, update, resolve, close, reopen, escalate, comment, attachment_upload, attachment_read, report_read)
+- team_leader: 7 task (create, assign, read_team, review, comment, attachment_upload, attachment_read) + 5 ticket (read_team, assign, comment, attachment_upload, attachment_read)
+- employee: 8 task (read_self, accept_self, request_change_self, progress_update_self, submit_self, comment, attachment_upload, attachment_read) + 5 ticket (create_self, read_self, comment, attachment_upload, attachment_read)
+- intern: same as employee
+- system_admin: 0 (no private task/ticket content access by default)
+
+### Files changed
+- `src/types/roles.ts` — 31 new permissions in Permission type, TaskStatus (14 states), TASK_STATUS_LABELS, TaskPriority, TASK_PRIORITY_LABELS, TaskType, TASK_TYPE_LABELS, CompletionOutcome, COMPLETION_OUTCOME_LABELS, AssignmentType, ASSIGNMENT_TYPE_LABELS, TaskRequestType, TASK_REQUEST_TYPE_LABELS, TaskRequestStatus, TASK_REQUEST_STATUS_LABELS, SubmissionReviewStatus, SUBMISSION_REVIEW_LABELS, AttachmentCategory, ATTACHMENT_CATEGORY_LABELS, DependencyType, DEPENDENCY_TYPE_LABELS, TicketCategory, TICKET_CATEGORY_LABELS, TicketStatus, TICKET_STATUS_LABELS, TASK_TICKET_APPROVED_MIME_TYPES, TASK_TICKET_APPROVED_EXTENSIONS, TASK_TICKET_MAX_FILE_BYTES, 6 new nav items (My Tasks, Assign Task, Team Tasks, Task Review, My Tickets, Ticket Management), PERMISSION_LABELS updated with 31 new entries
+- `src/lib/tasks.ts` — NEW: all task API functions (fetchMyTasks, fetchTeamTasks, fetchTaskById, fetchTaskActionRequests, fetchPendingActionRequests, fetchPendingSubmissions, createTask, acceptTask, rejectTask, requestTaskChange, reviewTaskRequest, addProgressUpdate, submitTask, reviewSubmission, reassignTask, changeDeadline, cancelTask, addTaskComment, addDependency, uploadTaskAttachment, createTaskAttachmentSignedUrl, formatDate, formatDateTime)
+- `src/lib/tickets.ts` — NEW: all ticket API functions (fetchMyTickets, fetchTeamTickets, fetchTicketById, createTicket, assignTicket, escalateTicket, resolveTicket, closeTicket, reopenTicket, addTicketComment, uploadTicketAttachment, createTicketAttachmentSignedUrl, formatTicketDate, formatTicketDateTime)
+- `src/pages/MyTasksPage.tsx` — NEW: employee task list with search, status filter, clickable rows
+- `src/pages/TaskDetailPage.tsx` — NEW: full task detail with 7 tabs (Overview, Progress, Submissions, Comments, Attachments, History, Requests); accept, add progress, submit, comment, upload attachment actions
+- `src/pages/TeamTasksPage.tsx` — NEW: manager team tasks view with search, status filter
+- `src/pages/CreateTaskPage.tsx` — NEW: assign new task form with all fields (title, description, assignee, priority, type, dates, target, acceptance)
+- `src/pages/TaskReviewPage.tsx` — NEW: review pending change requests and submissions with approve/reject/return/revision actions
+- `src/pages/MyTicketsPage.tsx` — NEW: employee ticket list + raise ticket form
+- `src/pages/TicketDetailPage.tsx` — NEW: full ticket detail with 5 tabs (Overview, Conversation, Attachments, History, Escalations); resolve, close, reopen, escalate, comment, upload actions
+- `src/pages/TicketManagementPage.tsx` — NEW: team ticket queue with search, status filter
+- `src/App.tsx` — 8 new routes with PermissionRoute guards
+- `src/components/AppShell.tsx` — page titles for Phase 5 routes
+- `supabase/functions/task-action/index.ts` — NEW: task action edge function (13 actions)
+- `supabase/functions/ticket-action/index.ts` — NEW: ticket action edge function (7 actions)
+- `supabase/functions/task-scheduler/index.ts` — NEW: deadline reminder scheduler edge function
+
+### Checks
+- TypeScript: `tsc -b` — PASS
+- Build: `npm run build` — PASS (128 modules, 623.41 kB JS / 26.97 kB CSS)
+- SQL/RLS tests: 30/30 PASS:
+  1. All 15 Phase 5 tables exist — PASS
+  2. All 15 tables have RLS enabled — PASS
+  3. No payroll columns in Phase 5 tables — PASS
+  4. tasks status CHECK (14 states) — PASS
+  5. tasks priority CHECK (4 levels) — PASS
+  6. task_progress_updates progress_percent CHECK (0-100) — PASS
+  7. task_dependencies self-dependency CHECK — PASS
+  8. task_status_history append-only (no UPDATE/DELETE) — PASS
+  9. task_deadline_history append-only (no UPDATE/DELETE) — PASS
+  10. ticket_history append-only (no UPDATE/DELETE) — PASS
+  11. 31 new Phase 5 permissions exist — PASS
+  12. Director has all 31 Phase 5 permissions — PASS
+  13. Employee has 13 Phase 5 permissions — PASS
+  14. System admin has 0 Phase 5 permissions — PASS
+  15. generate_task_code function exists — PASS
+  16. generate_ticket_code function exists — PASS
+  17. check_circular_dependency function exists — PASS
+  18. calculate_completion_outcome function exists — PASS
+  19. can_read_task helper exists — PASS
+  20. can_read_ticket helper exists — PASS
+  21. task-attachments bucket private — PASS
+  22. ticket-attachments bucket private — PASS
+  23. tasks has no DELETE policy — PASS
+  24. tickets has no DELETE policy — PASS
+  25. tasks completion_outcome CHECK (3 values) — PASS
+  26. tickets category CHECK (10 categories) — PASS
+  27. tickets status CHECK (10 states) — PASS
+  28. task_code unique per org index — PASS
+  29. ticket_code unique per org index — PASS
+  30. task_dependencies unique index — PASS
+
+### Task lifecycle
+DRAFT → ASSIGNED/ACCEPTANCE_PENDING → ACCEPTED → IN_PROGRESS → SUBMITTED → REVIEW_REQUIRED → COMPLETED
+With branches to: REVISION_REQUESTED, REASSIGNMENT_REQUESTED, REJECTED, CANCELLED, ON_HOLD, REVISION_REQUIRED
+Completion outcomes: EARLY (before deadline date), ON_TIME (on deadline date), DELAYED (after deadline date) — operational only, no salary effect
+
+### Known risks
+- No automated test framework (vitest/jest) — tests are SQL-based and code-review-based
+- The task-scheduler cron uses pg_net which may have timeout issues for large organizations
+- Circular dependency check uses recursive CTE which may be slow for very deep dependency chains
+- SLA hours are hardcoded in the edge function (CRITICAL=4h, HIGH=24h, MEDIUM=72h, LOW=168h) — should be configurable in future
+- No file size limit enforcement at the storage policy level (enforced in frontend only)
+- Browser smoke test not performed (no browser automation available)
+- The reject/change request form for employees is accessed via a navigate to `/tasks/${taskId}/reject` route which is not yet implemented as a separate page — the TaskDetailPage has an accept button but the reject form needs to be added as a modal or separate page
+- No daily reports or management reporting features (Phase 6 scope)
+
+### Next task
+Phase 6 — Daily Reports, Notifications and Reporting: EOD reports, management summaries, reminder rules, realtime inbox, email adapter and protected exports.

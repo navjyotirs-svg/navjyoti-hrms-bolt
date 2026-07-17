@@ -28,6 +28,14 @@ import { TeamLeavePage } from '@/pages/TeamLeavePage'
 import { LeaveManagementPage } from '@/pages/LeaveManagementPage'
 import { CompanyCalendarPage } from '@/pages/CompanyCalendarPage'
 import { HolidayManagementPage } from '@/pages/HolidayManagementPage'
+import { MyTasksPage } from '@/pages/MyTasksPage'
+import { TaskDetailPage } from '@/pages/TaskDetailPage'
+import { TeamTasksPage } from '@/pages/TeamTasksPage'
+import { CreateTaskPage } from '@/pages/CreateTaskPage'
+import { TaskReviewPage } from '@/pages/TaskReviewPage'
+import { MyTicketsPage } from '@/pages/MyTicketsPage'
+import { TicketDetailPage } from '@/pages/TicketDetailPage'
+import { TicketManagementPage } from '@/pages/TicketManagementPage'
 import type { ReactNode } from 'react'
 import type { Permission } from '@/types/roles'
 
@@ -175,6 +183,30 @@ function AppRoutes() {
         } />
         <Route path="/holidays" element={
           <PermissionRoute permissions={['calendar.holiday_manage']}><HolidayManagementPage /></PermissionRoute>
+        } />
+        <Route path="/my-tasks" element={
+          <PermissionRoute permissions={['task.read_self', 'task.read_team', 'task.read_all']}><MyTasksPage /></PermissionRoute>
+        } />
+        <Route path="/tasks/:id" element={
+          <PermissionRoute permissions={['task.read_self', 'task.read_team', 'task.read_all']}><TaskDetailPage /></PermissionRoute>
+        } />
+        <Route path="/tasks/create" element={
+          <PermissionRoute permissions={['task.create', 'task.assign']}><CreateTaskPage /></PermissionRoute>
+        } />
+        <Route path="/team-tasks" element={
+          <PermissionRoute permissions={['task.read_team', 'task.read_all', 'task.review']}><TeamTasksPage /></PermissionRoute>
+        } />
+        <Route path="/task-review" element={
+          <PermissionRoute permissions={['task.review', 'task.read_all']}><TaskReviewPage /></PermissionRoute>
+        } />
+        <Route path="/my-tickets" element={
+          <PermissionRoute permissions={['ticket.create_self', 'ticket.read_self', 'ticket.read_team', 'ticket.read_all']}><MyTicketsPage /></PermissionRoute>
+        } />
+        <Route path="/tickets/:id" element={
+          <PermissionRoute permissions={['ticket.create_self', 'ticket.read_self', 'ticket.read_team', 'ticket.read_all']}><TicketDetailPage /></PermissionRoute>
+        } />
+        <Route path="/ticket-management" element={
+          <PermissionRoute permissions={['ticket.read_all', 'ticket.assign', 'ticket.escalate', 'ticket.resolve', 'ticket.close']}><TicketManagementPage /></PermissionRoute>
         } />
         <Route path="/settings" element={<AccountSettingsPage />} />
       </Route>
