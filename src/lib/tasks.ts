@@ -112,7 +112,7 @@ export async function fetchTaskById(taskId: string) {
       task_submissions (id, submission_note, result_summary, submitted_at, review_status, reviewed_by, reviewed_at, reviewer_feedback, submitted_by),
       task_comments (id, author_id, comment_text, is_internal, created_at, edited_at, deleted_at),
       task_attachments (id, storage_path, file_name, mime_type, file_size_bytes, attachment_category, uploaded_by, created_at),
-      task_dependencies (id, depends_on_task_id, dependency_type, created_at)
+      task_dependencies!task_dependencies_task_id_fkey (id, depends_on_task_id, dependency_type, created_at)
     `)
     .eq('id', taskId)
     .maybeSingle()
