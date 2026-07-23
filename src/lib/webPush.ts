@@ -226,6 +226,3 @@ export function markPermissionSetupComplete(): void {
 export function clearPermissionSetup(): void {
   localStorage.removeItem(PERMISSION_SETUP_KEY)
 }
-
-
-export { hasCompletedPermissionSetup }

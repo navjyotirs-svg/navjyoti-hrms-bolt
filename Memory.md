@@ -1275,3 +1275,17 @@ Use `mcp__supabase__list_edge_function_secrets` to verify. If not present, confi
 10. Click notification → HRMS opens correct route.
 11. Deny notifications → no infinite prompt loop → in-app notifications still work.
 12. Deny location → non-attendance modules accessible → checkout blocked with instructions.
+
+---
+
+## Duplicate Export Build Fix — completed 2026-07-23
+
+### Root cause
+`src/lib/webPush.ts` had two exports of `hasCompletedPermissionSetup`: the `export function` declaration at line 218 and a duplicate `export { hasCompletedPermissionSetup }` statement at line 231. esbuild rejects multiple exports with the same name, causing the production build to fail.
+
+### File changed
+- `src/lib/webPush.ts` — removed the duplicate `export { hasCompletedPermissionSetup }` line. The `export function hasCompletedPermissionSetup()` declaration on line 218 is the sole export. No other duplicate named exports existed in the file. Import style in `src/components/AppShell.tsx` (`import { hasCompletedPermissionSetup } from '@/lib/webPush'`) is unchanged and still resolves correctly.
+
+### Build result
+- TypeScript: PASS
+- Production build (`npm run build`): PASS (143 modules, 683.87 kB JS / 31.15 kB CSS)
