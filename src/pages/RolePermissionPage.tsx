@@ -15,11 +15,6 @@ interface PermissionRow {
   label: string
 }
 
-interface RolePermissionRow {
-  role_id: string
-  permissions: { code: string; label: string }[]
-}
-
 export function RolePermissionPage() {
   const [roles, setRoles] = useState<RoleRow[]>([])
   const [permissions, setPermissions] = useState<PermissionRow[]>([])
@@ -38,9 +33,10 @@ export function RolePermissionPage() {
       if (pRes.data) setPermissions(pRes.data as PermissionRow[])
       if (rpRes.data) {
         const m = new Map<string, Set<string>>()
-        for (const row of rpRes.data as RolePermissionRow[]) {
+        for (const row of rpRes.data as unknown as { role_id: string; permissions: { code: string; label: string } | { code: string; label: string }[] }[]) {
           if (!m.has(row.role_id)) m.set(row.role_id, new Set())
-          for (const p of row.permissions) {
+          const perms = Array.isArray(row.permissions) ? row.permissions : [row.permissions]
+          for (const p of perms) {
             m.get(row.role_id)!.add(p.code)
           }
         }

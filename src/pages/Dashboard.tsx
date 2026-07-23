@@ -101,7 +101,7 @@ export function Dashboard() {
             .select('*', { count: 'exact', head: true })
             .eq('status', 'pending')
             .in('employee_id',
-              (await supabase.from('employees').select('id').eq('organization_id', orgId).eq('is_active', true)).data ?? []
+              (await supabase.from('employees').select('id').eq('organization_id', orgId).eq('is_active', true)).data?.map((e: { id: string }) => e.id) ?? []
             )
           updates.onboardingPending = onboardCount ?? 0
 
@@ -111,7 +111,7 @@ export function Dashboard() {
             .select('*', { count: 'exact', head: true })
             .eq('is_verified', false)
             .in('employee_id',
-              (await supabase.from('employees').select('id').eq('organization_id', orgId)).data ?? []
+              (await supabase.from('employees').select('id').eq('organization_id', orgId)).data?.map((e: { id: string }) => e.id) ?? []
             )
           updates.documentsPendingVerification = docCount ?? 0
         }

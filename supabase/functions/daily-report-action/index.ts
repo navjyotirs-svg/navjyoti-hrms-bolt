@@ -35,7 +35,7 @@ Deno.serve(async (req: Request) => {
     if (!profile || profile.status !== "active" || !profile.is_active)
       return errorResponse("Account not active", 403);
 
-    const { data: perms } = await supabase.rpc("get_my_effective_permissions");
+    const { data: perms } = await supabase.rpc("get_effective_permissions", { p_user_id: user.id });
     const permissions: string[] = perms || [];
     const orgId = profile.organization_id;
     if (!orgId) return errorResponse("No organization membership", 403);
