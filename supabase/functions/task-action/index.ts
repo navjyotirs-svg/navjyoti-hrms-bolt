@@ -31,16 +31,21 @@ Deno.serve(async (req: Request) => {
       return errorResponse("Missing authorization header", 401);
     }
 
+    // Use user JWT only to verify identity, then use pure service role for DB ops
+    const userClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser();
+    } = await userClient.auth.getUser();
     if (authError || !user) {
       return errorResponse("Unauthorized", 401);
     }
