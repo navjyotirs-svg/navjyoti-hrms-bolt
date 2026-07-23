@@ -109,7 +109,7 @@ export function Dashboard() {
           const { count: docCount } = await supabase
             .from('employee_documents')
             .select('*', { count: 'exact', head: true })
-            .eq('is_verified', false)
+            .eq('status', 'pending')
             .in('employee_id',
               (await supabase.from('employees').select('id').eq('organization_id', orgId)).data?.map((e: { id: string }) => e.id) ?? []
             )

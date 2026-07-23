@@ -1,12 +1,9 @@
-import { useRouteError } from 'react-router-dom'
-
 export function NotFoundPage() {
-  const error = useRouteError() as { statusText?: string; message?: string } | undefined
   return (
     <div style={{ padding: '40px', textAlign: 'center' }}>
       <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>Page Not Found</h2>
       <p style={{ color: 'var(--slate)', fontSize: '13.5px' }}>
-        {error?.statusText ?? error?.message ?? 'The requested page does not exist.'}
+        The requested page does not exist.
       </p>
     </div>
   )

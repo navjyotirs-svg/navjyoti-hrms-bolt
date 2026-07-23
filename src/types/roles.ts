@@ -760,7 +760,7 @@ export const NAV_ITEMS: NavItem[] = [
     permissions: ['task.read_self', 'task.read_team', 'task.read_all'],
   },
   {
-    id: 'create-task',
+    id: 'tasks/create',
     label: 'Assign Task',
     icon: 'M12 4v16m8-8H4',
     permissions: ['task.create', 'task.assign'],
