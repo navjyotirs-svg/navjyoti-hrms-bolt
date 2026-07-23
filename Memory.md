@@ -946,4 +946,59 @@ Completion outcomes: EARLY (before deadline date), ON_TIME (on deadline date), D
 - No daily reports or management reporting features (Phase 6 scope)
 
 ### Next task
-Phase 6 — Daily Reports, Notifications and Reporting: EOD reports, management summaries, reminder rules, realtime inbox, email adapter and protected exports.
+Phase 7 — Security hardening, pilot deployment, and production readiness.
+
+---
+
+## Phase 6 — Daily Reports, Notifications and Reporting (COMPLETE)
+
+### Overview
+Implemented daily work reports, end-of-day closure, management follow-up, consolidated reporting, notification inbox, email notification adapter, and protected data exports. No payroll/salary features were created.
+
+### Migrations Applied (7 total)
+1. **phase6_permissions** — 40 new permissions: daily_report.* (14), follow_up.* (7), notification.* (6), announcement.* (5), export.* (5). Director gets all 40. HR gets 24. Manager gets 14. Team leader gets 7. Employee/intern gets 11 each. System admin gets 2.
+2. **phase6_daily_report_tables** — 5 tables: daily_reports (UNIQUE employee_id+report_date, 7 statuses), daily_report_task_items, daily_report_attachments, daily_report_history (append-only), daily_report_comments (soft delete). Added 6 config columns to organizations (require_daily_report, checkout_report_warning_enabled, missing_report_reminder_enabled, report_submission_cutoff_time, late_report_allowed, manager_review_required).
+3. **phase6_follow_up_snapshots** — management_follow_ups (8 follow-up types, 6 statuses) and management_report_snapshots (JSONB snapshots with SHA-256 checksum, immutable).
+4. **phase6_notification_tables** — 6 tables: notification_preferences, notification_deliveries, email_templates (10 seeded), announcements, announcement_acknowledgements, export_jobs. Extended notifications table with category, read_at, action_url, expires_at, archived, delivery_status columns. Updated priority CHECK to include 'urgent'. All values use lowercase to match existing data.
+5. **phase6_rls** — RLS enabled on all 13 Phase 6 tables. Created 2 SECURITY DEFINER helper functions: can_read_daily_report(p_report_id), can_read_follow_up(p_follow_up_id). Both check org, permissions, ownership, and team scope via is_in_reporting_subtree(). Append-only tables (history, snapshots) have no UPDATE/DELETE policies. notification_deliveries INSERT is service-only.
+6. **phase6_storage** — 2 private storage buckets: daily-report-attachments, export-files. Both private (public=false), with CRUD storage policies for authenticated users.
+7. **phase6_cron** — 3 cron jobs: report-scheduler-daily (18:30 UTC / 00:00 IST), notification-worker-every-minute, export-cleanup-hourly. All use pg_net POST with service role key.
+
+### Edge Functions Deployed (4 total)
+1. **daily-report-action** (verify_jwt=true) — Actions: save_draft, submit, review, reopen, add_comment, add_task_item, delete_task_item, create_follow_up, assign_follow_up, resolve_follow_up, close_follow_up. Uses getKolkataDate() for report dates. Writes to daily_report_history on all status transitions. Sends notifications on review/reopen/follow-up assignment.
+2. **notification-worker** (verify_jwt=false) — Processes queued/retry notification deliveries. Checks user preferences (email_enabled). Marks in-app as delivered, email as sent. Limited to 50 per run.
+3. **report-scheduler** (verify_jwt=false) — Sends due reminders before cutoff, missing report reminders after cutoff, auto-submits DRAFT reports as late, generates daily summary snapshots with SHA-256 checksum. All notifications idempotent via dedup_key.
+4. **export-handler** (verify_jwt=true for user actions, false for cleanup) — Actions: request_export (generates CSV with formula injection prevention), get_download_url (signed URLs, 300s expiry), cancel_export, cleanup (cron-triggered, deletes expired files from storage). 10 export types supported.
+
+### Frontend Files Created
+- **src/lib/dailyReports.ts** — CRUD for daily reports, task items, comments, follow-ups, attachments (with signed URLs). getKolkataDate() helper.
+- **src/lib/notifications.ts** — Fetch/mark-read/archive notifications, preferences CRUD, delivery logs, realtime subscription helper.
+- **src/lib/announcements.ts** — CRUD for announcements, acknowledgements, fetch with ack status.
+- **src/lib/exports.ts** — Export job CRUD, request/get-download-url/cancel via edge function. EXPORT_TYPES constant.
+
+### Frontend Pages Created (9 total)
+1. **DailyReportPage** — Form for submitting/editing daily reports with all fields (summary, work planned/completed, result, pending, blockers, support, tomorrow plan, follow-up flag). Read-only after submission. Save draft + submit buttons.
+2. **MyReportHistoryPage** — Paginated table of user's own report history with status badges.
+3. **TeamReportsPage** — Team reports for a selected date with summary stats (total/submitted/approved/draft/late/returned).
+4. **ReportReviewPage** — Pending review queue with approve/return/reopen actions and manager comments.
+5. **OrgDailySummaryPage** — Consolidated daily summary from snapshots with stats cards and checksum display.
+6. **FollowUpQueuePage** — Follow-up queue with status filter, priority tags, resolve/close actions.
+7. **AnnouncementManagementPage** — Create/delete announcements with priority, scope, acknowledgement, expiry settings.
+8. **ExportCenterPage** — Request exports (10 types, date filters), download via signed URLs, cancel pending, view history.
+9. **NotificationInboxPage** — Filter by unread/category, mark read, mark all read, archive. Priority tags and unread indicators.
+
+### Other Frontend Updates
+- **src/types/roles.ts** — Added 40 new permission codes to Permission type, PERMISSION_LABELS, and 9 new NAV_ITEMS entries.
+- **src/App.tsx** — Added 9 new routes with PermissionRoute guards (notification-inbox is open to all authenticated users).
+- **src/components/AppShell.tsx** — Added 9 new PAGE_TITLES entries.
+- **src/pages/Dashboard.tsx** — Added pending reviews, open follow-ups, and today's reports metrics (permission-gated).
+
+### Build Status
+- TypeScript compilation: PASS
+- Production build: PASS (667 KB JS, 27 KB CSS)
+
+### Known Limitations
+- Email sending in notification-worker is a placeholder (marks as sent) — a real SMTP provider would need to be configured
+- Export only supports CSV format (XLSX/PDF types exist in schema but not implemented)
+- Browser smoke test not performed (no browser automation available)
+- Report scheduler runs at 18:30 UTC which is 00:00 IST — this is the correct boundary for Kolkata date rollover

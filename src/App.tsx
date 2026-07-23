@@ -36,6 +36,15 @@ import { TaskReviewPage } from '@/pages/TaskReviewPage'
 import { MyTicketsPage } from '@/pages/MyTicketsPage'
 import { TicketDetailPage } from '@/pages/TicketDetailPage'
 import { TicketManagementPage } from '@/pages/TicketManagementPage'
+import { DailyReportPage } from '@/pages/DailyReportPage'
+import { MyReportHistoryPage } from '@/pages/MyReportHistoryPage'
+import { TeamReportsPage } from '@/pages/TeamReportsPage'
+import { ReportReviewPage } from '@/pages/ReportReviewPage'
+import { OrgDailySummaryPage } from '@/pages/OrgDailySummaryPage'
+import { FollowUpQueuePage } from '@/pages/FollowUpQueuePage'
+import { AnnouncementManagementPage } from '@/pages/AnnouncementManagementPage'
+import { ExportCenterPage } from '@/pages/ExportCenterPage'
+import { NotificationInboxPage } from '@/pages/NotificationInboxPage'
 import type { ReactNode } from 'react'
 import type { Permission } from '@/types/roles'
 
@@ -208,6 +217,31 @@ function AppRoutes() {
         <Route path="/ticket-management" element={
           <PermissionRoute permissions={['ticket.read_all', 'ticket.assign', 'ticket.escalate', 'ticket.resolve', 'ticket.close']}><TicketManagementPage /></PermissionRoute>
         } />
+        <Route path="/my-reports" element={
+          <PermissionRoute permissions={['daily_report.submit', 'daily_report.read_self']}><DailyReportPage /></PermissionRoute>
+        } />
+        <Route path="/report-history" element={
+          <PermissionRoute permissions={['daily_report.read_self']}><MyReportHistoryPage /></PermissionRoute>
+        } />
+        <Route path="/team-reports" element={
+          <PermissionRoute permissions={['daily_report.read_team', 'daily_report.read_all', 'daily_report.review']}><TeamReportsPage /></PermissionRoute>
+        } />
+        <Route path="/report-review" element={
+          <PermissionRoute permissions={['daily_report.review']}><ReportReviewPage /></PermissionRoute>
+        } />
+        <Route path="/org-summary" element={
+          <PermissionRoute permissions={['daily_report.view_consolidated', 'daily_report.read_all']}><OrgDailySummaryPage /></PermissionRoute>
+        } />
+        <Route path="/follow-up-queue" element={
+          <PermissionRoute permissions={['follow_up.create', 'follow_up.read_all', 'follow_up.read_team', 'follow_up.assign', 'follow_up.resolve', 'follow_up.close']}><FollowUpQueuePage /></PermissionRoute>
+        } />
+        <Route path="/announcements" element={
+          <PermissionRoute permissions={['announcement.create', 'announcement.edit_all', 'announcement.manage']}><AnnouncementManagementPage /></PermissionRoute>
+        } />
+        <Route path="/export-center" element={
+          <PermissionRoute permissions={['export.request', 'export.download_own', 'export.download_all', 'export.audit_read', 'export.manage']}><ExportCenterPage /></PermissionRoute>
+        } />
+        <Route path="/notification-inbox" element={<NotificationInboxPage />} />
         <Route path="/settings" element={<AccountSettingsPage />} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />

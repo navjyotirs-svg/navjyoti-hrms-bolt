@@ -99,6 +99,48 @@ export type Permission =
   | 'ticket.attachment_upload'
   | 'ticket.attachment_read'
   | 'ticket.report_read'
+  // Phase 6 — Daily Reports
+  | 'daily_report.submit'
+  | 'daily_report.read_self'
+  | 'daily_report.read_team'
+  | 'daily_report.read_all'
+  | 'daily_report.review'
+  | 'daily_report.reopen'
+  | 'daily_report.view_consolidated'
+  | 'daily_report.export'
+  | 'daily_report.attach_upload'
+  | 'daily_report.attach_read'
+  | 'daily_report.comment'
+  | 'daily_report.history_read'
+  | 'daily_report.config_manage'
+  | 'daily_report.late_submit'
+  // Phase 6 — Follow-ups
+  | 'follow_up.create'
+  | 'follow_up.read_all'
+  | 'follow_up.read_team'
+  | 'follow_up.assign'
+  | 'follow_up.resolve'
+  | 'follow_up.close'
+  | 'follow_up.export'
+  // Phase 6 — Notifications
+  | 'notification.view_delivery_logs'
+  | 'notification.manage_preferences'
+  | 'notification.manage_templates'
+  | 'notification.send_broadcast'
+  | 'notification.view_all'
+  | 'notification.cleanup'
+  // Phase 6 — Announcements
+  | 'announcement.create'
+  | 'announcement.edit_all'
+  | 'announcement.delete'
+  | 'announcement.view_acknowledgements'
+  | 'announcement.manage'
+  // Phase 6 — Exports
+  | 'export.request'
+  | 'export.download_own'
+  | 'export.download_all'
+  | 'export.audit_read'
+  | 'export.manage'
 
 export type AttendanceStatus = 'PENDING_CHECKOUT' | 'FULL_DAY' | 'HALF_DAY'
 
@@ -567,6 +609,44 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'ticket.attachment_upload': 'Upload Ticket Attachment',
   'ticket.attachment_read': 'Read Ticket Attachment',
   'ticket.report_read': 'Read Ticket Reports',
+  // Phase 6
+  'daily_report.submit': 'Submit Daily Report',
+  'daily_report.read_self': 'Read Own Reports',
+  'daily_report.read_team': 'Read Team Reports',
+  'daily_report.read_all': 'Read All Reports',
+  'daily_report.review': 'Review Reports',
+  'daily_report.reopen': 'Reopen Reports',
+  'daily_report.view_consolidated': 'View Consolidated Reports',
+  'daily_report.export': 'Export Reports',
+  'daily_report.attach_upload': 'Upload Report Attachments',
+  'daily_report.attach_read': 'Read Report Attachments',
+  'daily_report.comment': 'Comment on Reports',
+  'daily_report.history_read': 'Read Report History',
+  'daily_report.config_manage': 'Manage Report Config',
+  'daily_report.late_submit': 'Submit Late Reports',
+  'follow_up.create': 'Create Follow-up',
+  'follow_up.read_all': 'Read All Follow-ups',
+  'follow_up.read_team': 'Read Team Follow-ups',
+  'follow_up.assign': 'Assign Follow-up',
+  'follow_up.resolve': 'Resolve Follow-up',
+  'follow_up.close': 'Close Follow-up',
+  'follow_up.export': 'Export Follow-ups',
+  'notification.view_delivery_logs': 'View Delivery Logs',
+  'notification.manage_preferences': 'Manage Notification Preferences',
+  'notification.manage_templates': 'Manage Email Templates',
+  'notification.send_broadcast': 'Send Broadcast',
+  'notification.view_all': 'View All Notifications',
+  'notification.cleanup': 'Cleanup Notifications',
+  'announcement.create': 'Create Announcement',
+  'announcement.edit_all': 'Edit All Announcements',
+  'announcement.delete': 'Delete Announcement',
+  'announcement.view_acknowledgements': 'View Acknowledgements',
+  'announcement.manage': 'Manage Announcements',
+  'export.request': 'Request Export',
+  'export.download_own': 'Download Own Exports',
+  'export.download_all': 'Download All Exports',
+  'export.audit_read': 'Read Export Audit',
+  'export.manage': 'Manage Exports',
 }
 
 export type NavItem = {
@@ -708,6 +788,60 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Ticket Management',
     icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
     permissions: ['ticket.read_all', 'ticket.assign', 'ticket.escalate', 'ticket.resolve', 'ticket.close'],
+  },
+  {
+    id: 'my-reports',
+    label: 'My Daily Report',
+    icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
+    permissions: ['daily_report.submit', 'daily_report.read_self'],
+  },
+  {
+    id: 'report-history',
+    label: 'Report History',
+    icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+    permissions: ['daily_report.read_self'],
+  },
+  {
+    id: 'team-reports',
+    label: 'Team Reports',
+    icon: 'M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-2a4 4 0 10-8 4 4 0 000 8z',
+    permissions: ['daily_report.read_team', 'daily_report.read_all', 'daily_report.review'],
+  },
+  {
+    id: 'report-review',
+    label: 'Report Review',
+    icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+    permissions: ['daily_report.review'],
+  },
+  {
+    id: 'org-summary',
+    label: 'Org Summary',
+    icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
+    permissions: ['daily_report.view_consolidated', 'daily_report.read_all'],
+  },
+  {
+    id: 'follow-up-queue',
+    label: 'Follow-up Queue',
+    icon: 'M13 10V3L4 14h7v7l9-11h-7z',
+    permissions: ['follow_up.create', 'follow_up.read_all', 'follow_up.read_team', 'follow_up.assign', 'follow_up.resolve', 'follow_up.close'],
+  },
+  {
+    id: 'announcements',
+    label: 'Announcements',
+    icon: 'M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6a4.001 4.001 0 012.564 7.683l-2.147 6.15A1.76 1.76 0 014 19.24V5.882',
+    permissions: ['announcement.create', 'announcement.edit_all', 'announcement.manage'],
+  },
+  {
+    id: 'export-center',
+    label: 'Export Center',
+    icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4',
+    permissions: ['export.request', 'export.download_own', 'export.download_all', 'export.audit_read', 'export.manage'],
+  },
+  {
+    id: 'notification-inbox',
+    label: 'Notification Inbox',
+    icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',
+    permissions: [],
   },
   {
     id: 'settings',

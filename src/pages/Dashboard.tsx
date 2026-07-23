@@ -21,6 +21,9 @@ export function Dashboard() {
     halfDay: null,
     pendingCorrections: null,
     unreadNotifications: null,
+    pendingReviews: null,
+    openFollowUps: null,
+    todayReports: null,
   })
   const [recentAudit, setRecentAudit] = useState<{ action: string; entity_type: string; created_at: string }[]>([])
   const [todayAttendance, setTodayAttendance] = useState<{ check_in_at: string; required_checkout_at: string; final_status: string } | null>(null)
@@ -152,6 +155,39 @@ export function Dashboard() {
             .select('*', { count: 'exact', head: true })
             .eq('status', 'PENDING')
           updates.pendingCorrections = corrCount ?? 0
+        }
+
+        const canReviewReports = permissions.includes('daily_report.review')
+        const canReadFollowUps = permissions.includes('follow_up.read_all') || permissions.includes('follow_up.read_team')
+        const canReadReports = permissions.includes('daily_report.read_all') || permissions.includes('daily_report.read_team')
+
+        // Pending report reviews
+        if (canReviewReports) {
+          const { count: reviewCount } = await supabase
+            .from('daily_reports')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'submitted')
+          updates.pendingReviews = reviewCount ?? 0
+        }
+
+        // Open follow-ups
+        if (canReadFollowUps) {
+          const { count: fuCount } = await supabase
+            .from('management_follow_ups')
+            .select('*', { count: 'exact', head: true })
+            .in('status', ['open', 'assigned', 'in_progress'])
+          updates.openFollowUps = fuCount ?? 0
+        }
+
+        // Today's reports (team/all)
+        if (canReadReports) {
+          const todayDate = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })
+          const kolkataDate = new Date(todayDate).toISOString().slice(0, 10)
+          const { count: reportCount } = await supabase
+            .from('daily_reports')
+            .select('*', { count: 'exact', head: true })
+            .eq('report_date', kolkataDate)
+          updates.todayReports = reportCount ?? 0
         }
 
         // Unread notifications
@@ -358,6 +394,17 @@ export function Dashboard() {
           <MetricCard label="Unread" value={metrics.unreadNotifications} />
         </div>
       </div>
+
+      {(metrics.pendingReviews !== null || metrics.openFollowUps !== null || metrics.todayReports !== null) && (
+        <div className="dashboard-section">
+          <h3 className="dashboard-section-title">Daily Reports & Follow-ups</h3>
+          <div className="dashboard-grid">
+            {metrics.pendingReviews !== null && <MetricCard label="Pending Reviews" value={metrics.pendingReviews} />}
+            {metrics.openFollowUps !== null && <MetricCard label="Open Follow-ups" value={metrics.openFollowUps} />}
+            {metrics.todayReports !== null && <MetricCard label="Today's Reports" value={metrics.todayReports} />}
+          </div>
+        </div>
+      )}
 
       {canReadAudit && recentAudit.length > 0 && (
         <div className="dashboard-section">
