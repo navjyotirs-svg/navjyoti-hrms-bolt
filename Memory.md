@@ -315,10 +315,13 @@ Attendance check-in/checkout with camera and location evidence, server-side atte
 - No LATE, ABSENT, or SHORT_ATTENDANCE for employees with check-in records
 
 ### Development test mode
-- Server environment variables: ATTENDANCE_TEST_MODE=true, ATTENDANCE_TOTAL_MINUTES=5, ATTENDANCE_PRE_ALERT_MINUTES=2
-- Disabled by default; production always uses 540 minutes
-- Server rejects test mode when in production (DENO_DEPLOYMENT_ID check)
-- VITE_ATTENDANCE_TEST_MODE does not control server truth
+- Server environment variables: ATTENDANCE_TEST_MODE=false, ATTENDANCE_TOTAL_MINUTES=540, ATTENDANCE_PRE_ALERT_MINUTES=5
+- Production mode active (SUPABASE_ENV=production) — server always uses 540 minutes when test mode is false
+- Pre-checkout reminder fires 5 minutes before required_checkout_at
+- New check-ins calculate required_checkout_at = server_check_in_at + 540 minutes
+- Old attendance records are NOT recalculated — only new check-ins use production duration
+- Test-mode banner CSS removed from attendance.css
+- No development-only attendance reset tools exist in the codebase
 
 ### Files changed
 - `src/types/roles.ts` — 11 new attendance permissions, AttendanceStatus type, ATTENDANCE_STATUS_LABELS, CorrectionType, CORRECTION_TYPE_LABELS, CorrectionStatus, CORRECTION_STATUS_LABELS, ATTENDANCE_APPROVED_MIME_TYPES, ATTENDANCE_APPROVED_EXTENSIONS, ATTENDANCE_MAX_PHOTO_BYTES, 3 new nav items (My Attendance, Attendance Management, Corrections)
@@ -328,7 +331,7 @@ Attendance check-in/checkout with camera and location evidence, server-side atte
 - `src/pages/AttendancePage.tsx` — NEW: employee attendance dashboard with 3 tabs (Today, History, Corrections), check-in button, live timer, checkout button, correction request modal
 - `src/pages/AttendanceManagementPage.tsx` — NEW: HR/Director attendance view with search, status filter, date filter, 11-column table, evidence viewing with permission control
 - `src/pages/AttendanceCorrectionsPage.tsx` — NEW: correction requests list with approve/reject for HR/Director, own corrections for employees
-- `src/styles/attendance.css` — NEW: attendance-specific styles (tabs, status grid, timer, badges, checkout modal, notification bell, toast, test mode banner)
+- `src/styles/attendance.css` — attendance-specific styles (tabs, status grid, timer, badges, checkout modal, notification bell, toast)
 - `src/App.tsx` — 3 new routes added with PermissionRoute guards
 - `src/components/Topbar.tsx` — updated with NotificationBell component
 - `src/components/AppShell.tsx` — updated with soundEnabled state (localStorage), toggleSound function passed via outlet context, getPageTitle for attendance routes
@@ -378,7 +381,7 @@ Attendance check-in/checkout with camera and location evidence, server-side atte
 
 ### Known risks
 - No automated test framework (vitest/jest) — RLS tests are SQL-based via execute_sql
-- Edge function test mode relies on DENO_DEPLOYMENT_ID env var which may not be set in all Supabase environments
+- Edge function config now reads from vault.decrypted_secrets via get_attendance_config() RPC — production values confirmed (TEST_MODE=false, TOTAL_MINUTES=540, PRE_ALERT=5)
 - Cron job uses pg_net which requires the extension to be available (confirmed installed)
 - Realtime subscription may have a brief delay between notification insert and client receipt
 - No file size limit enforcement at the storage policy level (enforced in frontend + edge function)
@@ -947,6 +950,52 @@ Completion outcomes: EARLY (before deadline date), ON_TIME (on deadline date), D
 
 ### Next task
 Phase 7 — Security hardening, pilot deployment, and production readiness.
+
+---
+
+## Attendance Production Configuration (COMPLETE)
+
+### Vault Secrets (Production)
+- ATTENDANCE_TEST_MODE = false
+- ATTENDANCE_TOTAL_MINUTES = 540
+- ATTENDANCE_PRE_ALERT_MINUTES = 5
+- SUPABASE_ENV = production
+
+### Production Preflight Test
+All 4 secrets verified PASS via get_attendance_config() RPC:
+- ATTENDANCE_TEST_MODE: false (PASS)
+- ATTENDANCE_TOTAL_MINUTES: 540 (PASS)
+- ATTENDANCE_PRE_ALERT_MINUTES: 5 (PASS)
+- SUPABASE_ENV: production (PASS)
+
+### Edge Functions Redeployed
+- attendance-action: verify_jwt=true — reads config from vault, uses 540 minutes when test mode is false
+- attendance-scheduler: verify_jwt=false — reads preAlertMinutes from vault (5 minutes), sends pre-checkout reminder 5 minutes before required_checkout_at
+- attendance-correction: verify_jwt=true — reads required_total_minutes from DB record (not config), no changes needed for duration
+
+### Frontend Changes
+- Removed test-mode banner CSS from attendance.css (dead CSS, was never referenced in any TSX component)
+- No development-only attendance reset tools found in the codebase
+- NotificationBell enhanced with:
+  - Browser Notification API permission request (asks on page load and on window focus)
+  - Real-time Supabase subscription for INSERT events on notifications table (filtered by recipient_id)
+  - Desktop notifications fire even when tab is in background (browser handles this natively)
+  - High/urgent priority notifications use requireInteraction=true (stay visible until user dismisses)
+  - Audio alert (880Hz sine wave) for high/urgent priority notifications
+  - Connection indicator dot (green=connected, gray=reconnecting)
+  - "Enable alerts" button in dropdown when permission is default; "Desktop alerts blocked" when denied
+  - Toast popup for high/urgent notifications (auto-dismiss after 8 seconds)
+
+### Build Status
+- TypeScript compilation: PASS
+- Production build: PASS (668 KB JS, 27 KB CSS)
+
+### Key Behaviors
+- New check-ins: required_checkout_at = server_check_in_at + 540 minutes (9 hours)
+- Pre-checkout reminder: fires 5 minutes before required_checkout_at (via scheduler every minute)
+- Checkout-ready reminder: fires at required_checkout_at
+- Old attendance records: NOT recalculated (only new check-ins use production duration)
+- Secret values: never exposed in frontend code or logs (read server-side only via get_attendance_config RPC)
 
 ---
 

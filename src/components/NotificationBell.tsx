@@ -20,6 +20,7 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
   const [showDropdown, setShowDropdown] = useState(false)
   const [toast, setToast] = useState<Notification | null>(null)
   const [connected, setConnected] = useState(false)
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default')
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const shownIdsRef = useRef<Set<string>>(new Set())
 
@@ -42,6 +43,46 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
     }
   }, [soundEnabled])
 
+  const sendBrowserNotification = useCallback((notif: Notification) => {
+    if (!('Notification' in window)) return
+    if (Notification.permission !== 'granted') return
+
+    const priority = notif.priority || 'normal'
+    const isHigh = priority === 'high' || priority === 'urgent'
+
+    const title = isHigh ? `\u26A0 ${notif.title}` : notif.title
+    const body = notif.message
+
+    try {
+      const n = new Notification(title, {
+        body,
+        tag: notif.id,
+        requireInteraction: isHigh,
+        silent: false,
+      })
+      n.onclick = () => {
+        window.focus()
+        n.close()
+      }
+    } catch {
+      // Notification API may not be available in all contexts
+    }
+  }, [])
+
+  const requestPermission = useCallback(async () => {
+    if (!('Notification' in window)) return
+    if (Notification.permission === 'granted') {
+      setNotifPermission('granted')
+      return
+    }
+    if (Notification.permission === 'denied') {
+      setNotifPermission('denied')
+      return
+    }
+    const result = await Notification.requestPermission()
+    setNotifPermission(result)
+  }, [])
+
   const loadUnread = useCallback(async () => {
     const [count, notifs] = await Promise.all([
       fetchUnreadNotificationCount(),
@@ -53,6 +94,7 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
   }, [])
 
   useEffect(() => {
+    requestPermission()
     loadUnread()
 
     const channel = supabase
@@ -71,11 +113,17 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
           shownIdsRef.current.add(notif.id)
           setUnreadCount((prev) => prev + 1)
           setNotifications((prev) => [notif, ...prev])
-          if (notif.priority === 'high') {
+
+          const priority = notif.priority || 'normal'
+          const isHigh = priority === 'high' || priority === 'urgent'
+
+          if (isHigh) {
             setToast(notif)
             setTimeout(() => setToast(null), 8000)
             playSound()
           }
+
+          sendBrowserNotification(notif)
         }
       )
       .on('system', { event: 'connected' }, () => {
@@ -89,11 +137,20 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
 
     channelRef.current = channel
 
+    // Re-request permission on window focus (in case user dismissed initially)
+    const handleFocus = () => {
+      if ('Notification' in window && Notification.permission === 'default') {
+        requestPermission()
+      }
+    }
+    window.addEventListener('focus', handleFocus)
+
     return () => {
       supabase.removeChannel(channel)
       channelRef.current = null
+      window.removeEventListener('focus', handleFocus)
     }
-  }, [userId, loadUnread, playSound])
+  }, [userId, loadUnread, playSound, sendBrowserNotification, requestPermission])
 
   async function handleMarkRead(id: string) {
     await markNotificationRead(id)
@@ -124,9 +181,21 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
           <div className="notif-dropdown">
             <div className="notif-dropdown-header">
               <span>Notifications</span>
-              {notifications.length > 0 && (
-                <button className="notif-mark-all" onClick={handleMarkAllRead}>Mark all read</button>
-              )}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {notifPermission === 'default' && (
+                  <button className="notif-mark-all" onClick={(e) => { e.stopPropagation(); requestPermission() }}>
+                    Enable alerts
+                  </button>
+                )}
+                {notifPermission === 'denied' && (
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }} title="Enable notifications in your browser settings to receive desktop alerts">
+                    Desktop alerts blocked
+                  </span>
+                )}
+                {notifications.length > 0 && (
+                  <button className="notif-mark-all" onClick={handleMarkAllRead}>Mark all read</button>
+                )}
+              </div>
             </div>
             <div className="notif-list">
               {notifications.length === 0 ? (
