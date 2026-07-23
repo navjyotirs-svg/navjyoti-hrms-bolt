@@ -18,7 +18,6 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Verify the user is authenticated
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return errorResponse("Missing authorization header", 401);
@@ -38,12 +37,10 @@ Deno.serve(async (req: Request) => {
     const userId = userData.user.id;
     const body = await req.json().catch(() => ({}));
 
-    // Handle test push: send only to the current user's subscriptions
     if (body.test) {
       return await sendTestPush(supabase, userId);
     }
 
-    // Handle real notification delivery
     if (body.notificationId) {
       return await sendPushForNotification(supabase, body.notificationId);
     }
@@ -66,11 +63,20 @@ async function sendTestPush(supabase: any, userId: string): Promise<Response> {
     return jsonResponse({
       success: false,
       message: "No active push subscriptions. Enable notifications first.",
+      errorCategory: "no_subscription",
     });
+  }
+
+  const vapidConfig = validateVapidConfig();
+  if ("errorCategory" in vapidConfig) {
+    return jsonResponse({ success: false, message: vapidConfig.message, errorCategory: vapidConfig.errorCategory });
   }
 
   let sent = 0;
   let failed = 0;
+  let deactivated = 0;
+  let lastErrorCategory = "";
+
   for (const sub of subs) {
     const result = await sendWebPush(sub, {
       title: "Test Notification",
@@ -80,11 +86,15 @@ async function sendTestPush(supabase: any, userId: string): Promise<Response> {
       actionUrl: "/notifications",
       icon: "/icon-192.png",
       badge: "/badge-72.png",
-    });
-    if (result.ok) sent++;
-    else {
+    }, vapidConfig);
+
+    if (result.ok) {
+      sent++;
+    } else {
       failed++;
+      lastErrorCategory = result.errorCategory;
       if (result.deactivate) {
+        deactivated++;
         await supabase
           .from("push_subscriptions")
           .update({ is_active: false, revoked_at: new Date().toISOString() })
@@ -93,11 +103,21 @@ async function sendTestPush(supabase: any, userId: string): Promise<Response> {
     }
   }
 
-  return jsonResponse({ success: true, message: `Test push sent to ${sent} device(s).`, sent, failed });
+  const message = sent > 0
+    ? `Test push sent to ${sent} device(s).`
+    : mapErrorCategoryToMessage(lastErrorCategory);
+
+  return jsonResponse({
+    success: sent > 0,
+    message,
+    sent,
+    failed,
+    deactivated,
+    errorCategory: sent > 0 ? undefined : lastErrorCategory,
+  });
 }
 
 async function sendPushForNotification(supabase: any, notificationId: string): Promise<Response> {
-  // Load the notification
   const { data: notif, error: notifErr } = await supabase
     .from("notifications")
     .select("id, recipient_id, title, message, priority, category, action_url")
@@ -108,7 +128,6 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
     return errorResponse("Notification not found", 404);
   }
 
-  // Check user push preferences
   const { data: prefs } = await supabase
     .from("notification_preferences")
     .select("push_enabled, attendance_push, task_push, leave_push, ticket_push, daily_report_push, calendar_push, announcement_push, security_push, quiet_hours_start, quiet_hours_end, timezone")
@@ -136,7 +155,6 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
       return jsonResponse({ success: false, message: `Push disabled for ${notif.category} category` });
     }
 
-    // Check quiet hours (non-urgent only)
     if (prefs.quiet_hours_start && prefs.quiet_hours_end && notif.priority !== "urgent" && notif.priority !== "high") {
       const now = new Date();
       const tz = prefs.timezone || "Asia/Kolkata";
@@ -154,7 +172,6 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
     }
   }
 
-  // Load active subscriptions for the recipient
   const { data: subs, error: subErr } = await supabase
     .from("push_subscriptions")
     .select("id, endpoint, p256dh_key, auth_key")
@@ -165,7 +182,11 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
     return jsonResponse({ success: false, message: "No active subscriptions" });
   }
 
-  // Create delivery record
+  const vapidConfig = validateVapidConfig();
+  if ("errorCategory" in vapidConfig) {
+    return jsonResponse({ success: false, message: vapidConfig.message, errorCategory: vapidConfig.errorCategory });
+  }
+
   const idempotencyKey = `push-${notificationId}`;
   const { data: existingDelivery } = await supabase
     .from("notification_deliveries")
@@ -190,6 +211,8 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
 
   let sent = 0;
   let failed = 0;
+  let deactivated = 0;
+
   for (const sub of subs) {
     const result = await sendWebPush(sub, {
       title: notif.title,
@@ -200,11 +223,14 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
       notificationId: notif.id,
       icon: "/icon-192.png",
       badge: "/badge-72.png",
-    });
-    if (result.ok) sent++;
-    else {
+    }, vapidConfig);
+
+    if (result.ok) {
+      sent++;
+    } else {
       failed++;
       if (result.deactivate) {
+        deactivated++;
         await supabase
           .from("push_subscriptions")
           .update({ is_active: false, revoked_at: new Date().toISOString() })
@@ -213,7 +239,6 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
     }
   }
 
-  // Update delivery record
   await supabase
     .from("notification_deliveries")
     .update({
@@ -224,7 +249,54 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
     .eq("notification_id", notificationId)
     .eq("channel", "web_push");
 
-  return jsonResponse({ success: sent > 0, message: `Push sent to ${sent} device(s)`, sent, failed });
+  return jsonResponse({
+    success: sent > 0,
+    message: `Push sent to ${sent} device(s)`,
+    sent,
+    failed,
+    deactivated,
+  });
+}
+
+interface VapidConfig {
+  publicKey: string;
+  privateKey: string;
+  subject: string;
+}
+
+type VapidConfigResult = VapidConfig | { errorCategory: string; message: string };
+
+function validateVapidConfig(): VapidConfigResult {
+  const privateKey = Deno.env.get("VAPID_PRIVATE_KEY");
+  const publicKey = Deno.env.get("VAPID_PUBLIC_KEY");
+  const subject = Deno.env.get("VAPID_SUBJECT") || "";
+
+  if (!privateKey || !publicKey) {
+    return { errorCategory: "missing_vapid", message: "Push service is not configured correctly." };
+  }
+
+  if (!subject) {
+    return { errorCategory: "missing_vapid", message: "Push service is not configured correctly." };
+  }
+
+  if (!subject.startsWith("mailto:") && !subject.startsWith("https://")) {
+    return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
+  }
+
+  try {
+    const privBytes = base64UrlDecode(privateKey);
+    if (privBytes.length !== 32) {
+      return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
+    }
+    const pubBytes = base64UrlDecode(publicKey);
+    if (pubBytes.length !== 65) {
+      return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
+    }
+  } catch {
+    return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
+  }
+
+  return { publicKey, privateKey, subject };
 }
 
 interface PushPayload {
@@ -240,65 +312,63 @@ interface PushPayload {
 
 async function sendWebPush(
   sub: { endpoint: string; p256dh_key: string; auth_key: string },
-  payload: PushPayload
-): Promise<{ ok: boolean; deactivate: boolean }> {
-  const vapidPrivateKey = Deno.env.get("VAPID_PRIVATE_KEY");
-  const vapidSubject = Deno.env.get("VAPID_SUBJECT") || "mailto:admin@navjyoti.org";
-
-  if (!vapidPrivateKey) {
-    return { ok: false, deactivate: false };
-  }
-
+  payload: PushPayload,
+  vapid: VapidConfig
+): Promise<{ ok: boolean; deactivate: boolean; errorCategory: string }> {
   try {
-    // Generate VAPID JWT
-    const jwt = await generateVapidJWT(vapidSubject, vapidPrivateKey);
-
-    // Build the push request
+    const jwt = await generateVapidJWT(sub.endpoint, vapid.subject, vapid.privateKey, vapid.publicKey);
     const body = JSON.stringify(payload);
+
     const response = await fetch(sub.endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "TTL": "2419200",
-        "Authorization": `vapid t=${jwt},k=${Deno.env.get("VAPID_PUBLIC_KEY")}`,
+        "Authorization": `vapid t=${jwt},k=${vapid.publicKey}`,
         "Urgency": payload.priority === "urgent" ? "high" : "normal",
       },
       body,
     });
 
     if (response.ok || response.status === 201 || response.status === 202) {
-      return { ok: true, deactivate: false };
+      return { ok: true, deactivate: false, errorCategory: "" };
     }
 
-    // 404 or 410 means subscription is gone — deactivate
     if (response.status === 404 || response.status === 410) {
-      return { ok: false, deactivate: true };
+      return { ok: false, deactivate: true, errorCategory: "expired_subscription" };
     }
 
-    return { ok: false, deactivate: false };
+    if (response.status === 401 || response.status === 403) {
+      return { ok: false, deactivate: false, errorCategory: "invalid_vapid" };
+    }
+
+    return { ok: false, deactivate: false, errorCategory: "temporary_failure" };
   } catch {
-    return { ok: false, deactivate: false };
+    return { ok: false, deactivate: false, errorCategory: "temporary_failure" };
   }
 }
 
-async function generateVapidJWT(subject: string, privateKeyB64: string): Promise<string> {
-  // Decode the private key
+async function generateVapidJWT(
+  endpoint: string,
+  subject: string,
+  privateKeyB64: string,
+  _publicKeyB64: string
+): Promise<string> {
   const rawKey = base64UrlDecode(privateKeyB64);
 
-  // Import the key
   const key = await crypto.subtle.importKey(
-    "pkcs8",
+    "raw",
     rawKey,
     { name: "ECDSA", namedCurve: "P-256" },
     false,
     ["sign"]
   );
 
-  // Create JWT header and payload
   const header = { typ: "JWT", alg: "ES256" };
   const now = Math.floor(Date.now() / 1000);
+  const aud = new URL(endpoint).origin;
   const jwtPayload = {
-    aud: new URL("https://fcm.googleapis.com").origin,
+    aud,
     exp: now + 12 * 60 * 60,
     sub: subject,
   };
@@ -318,6 +388,40 @@ async function generateVapidJWT(subject: string, privateKeyB64: string): Promise
   return `${signingInput}.${signatureB64}`;
 }
 
+function mapErrorCategoryToMessage(category: string): string {
+  switch (category) {
+    case "missing_vapid":
+      return "Push service is not configured correctly.";
+    case "invalid_vapid":
+      return "Push authentication configuration is invalid.";
+    case "expired_subscription":
+      return "This device subscription has expired. Please register notifications again.";
+    case "permission_denied":
+      return "Browser notifications are blocked.";
+    case "no_service_worker":
+      return "Push service worker is not active on this device.";
+    case "temporary_failure":
+      return "Push delivery is temporarily unavailable. Please retry.";
+    default:
+      return "Push delivery failed. Please try again.";
+  }
+}
+
+function isInQuietHours(current: string, start: string, end: string): boolean {
+  const toMinutes = (t: string) => {
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + m;
+  };
+  const curr = toMinutes(current);
+  const s = toMinutes(start);
+  const e = toMinutes(end);
+  if (s <= e) {
+    return curr >= s && curr < e;
+  } else {
+    return curr >= s || curr < e;
+  }
+}
+
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) {
@@ -334,21 +438,6 @@ function base64UrlDecode(str: string): Uint8Array {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
-}
-
-function isInQuietHours(current: string, start: string, end: string): boolean {
-  const toMinutes = (t: string) => {
-    const [h, m] = t.split(":").map(Number);
-    return h * 60 + m;
-  };
-  const curr = toMinutes(current);
-  const s = toMinutes(start);
-  const e = toMinutes(end);
-  if (s <= e) {
-    return curr >= s && curr < e;
-  } else {
-    return curr >= s || curr < e;
-  }
 }
 
 function jsonResponse(data: unknown, status = 200): Response {

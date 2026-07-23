@@ -188,7 +188,7 @@ export async function removeSubscription(id: string): Promise<boolean> {
   return !error
 }
 
-export async function sendTestPushNotification(): Promise<{ success: boolean; message: string }> {
+export async function sendTestPushNotification(): Promise<{ success: boolean; message: string; errorCategory?: string }> {
   try {
     const { data: session } = await supabase.auth.getSession()
     if (!session.session) return { success: false, message: 'Not authenticated' }
@@ -204,13 +204,101 @@ export async function sendTestPushNotification(): Promise<{ success: boolean; me
     })
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
-      return { success: false, message: err.error || `Request failed (${response.status})` }
+      return {
+        success: false,
+        message: err.message || err.error || `Request failed (${response.status})`,
+        errorCategory: err.errorCategory,
+      }
     }
     const result = await response.json()
-    return { success: result.success !== false, message: result.message || 'Test push sent' }
-  } catch (e) {
-    return { success: false, message: (e as Error).message }
+    return {
+      success: result.success !== false,
+      message: result.message || 'Test push sent',
+      errorCategory: result.errorCategory,
+    }
+  } catch {
+    return {
+      success: false,
+      message: 'Push delivery is temporarily unavailable. Please retry.',
+      errorCategory: 'temporary_failure',
+    }
   }
+}
+
+export async function repairPushSubscription(): Promise<{ success: boolean; message: string }> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return { success: false, message: 'Push service worker is not active on this device.' }
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.ready
+    const existing = await reg.pushManager.getSubscription()
+
+    if (existing) {
+      await existing.unsubscribe()
+    }
+
+    const { data: session } = await supabase.auth.getSession()
+    if (!session.session) return { success: false, message: 'Not authenticated' }
+
+    if (existing) {
+      const subJson = existing.toJSON()
+      if (subJson.endpoint) {
+        await supabase
+          .from('push_subscriptions')
+          .update({ is_active: false, revoked_at: new Date().toISOString() })
+          .eq('endpoint', subJson.endpoint)
+      }
+    }
+
+    const newSub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY).buffer as ArrayBuffer,
+    })
+
+    const saved = await saveSubscriptionToServer(newSub)
+    if (!saved) {
+      return { success: false, message: 'Could not save subscription. Please try again.' }
+    }
+
+    const testResult = await sendTestPushNotification()
+    return {
+      success: testResult.success,
+      message: testResult.success
+        ? 'Push subscription repaired and test notification sent.'
+        : `Subscription repaired but test failed: ${testResult.message}`,
+    }
+  } catch {
+    return { success: false, message: 'Could not repair push subscription. Please try again.' }
+  }
+}
+
+export async function getPushDiagnostics(): Promise<{
+  permission: NotifPermissionState
+  serviceWorkerActive: boolean
+  subscriptionActive: boolean
+  subscriptionCount: number
+}> {
+  const permission = getNotificationPermission()
+  let serviceWorkerActive = false
+  let subscriptionActive = false
+  let subscriptionCount = 0
+
+  if ('serviceWorker' in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.ready
+      serviceWorkerActive = !!reg
+      const sub = await reg.pushManager.getSubscription()
+      subscriptionActive = !!sub
+    } catch {
+      serviceWorkerActive = false
+    }
+  }
+
+  const subs = await fetchMySubscriptions()
+  subscriptionCount = subs.length
+
+  return { permission, serviceWorkerActive, subscriptionActive, subscriptionCount }
 }
 
 const PERMISSION_SETUP_KEY = 'navjyoti_permission_setup_done'

@@ -1289,3 +1289,62 @@ Use `mcp__supabase__list_edge_function_secrets` to verify. If not present, confi
 ### Build result
 - TypeScript: PASS
 - Production build (`npm run build`): PASS (143 modules, 683.87 kB JS / 31.15 kB CSS)
+
+---
+
+## Web Push Delivery Repair — completed 2026-07-23
+
+### Root cause
+The `send-test-push` and `send-push-notification` edge functions imported the VAPID private key as PKCS8 DER (`crypto.subtle.importKey("pkcs8", ...)`), but the configured VAPID_PRIVATE_KEY is a raw 32-byte base64url-encoded ECDSA scalar — not valid PKCS8 DER. This caused `importKey` to throw, the catch block swallowed the error, and the user saw the generic "Failed to send push. Check browser notification settings." message even though permission and subscription were active.
+
+Secondary issue: the VAPID JWT `aud` claim was hardcoded to `https://fcm.googleapis.com` instead of being derived from each subscription's endpoint origin.
+
+### Push provider/runtime error found
+- `crypto.subtle.importKey("pkcs8", ...)` rejected the raw 32-byte scalar (not valid DER).
+- JWT `aud` was hardcoded, which would break non-FCM endpoints.
+
+### VAPID key mismatch
+No key mismatch existed. The subscription was created with the current VAPID public key. The subscription data (endpoint, p256dh, auth) was clean — no double JSON stringification. A `vapid_key_fp` column was added to `push_subscriptions` for future key-rotation detection.
+
+### Subscription recreation
+Not required — existing subscription was valid. A "Repair Push Subscription" button was added to Account Settings for future use.
+
+### Server function changes
+- `supabase/functions/send-test-push/index.ts` — rewritten: imports VAPID private key as raw ECDSA P-256 scalar (`importKey("raw", ...)`), derives JWT `aud` from endpoint origin, validates VAPID config at invocation, categorizes errors (missing_vapid, invalid_vapid, expired_subscription, temporary_failure), deactivates 404/410 subscriptions, returns attempted/sent/failed/deactivated counts.
+- `supabase/functions/send-push-notification/index.ts` — same fixes plus: checks user push preferences, category-specific push flags, quiet hours, idempotency for notification delivery, records delivery result in `notification_deliveries`.
+- `supabase/functions/subscribe-device/index.ts` — stores `vapid_key_fp` (first 16 chars of VAPID public key) on subscription insert/update for rotation detection.
+
+### Service worker changes
+None — `public/sw.js` was already correct: has `push` handler calling `self.registration.showNotification()`, `notificationclick` handler with safe internal-URL validation, `skipWaiting`/`clients.claim` update strategy.
+
+### Files changed
+- `supabase/functions/send-test-push/index.ts`
+- `supabase/functions/send-push-notification/index.ts`
+- `supabase/functions/subscribe-device/index.ts`
+- `supabase/migrations/` — migration `add_vapid_key_fingerprint_to_push_subscriptions` applied
+- `src/lib/webPush.ts` — added `repairPushSubscription()`, `getPushDiagnostics()`, improved `sendTestPushNotification()` error handling with errorCategory
+- `src/pages/AccountSettingsPage.tsx` — added "Repair Push Subscription" button, push diagnostics panel (permission, SW state, subscription state, device count), improved error messages
+- `src/lib/__tests__/push.test.ts` — 22 unit tests covering VAPID validation, error mapping, subscription construction, quiet hours, SW verification, key rotation detection
+- `tsconfig.json` — excluded `src/**/__tests__/**` from TS build (test files use Node built-ins)
+
+### Tests and results
+- 22 tests, all PASS (run with `node --test src/lib/__tests__/push.test.ts`)
+- Covers: missing VAPID, subject validation, user targeting, subscription object, duplicate prevention, key rotation, 201/202 success, 404/410 deactivation, temporary failure retry, private key absent from frontend, SW push handler, showNotification, safe click URL, delivery recording, error mapping, quiet hours, no payroll feature
+
+### Build result
+- TypeScript: PASS
+- Production build (`npm run build`): PASS (143 modules, 686.63 kB JS / 31.15 kB CSS)
+- Edge functions deployed: send-test-push, send-push-notification, subscribe-device
+
+### Manual verification steps
+1. Go to https://navjyotirs-svg-navjy-hpxl.bolt.host
+2. Remove the current registered device in Account Settings.
+3. Refresh the page.
+4. Re-enable/register notifications.
+5. Confirm Push Subscription shows Active (1).
+6. Click "Send Test Push Notification".
+7. A Windows system notification appears.
+8. Put the HRMS tab in background, send another test — notification still appears.
+9. Close the HRMS tab, trigger another authorized test — notification appears while tab is closed.
+10. Click the notification — published HRMS opens.
+11. Delivery log shows success.

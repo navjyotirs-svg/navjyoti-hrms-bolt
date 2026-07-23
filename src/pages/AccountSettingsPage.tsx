@@ -11,6 +11,8 @@ import {
   registerServiceWorker,
   subscribeToPush,
   saveSubscriptionToServer,
+  repairPushSubscription,
+  getPushDiagnostics,
   type PushSubscriptionRow,
   type NotifPermissionState,
 } from '@/lib/webPush'
@@ -81,6 +83,13 @@ export function AccountSettingsPage() {
   const [testResult, setTestResult] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [reSubscribing, setReSubscribing] = useState(false)
+  const [repairing, setRepairing] = useState(false)
+  const [diagnostics, setDiagnostics] = useState<{
+    permission: NotifPermissionState
+    serviceWorkerActive: boolean
+    subscriptionActive: boolean
+    subscriptionCount: number
+  } | null>(null)
 
   useEffect(() => {
     if (!profile?.id) return
@@ -170,6 +179,23 @@ export function AccountSettingsPage() {
     const result = await sendTestPushNotification()
     setTestResult(result.message)
     setTesting(false)
+    refreshDiagnostics()
+  }
+
+  async function refreshDiagnostics() {
+    const d = await getPushDiagnostics()
+    setDiagnostics(d)
+    setNotifPerm(d.permission)
+    setSubs(await fetchMySubscriptions())
+  }
+
+  async function handleRepairPush() {
+    setRepairing(true)
+    setTestResult(null)
+    const result = await repairPushSubscription()
+    setTestResult(result.message)
+    setRepairing(false)
+    refreshDiagnostics()
   }
 
   async function handleRemoveSub(id: string) {
@@ -394,6 +420,22 @@ export function AccountSettingsPage() {
               <button className="btn btn-sm btn-secondary" onClick={handleTestPush} disabled={testing} type="button" style={{ marginTop: 'var(--space-3)' }}>
                 {testing ? 'Sending…' : 'Send Test Push Notification'}
               </button>
+            )}
+
+            {notifPerm === 'granted' && subs.length > 0 && (
+              <button className="btn btn-sm btn-outline" onClick={handleRepairPush} disabled={repairing} type="button" style={{ marginTop: 'var(--space-2)' }}>
+                {repairing ? 'Repairing…' : 'Repair Push Subscription'}
+              </button>
+            )}
+
+            {diagnostics && (
+              <div style={{ marginTop: 'var(--space-4)', padding: 'var(--space-3)', background: 'var(--surface)', borderRadius: '8px', fontSize: '11.5px', color: 'var(--slate)' }}>
+                <div style={{ fontWeight: 600, marginBottom: 'var(--space-2)', color: 'var(--ink)' }}>Push Diagnostics</div>
+                <div>Permission: <strong style={{ color: diagnostics.permission === 'granted' ? 'var(--success)' : 'var(--error)' }}>{diagnostics.permission}</strong></div>
+                <div>Service Worker: <strong style={{ color: diagnostics.serviceWorkerActive ? 'var(--success)' : 'var(--error)' }}>{diagnostics.serviceWorkerActive ? 'Active' : 'Inactive'}</strong></div>
+                <div>Browser Subscription: <strong style={{ color: diagnostics.subscriptionActive ? 'var(--success)' : 'var(--error)' }}>{diagnostics.subscriptionActive ? 'Active' : 'None'}</strong></div>
+                <div>Registered Devices: <strong>{diagnostics.subscriptionCount}</strong></div>
+              </div>
             )}
           </div>
         </div>

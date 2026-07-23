@@ -49,6 +49,10 @@ Deno.serve(async (req: Request) => {
       return errorResponse("Missing required subscription fields (endpoint, p256dh, auth)", 400);
     }
 
+    // Compute VAPID key fingerprint from the configured public key
+    const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY") || "";
+    const vapidKeyFp = vapidPublicKey ? vapidPublicKey.slice(0, 16) : null;
+
     // Use service-role client to upsert (avoids RLS issues with duplicate detection)
     const adminClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -78,6 +82,7 @@ Deno.serve(async (req: Request) => {
           permission_status: "granted",
           last_used_at: new Date().toISOString(),
           revoked_at: null,
+          vapid_key_fp: vapidKeyFp,
         })
         .eq("id", existing.id);
 
@@ -104,6 +109,7 @@ Deno.serve(async (req: Request) => {
         is_active: true,
         permission_status: "granted",
         last_used_at: new Date().toISOString(),
+        vapid_key_fp: vapidKeyFp,
       })
       .select("id")
       .single();
