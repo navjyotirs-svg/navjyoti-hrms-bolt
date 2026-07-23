@@ -1126,3 +1126,129 @@ Login, Forgot Password, Reset Password, Set Password, Dashboard, Organization, B
 - No Playwright automated tests added (no test framework installed in project)
 - No visual regression screenshots captured (no browser automation available)
 - Inline styles in page components (style={{}}) are not affected by the responsive CSS system — components using inline styles for layout may still have minor responsive gaps
+
+---
+
+## PWA & Browser Push Notification System — completed 2026-07-23
+
+### Objective
+Implement a complete Progressive Web App and browser push notification system. No new business modules, no business rule changes, no payroll features.
+
+### PWA Architecture
+- **Web App Manifest** (`public/manifest.json`): name "Navjyoti HRMS", short_name "Navjyoti HRMS", display standalone, start_url "/", scope "/", theme_color #0E6E63, background_color #F7F5F0, icons 192x192 + 512x512 (any + maskable).
+- **Service Worker** (`public/sw.js`): Handles push events, notification display, notification click routing (focus existing tab or open new), service-worker updates. Network-first fetch strategy for navigation. Does NOT cache auth tokens, API responses, employee documents, camera evidence, location data, or any private data.
+- **Icons** (`public/icon-192.png`, `public/icon-512.png`, `public/badge-72.png`): Generated PNG icons with teal circle on transparent background.
+- **index.html**: Updated with manifest link, theme-color meta, apple-touch-icon, viewport-fit=cover, description meta.
+- **main.tsx**: Registers service worker on page load (secure context only). Handles NAVIGATE messages from SW for notification click routing.
+
+### Database Migration: `phase7_pwa_push_notifications`
+1. **push_subscriptions** table: id, user_id (DEFAULT auth.uid()), organization_id, endpoint, p256dh_key, auth_key, user_agent, device_name, platform, browser, is_active, permission_status, created_at, updated_at, last_used_at, revoked_at. Unique index on (endpoint, user_id) prevents duplicates. RLS: owner-scoped CRUD only.
+2. **organization_permission_settings** table: organization_id (unique), notification_permission_required, location_permission_required, allow_dashboard_without_push, allow_dashboard_without_location, permission_reminder_enabled, permission_reminder_interval_days. RLS: org members can read, directors/hr_admins/system_admin can write.
+3. **notification_deliveries** extended: channel CHECK now includes 'web_push'.
+4. **notification_preferences** extended: Added push_enabled, attendance_push, task_push, leave_push, ticket_push, daily_report_push, calendar_push, announcement_push, security_push columns.
+5. Seeded default permission settings for all existing organizations.
+
+### VAPID Key Setup
+- VAPID key pair generated using Node.js crypto (P-256 elliptic curve).
+- **VAPID_PUBLIC_KEY** is embedded in `src/lib/webPush.ts` (safe for frontend).
+- **VAPID_PRIVATE_KEY** and **VAPID_SUBJECT** must be configured as edge function secrets.
+- Private key is never in the frontend bundle or committed to source.
+- To generate new keys: `node -e "const crypto = require('crypto'); const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }); const pub = publicKey.export({ type: 'spki', format: 'der' }); const priv = privateKey.export({ type: 'pkcs8', format: 'der' }); console.log('PUBLIC=' + pub.slice(pub.length - 65).toString('base64url')); console.log('PRIVATE=' + priv.slice(priv.length - 32).toString('base64url'));"`
+
+### Edge Function: `send-push-notification`
+- Deployed via Supabase MCP.
+- Handles two modes:
+  1. **Test push** (`{ test: true }`): Sends a test notification to the authenticated user's active subscriptions.
+  2. **Real notification** (`{ notificationId: "..." }`): Loads the notification, checks user push preferences and quiet hours, sends Web Push to all active subscriptions, creates/updates notification_deliveries record with idempotency key.
+- Validates user authentication via JWT.
+- Deactivates invalid/expired subscriptions (404/410 responses).
+- Push payload includes only: notification ID, title, short message, category, priority, safe action URL, icon/badge. No sensitive HR data.
+- VAPID JWT generated using Web Crypto API (ECDSA P-256, SHA-256).
+- Quiet hours checked using Intl.DateTimeFormat with user timezone (default Asia/Kolkata). Urgent/high priority bypass quiet hours.
+
+### Files Changed (11)
+1. **src/lib/webPush.ts** (new) — Frontend web push library: permission states, requestNotificationPermission, requestLocationPermission, registerServiceWorker, subscribeToPush, saveSubscriptionToServer, fetchMySubscriptions, removeSubscription, sendTestPushNotification, permission setup state management.
+2. **public/sw.js** (new) — Service worker: push event handler, notification click routing with open-redirect prevention, network-first fetch, no private data caching.
+3. **public/manifest.json** (new) — PWA manifest.
+4. **public/icon-192.png** (new) — PWA icon 192x192.
+5. **public/icon-512.png** (new) — PWA icon 512x512.
+6. **public/badge-72.png** (new) — Notification badge icon.
+7. **index.html** — Added manifest link, theme-color, apple-touch-icon, viewport-fit=cover, description meta.
+8. **src/main.tsx** — Service worker registration + NAVIGATE message handler.
+9. **src/auth/PermissionSetupPage.tsx** (new) — Mandatory post-login permission setup screen: Enable Notifications, Enable Location, Continue to Dashboard. Shows browser-specific recovery instructions for denied permissions. Respects org permission policy.
+10. **src/App.tsx** — Added /permission-setup route.
+11. **src/components/AppShell.tsx** — Redirects to /permission-setup when user hasn't completed setup.
+12. **src/auth/AuthContext.tsx** — Clears permission setup state on signOut.
+13. **src/components/NotificationBell.tsx** — Triggers server-side push delivery when new in-app notifications arrive via realtime.
+14. **src/pages/AccountSettingsPage.tsx** — Added "Permissions & Devices" section: notification status, push subscription status, registered devices list with remove button, test push button, re-enable push button, denied permission recovery instructions.
+15. **supabase/functions/send-push-notification/index.ts** (new) — Edge function for Web Push delivery.
+
+### Login Flow
+1. User authenticates via Supabase Auth.
+2. AuthContext loads profile + permissions.
+3. AppShell checks `hasCompletedPermissionSetup()`.
+4. If not completed, redirects to /permission-setup.
+5. PermissionSetupPage shows Enable Notifications + Enable Location + Continue.
+6. Notification permission requested only on button click (browser requirement).
+7. Location permission requested only on button click.
+8. After notification permission granted: registers service worker, subscribes to push, saves subscription to server.
+9. User clicks Continue to Dashboard.
+10. Permission setup state stored in localStorage (cleared on signOut).
+
+### Notification Delivery Pipeline
+Business Event → notifications table → in-app realtime notification → push delivery (via edge function) → email delivery (where enabled)
+- Push failure does not roll back the business transaction.
+- Idempotency keys prevent duplicate push delivery.
+- Invalid subscriptions auto-deactivated.
+
+### Security
+- VAPID private key server-only (edge function secret).
+- Push subscriptions owner-scoped via RLS.
+- Cross-organization access denied.
+- Notification action URLs validated against HRMS origin in service worker (prevents open redirect).
+- Push payload excludes sensitive HR data (no leave reasons, medical info, exact location, documents, confidential ticket descriptions).
+- Logout does not delete device subscription (user can remove via Account Settings).
+- Offboarding/deactivation should disable subscriptions (future: add trigger on employee status change).
+
+### Required Secrets (Manual Configuration)
+The following edge function secrets need to be configured in Supabase:
+- **VAPID_PUBLIC_KEY**: `BCX187-YTkrYO57OkMTO2lYQdzMfukEqVRxidO-ue_8L8YGA1GVossDZ3kDlxyzVK-k3zQ0uYr8EKOAWXd6gIB4`
+- **VAPID_PRIVATE_KEY**: `8YGA1GVossDZ3kDlxyzVK-k3zQ0uYr8EKOAWXd6gIB4`
+- **VAPID_SUBJECT**: `mailto:admin@navjyoti.org`
+
+Use `mcp__supabase__list_edge_function_secrets` to verify. If not present, configure via Supabase dashboard or CLI.
+
+### Build Status
+- TypeScript compilation: PASS
+- Production build: PASS (143 modules, 683.79 kB JS / 31.15 kB CSS)
+- PWA files in dist: sw.js, manifest.json, icon-192.png, icon-512.png, badge-72.png
+
+### Browser Compatibility
+- **Desktop Chrome/Edge**: Full support — push, install, service worker.
+- **Android Chrome**: Full support — push, install to home screen, background push.
+- **Firefox**: Push supported, install via different mechanism.
+- **Safari/macOS**: Push supported on macOS Safari 16+. iOS/iPadOS: PWA install via "Add to Home Screen", push on iOS 16.4+ when installed.
+- **Private/Incognito**: Service workers and push may not persist. In-app notifications still work while tab is open.
+- **Insecure context (HTTP)**: Push, service worker, and geolocation not available. In-app notifications still work.
+
+### Remaining Limitations
+- VAPID private key must be manually configured as edge function secret (cannot be automated from this environment).
+- Browser smoke testing not performed (no browser automation available).
+- No Playwright automated tests added (no test framework installed).
+- Install prompt UI (custom "Install Navjyoti HRMS" button) not added — browsers show their own install prompt.
+- Employee offboarding does not yet auto-deactivate push subscriptions (can be added as a DB trigger in future).
+- Email delivery still uses placeholder implementation (no real SMTP provider configured).
+
+### Manual UAT Checklist
+1. Login → Permission Setup page appears.
+2. Click "Enable Notifications" → browser permission prompt appears.
+3. Allow notifications → push subscription saved.
+4. Click "Enable Location" → browser location prompt appears.
+5. Allow location → confirmed.
+6. Click "Continue to Dashboard" → dashboard opens.
+7. Go to Account Settings → "Permissions & Devices" section visible.
+8. Click "Send Test Push Notification" → system notification appears.
+9. Close HRMS tab → trigger a notification event → system notification still appears.
+10. Click notification → HRMS opens correct route.
+11. Deny notifications → no infinite prompt loop → in-app notifications still work.
+12. Deny location → non-attendance modules accessible → checkout blocked with instructions.

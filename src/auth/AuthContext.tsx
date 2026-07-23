@@ -186,6 +186,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null)
     setPermissions([])
     setProfileError(null)
+    // Clear permission setup state so user re-runs setup on next login
+    try {
+      localStorage.removeItem('navjyoti_permission_setup_done')
+    } catch {}
   }
 
   async function resetPassword(email: string) {

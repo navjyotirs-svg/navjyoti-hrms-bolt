@@ -3,6 +3,17 @@ import { useAuth } from '@/auth/AuthContext'
 import { useOutletContext } from 'react-router-dom'
 import { ROLE_LABELS } from '@/types/roles'
 import { supabase } from '@/lib/supabase'
+import {
+  getNotificationPermission,
+  fetchMySubscriptions,
+  removeSubscription,
+  sendTestPushNotification,
+  registerServiceWorker,
+  subscribeToPush,
+  saveSubscriptionToServer,
+  type PushSubscriptionRow,
+  type NotifPermissionState,
+} from '@/lib/webPush'
 import '@/styles/shared.css'
 
 const SELF_SERVICE_FIELDS = [
@@ -64,6 +75,12 @@ export function AccountSettingsPage() {
   const [savingPassword, setSavingPassword] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSuccess, setPasswordSuccess] = useState(false)
+
+  const [notifPerm, setNotifPerm] = useState<NotifPermissionState>('default')
+  const [subs, setSubs] = useState<PushSubscriptionRow[]>([])
+  const [testResult, setTestResult] = useState<string | null>(null)
+  const [testing, setTesting] = useState(false)
+  const [reSubscribing, setReSubscribing] = useState(false)
 
   useEffect(() => {
     if (!profile?.id) return
@@ -140,6 +157,49 @@ export function AccountSettingsPage() {
     const { error } = await updatePassword(newPassword)
     if (error) { setPasswordError(error) } else { setPasswordSuccess(true); setNewPassword(''); setConfirmPassword('') }
     setSavingPassword(false)
+  }
+
+  useEffect(() => {
+    setNotifPerm(getNotificationPermission())
+    fetchMySubscriptions().then(setSubs)
+  }, [])
+
+  async function handleTestPush() {
+    setTesting(true)
+    setTestResult(null)
+    const result = await sendTestPushNotification()
+    setTestResult(result.message)
+    setTesting(false)
+  }
+
+  async function handleRemoveSub(id: string) {
+    const ok = await removeSubscription(id)
+    if (ok) setSubs(subs.filter((s) => s.id !== id))
+  }
+
+  async function handleReEnablePush() {
+    setReSubscribing(true)
+    setTestResult(null)
+    try {
+      await registerServiceWorker()
+      const sub = await subscribeToPush()
+      if (sub) {
+        const saved = await saveSubscriptionToServer(sub)
+        if (saved) {
+          setNotifPerm('granted')
+          const updated = await fetchMySubscriptions()
+          setSubs(updated)
+          setTestResult('Push notifications re-enabled.')
+        } else {
+          setTestResult('Could not save subscription. Please try again.')
+        }
+      } else {
+        setTestResult('Could not subscribe to push. Check browser notification settings.')
+      }
+    } catch {
+      setTestResult('An error occurred. Please try again.')
+    }
+    setReSubscribing(false)
   }
 
   if (!profile) return null
@@ -267,6 +327,77 @@ export function AccountSettingsPage() {
           </div>
         </div>
       )}
+
+      <div className="card">
+        <div className="card-header">Permissions & Devices</div>
+        <div className="card-body">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <div className="info-row" style={{ borderBottom: '1px solid var(--border)' }}>
+              <span className="info-label">Notifications</span>
+              <span className="info-value">
+                {notifPerm === 'granted' && <span className="tag tag-teal">Enabled</span>}
+                {notifPerm === 'denied' && <span className="tag tag-rose">Blocked</span>}
+                {notifPerm === 'default' && <span className="tag tag-gray">Not configured</span>}
+                {notifPerm === 'unsupported' && <span className="tag tag-gray">Unsupported</span>}
+              </span>
+            </div>
+
+            <div className="info-row" style={{ borderBottom: '1px solid var(--border)' }}>
+              <span className="info-label">Push Subscription</span>
+              <span className="info-value">
+                {subs.length > 0 ? <span className="tag tag-teal">Active ({subs.length})</span> : <span className="tag tag-gray">Inactive</span>}
+              </span>
+            </div>
+
+            {notifPerm === 'denied' && (
+              <div className="form-error" style={{ fontSize: '12px' }}>
+                Notifications are blocked. Open your browser Site Settings and allow Notifications for this HRMS.
+                <br /><br />
+                <strong>Chrome/Edge:</strong> Click the lock icon next to the URL &gt; Site settings &gt; Notifications &gt; Allow.<br />
+                <strong>Firefox:</strong> Click the lock icon &gt; Clear permissions, then reload.<br />
+                <strong>Safari:</strong> Preferences &gt; Websites &gt; Notifications &gt; Allow for this site.
+              </div>
+            )}
+
+            {notifPerm === 'default' && (
+              <button className="btn btn-sm" onClick={handleReEnablePush} disabled={reSubscribing}>
+                {reSubscribing ? 'Enabling…' : 'Enable Push Notifications'}
+              </button>
+            )}
+
+            {testResult && (
+              <div className="form-success" style={{ fontSize: '12.5px' }}>{testResult}</div>
+            )}
+
+            {subs.length > 0 && (
+              <div style={{ marginTop: 'var(--space-3)' }}>
+                <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Registered Devices</h4>
+                {subs.map((s) => (
+                  <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-2) 0', borderBottom: '1px solid var(--border)', gap: 'var(--space-2)' }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: '12.5px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {s.device_name || `${s.platform || ''} ${s.browser || ''}`}
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--slate)' }}>
+                        Last used: {s.last_used_at ? new Date(s.last_used_at).toLocaleDateString('en-IN') : 'Never'}
+                      </div>
+                    </div>
+                    <button className="btn btn-sm btn-danger" onClick={() => handleRemoveSub(s.id)} type="button">
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {notifPerm === 'granted' && subs.length > 0 && (
+              <button className="btn btn-sm btn-secondary" onClick={handleTestPush} disabled={testing} type="button" style={{ marginTop: 'var(--space-3)' }}>
+                {testing ? 'Sending…' : 'Send Test Push Notification'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

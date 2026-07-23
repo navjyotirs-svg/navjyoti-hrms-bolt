@@ -6,6 +6,7 @@ import { ForgotPasswordPage } from '@/auth/ForgotPasswordPage'
 import { ResetPasswordPage } from '@/auth/ResetPasswordPage'
 import { SetPasswordPage } from '@/auth/SetPasswordPage'
 import { UnauthorizedPage } from '@/auth/UnauthorizedPage'
+import { PermissionSetupPage } from '@/auth/PermissionSetupPage'
 import { AppShell } from '@/components/AppShell'
 import { PermissionGuard } from '@/components/PermissionGuard'
 import { Dashboard } from '@/pages/Dashboard'
@@ -134,6 +135,9 @@ function AppRoutes() {
       <Route path="/set-password" element={<SetPasswordPage />} />
       <Route path="/auth/callback" element={<AuthCallbackRedirect />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
+      <Route path="/permission-setup" element={
+        <ProtectedRoute><PermissionSetupPage /></ProtectedRoute>
+      } />
       <Route
         element={
           <ProtectedRoute>

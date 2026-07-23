@@ -124,6 +124,20 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
           }
 
           sendBrowserNotification(notif)
+
+          // Also trigger server-side push delivery for background notifications
+          ;(async () => {
+            const session = await supabase.auth.getSession()
+            fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-push-notification`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${session.data.session?.access_token || ''}`,
+                apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+              },
+              body: JSON.stringify({ notificationId: notif.id }),
+            }).catch(() => {})
+          })()
         }
       )
       .on('system', { event: 'connected' }, () => {

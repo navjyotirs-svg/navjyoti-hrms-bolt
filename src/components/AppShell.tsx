@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { useAuth } from '@/auth/AuthContext'
 import { PendingActivationPage } from '@/auth/PendingActivationPage'
+import { hasCompletedPermissionSetup } from '@/lib/webPush'
 import '@/styles/shell.css'
 
 const PAGE_TITLES: Record<string, string> = {
@@ -91,6 +92,10 @@ export function AppShell() {
 
   if (profile?.status === 'disabled') {
     return <Navigate to="/login" replace />
+  }
+
+  if (!hasCompletedPermissionSetup() && location.pathname !== '/permission-setup') {
+    return <Navigate to="/permission-setup" replace />
   }
 
   return (
