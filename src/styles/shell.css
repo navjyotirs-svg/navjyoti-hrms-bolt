@@ -50,6 +50,7 @@
   gap: 2px;
   flex: 1;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .sidebar-item {
@@ -62,7 +63,8 @@
   color: #c6c2b8;
   border: 1px solid transparent;
   transition: background var(--transition-fast);
-  min-height: 40px;
+  min-height: var(--touch-target);
+  text-decoration: none;
 }
 
 .sidebar-item:hover {
@@ -98,6 +100,9 @@
   font-weight: 600;
   font-size: 12.5px;
   margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar-foot-role {
@@ -114,7 +119,8 @@
   font-weight: 600;
   width: 100%;
   transition: all var(--transition-fast);
-  min-height: 32px;
+  min-height: 36px;
+  cursor: pointer;
 }
 
 .sidebar-signout:hover {
@@ -188,8 +194,8 @@
 .sidebar-toggle {
   display: none;
   position: fixed;
-  top: 14px;
-  left: 14px;
+  top: 10px;
+  left: 10px;
   z-index: 101;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -197,6 +203,10 @@
   padding: 8px;
   color: var(--ink);
   box-shadow: var(--shadow-sm);
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  align-items: center;
+  justify-content: center;
 }
 
 .sidebar-overlay {
@@ -219,7 +229,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 26px;
+  gap: 8px;
+  padding: 0 var(--page-pad-x);
   flex-shrink: 0;
   position: sticky;
   top: 0;
@@ -228,15 +239,21 @@
 
 .topbar-title {
   font-family: var(--font-heading);
-  font-size: 20px;
+  font-size: var(--fs-page-title);
   font-weight: 600;
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .topbar-bell {
@@ -247,6 +264,12 @@
   border-radius: var(--radius-sm);
   color: var(--ink-text);
   transition: background var(--transition-fast);
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 .topbar-bell:hover {
@@ -257,17 +280,26 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  max-width: 160px;
 }
 
 .topbar-user-name {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--ink-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .topbar-user-role {
   font-size: 10.5px;
   color: var(--slate);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .topbar-attendance {
@@ -287,6 +319,7 @@
   cursor: pointer;
   transition: background var(--transition-fast);
   white-space: nowrap;
+  min-height: var(--touch-target);
 }
 
 .topbar-checkin-btn:hover:not(:disabled) {
@@ -309,6 +342,7 @@
   cursor: pointer;
   transition: background var(--transition-fast);
   white-space: nowrap;
+  min-height: var(--touch-target);
 }
 
 .topbar-checkout-btn:hover {
@@ -339,23 +373,26 @@
 .app-content {
   flex: 1;
   overflow-y: auto;
-  padding: 26px;
+  padding: var(--page-pad-y) var(--page-pad-x);
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ---- Responsive ---- */
-@media (max-width: 768px) {
+
+/* Tablet and below: sidebar becomes drawer */
+@media (max-width: 1023px) {
   .sidebar {
+    width: var(--drawer-width);
     transform: translateX(-100%);
   }
 
   .sidebar.open {
     transform: translateX(0);
+    box-shadow: var(--shadow-lg);
   }
 
   .sidebar-toggle {
     display: flex;
-    align-items: center;
-    justify-content: center;
   }
 
   .sidebar-overlay {
@@ -373,12 +410,72 @@
   .topbar {
     padding-left: 60px;
   }
+}
 
+/* Small mobile: collapse topbar user info, compact attendance */
+@media (max-width: 479px) {
   .topbar-user {
     display: none;
   }
 
-  .app-content {
-    padding: 16px;
+  .topbar-timer {
+    font-size: 11px;
   }
+
+  .topbar-checkin-btn,
+  .topbar-checkout-btn {
+    padding: 6px 10px;
+    font-size: 11.5px;
+  }
+
+  .topbar-attendance-done {
+    font-size: 10.5px;
+  }
+}
+
+/* Very small: 320px — stack attendance items if needed */
+@media (max-width: 359px) {
+  .topbar-attendance {
+    gap: 4px;
+  }
+
+  .topbar-checkin-btn,
+  .topbar-checkout-btn {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+}
+
+/* ---- Accessibility ---- */
+
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.sidebar-item:focus-visible {
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Screen-reader-only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback } from 'react'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { navItemsForPermissions, NAV_ITEMS, ROLE_LABELS } from '@/types/roles'
 import '@/styles/shell.css'
@@ -7,11 +7,33 @@ import '@/styles/shell.css'
 export function Sidebar() {
   const { profile, permissions, signOut, refreshProfile } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [reloading, setReloading] = useState(false)
   const [showDiagnostics, setShowDiagnostics] = useState(false)
 
   const items = navItemsForPermissions(permissions)
+
+  const closeMobile = useCallback(() => setMobileOpen(false), [])
+
+  // Close drawer on route change
+  useEffect(() => {
+    closeMobile()
+  }, [location.pathname, closeMobile])
+
+  // Escape closes drawer + body scroll lock
+  useEffect(() => {
+    if (!mobileOpen) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMobile()
+    }
+    document.addEventListener('keydown', handleKey)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', handleKey)
+      document.body.style.overflow = ''
+    }
+  }, [mobileOpen, closeMobile])
 
   async function handleSignOut() {
     await signOut()
@@ -22,10 +44,6 @@ export function Sidebar() {
     setReloading(true)
     await refreshProfile()
     setReloading(false)
-  }
-
-  function closeMobile() {
-    setMobileOpen(false)
   }
 
   return (

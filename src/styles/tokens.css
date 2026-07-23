@@ -83,6 +83,36 @@
   /* ---- Layout ---- */
   --sidebar-width: 250px;
   --topbar-height: 60px;
+  --drawer-width: 280px;
+
+  /* ---- Breakpoints (reference values — used in media queries) ---- */
+  /* xs: 320px, sm: 480px, md: 768px, lg: 1024px, xl: 1280px, 2xl: 1536px */
+
+  /* ---- Responsive layout tokens ---- */
+  --page-pad-x: clamp(16px, 3vw, 32px);
+  --page-pad-y: clamp(20px, 3vw, 28px);
+  --section-gap: clamp(16px, 3vw, 24px);
+  --card-pad: clamp(16px, 2.5vw, 24px);
+  --field-height: 44px;
+  --touch-target: 44px;
+  --modal-width: min(560px, calc(100vw - 24px));
+  --modal-max-height: 90dvh;
+  --table-density: 13px;
+
+  /* ---- Fluid typography scale ---- */
+  --fs-page-title: clamp(17px, 2.5vw, 22px);
+  --fs-section-title: clamp(15px, 2vw, 18px);
+  --fs-card-title: clamp(14px, 1.8vw, 16px);
+  --fs-body: clamp(13px, 1.5vw, 14px);
+  --fs-label: clamp(11px, 1.3vw, 12px);
+  --fs-helper: clamp(11px, 1.3vw, 12px);
+  --fs-mono: clamp(11px, 1.3vw, 13px);
+  --fs-kpi-num: clamp(22px, 3vw, 30px);
+  --fs-timer: clamp(28px, 5vw, 40px);
+
+  /* ---- Safe area ---- */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
 }
 
 *,

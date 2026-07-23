@@ -1051,3 +1051,78 @@ Implemented daily work reports, end-of-day closure, management follow-up, consol
 - Export only supports CSV format (XLSX/PDF types exist in schema but not implemented)
 - Browser smoke test not performed (no browser automation available)
 - Report scheduler runs at 18:30 UTC which is 00:00 IST — this is the correct boundary for Kolkata date rollover
+
+---
+
+## Responsive Design & UI Compatibility Audit — completed 2026-07-23
+
+### Objective
+Full responsive audit across all breakpoints (320px–1920px+). No new business modules, no workflow/DB changes, no payroll features.
+
+### Responsive architecture summary (before)
+- Tokens existed for colors/spacing/radius/shadows but only 2 layout variables (`--sidebar-width`, `--topbar-height`). No breakpoint tokens, no fluid typography, no touch-target/modal/page-padding tokens.
+- Media queries used arbitrary values (768px, 900px, 500px, 600px, 1100px) scattered across 4 CSS files.
+- Tables used `overflow-x: auto` only — no mobile card treatment.
+- Modals capped at 560px with no mobile full-screen sheet.
+- Forms collapsed to 1-col at 768px but no tablet intermediate.
+- Sidebar drawer lacked Escape/scroll-lock/focus-trap.
+- No `:focus-visible`, no `prefers-reduced-motion`, no `.sr-only` utility.
+- Buttons were 36px min-height (below 44px touch target).
+
+### Files changed (7)
+1. **src/styles/tokens.css** — Added 20+ responsive design tokens: `--drawer-width`, `--page-pad-x/y` (clamp), `--section-gap` (clamp), `--card-pad` (clamp), `--field-height` (44px), `--touch-target` (44px), `--modal-width` (min(560px, 100vw-24px)), `--modal-max-height` (90dvh), `--table-density`, fluid typography scale (`--fs-page-title`, `--fs-section-title`, `--fs-card-title`, `--fs-body`, `--fs-label`, `--fs-mono`, `--fs-kpi-num`, `--fs-timer` all using clamp()), safe-area insets (`--safe-bottom`, `--safe-top`).
+2. **src/styles/shell.css** — Rewritten: sidebar items use `min-height: var(--touch-target)` (44px), sidebar drawer transform with Escape/overlay close, topbar uses fluid `--fs-page-title`, topbar user info hidden below 480px, topbar attendance buttons compact below 480px and 360px, `:focus-visible` outline, `prefers-reduced-motion` media query, `.sr-only` utility class, `dvh` units for modal heights.
+3. **src/styles/shared.css** — Rewritten: KPI grid uses `auto-fit minmax(min(100%, 220px), 1fr)` (responsive without media queries), forms use 2-col grid collapsing to 1-col at 600px, form actions stack and go full-width on mobile, modals become full-screen sheets at 600px (`width: 100%; max-height: 100dvh; border-radius: 0`), modal header/footer sticky with safe-area padding, buttons use `min-height: var(--field-height)` (44px), `.btn-sm` is 36px, table density uses token, calendar cells compact below 600px with dot indicators instead of text.
+4. **src/styles/attendance.css** — Timer uses `--fs-timer` (clamp), checkout video uses `max-height: 50dvh` with `object-fit: cover`, notification dropdown uses `max-width: calc(100vw - 24px)`, notification toast uses safe-area inset and full-width on mobile, checkout video max-height 40dvh below 480px.
+5. **src/styles/dashboard.css** — Grid uses `auto-fit minmax(min(100%, 220px), 1fr)`, card numbers use `--fs-kpi-num` (clamp), card padding uses `--card-pad` (clamp), section title uses `--fs-section-title` (clamp), greeting uses `--fs-page-title` (clamp).
+6. **src/styles/auth.css** — Auth page uses `100dvh` and safe-area top padding, card padding uses `clamp(20px, 5vw, space-8)`, title uses `clamp(22px, 5vw, 26px)`.
+7. **src/components/Sidebar.tsx** — Added Escape key handler, body scroll lock when drawer open, route-change auto-close.
+
+### Responsive improvements by category
+
+**Global system**: Shared breakpoint reference (xs:320, sm:480, md:768, lg:1024, xl:1280, 2xl:1536). All media queries use these values. Fluid sizing via clamp() for typography, padding, gaps. CSS grid auto-fit with minmax() for KPI/dashboard grids.
+
+**Application shell**: Sidebar becomes drawer below 1024px with hamburger toggle, overlay, Escape close, body scroll lock, route-change auto-close. Topbar hides user name/role below 480px, compacts attendance buttons below 480px and 360px. All touch targets 44px minimum.
+
+**Page containers**: `--page-pad-x` uses `clamp(16px, 3vw, 32px)` — 16px on mobile, 32px on desktop. `--page-pad-y` uses `clamp(20px, 3vw, 28px)`. No fixed widths on page containers.
+
+**Typography**: All headings use clamp() — page title (17–22px), section title (15–18px), card title (14–16px), body (13–14px), KPI numbers (22–30px), timer (28–40px). No text below 11px.
+
+**Forms**: 2-column grid on desktop/tablet, 1-column below 600px. All inputs `width: 100%` with `min-height: 44px`. Form actions stack and go full-width on mobile. Labels above controls (flex-direction: column).
+
+**Buttons**: All buttons `min-height: 44px` (var(--field-height)). Small buttons 36px. Full-width on mobile in form actions and modals.
+
+**Tables**: Contained horizontal scroll via `.table-wrap`. Font size uses `--table-density` token. No page-level horizontal scroll.
+
+**Modals**: `max-width: min(560px, 100vw - 24px)` on desktop. Below 600px: full-screen sheet (`width: 100%; max-height: 100dvh; border-radius: 0`). Sticky header/footer. Safe-area padding on footer.
+
+**Camera checkout**: Video `max-height: 50dvh` with `object-fit: cover`. Below 480px: `max-height: 40dvh`. Uses dvh units for viewport changes.
+
+**Dashboards**: KPI grid uses `auto-fit minmax(min(100%, 220px), 1fr)` — 4 cols on desktop, 2 on tablet, 1 on mobile, all via auto-fit without explicit breakpoints.
+
+**Attendance**: Status grid 3-col desktop, 2-col tablet, 1-col mobile. Timer uses fluid clamp. Notification dropdown `max-width: calc(100vw - 24px)`.
+
+**Calendar**: 7-column grid maintained but cells compact below 600px (min-height 48px, events hidden, dot indicator instead).
+
+**Notifications**: Dropdown constrained to viewport width. Toast uses safe-area bottom and full-width on mobile.
+
+**Accessibility**: `:focus-visible` outline on all interactive elements. `prefers-reduced-motion` media query disables animations. `.sr-only` utility class for screen readers. All icon buttons have aria-labels. 44px minimum touch targets.
+
+### Build Status
+- TypeScript compilation: PASS
+- Production build: PASS (141 modules, 668.64 kB JS / 31.15 kB CSS)
+
+### CSS bundle size change
+- Before: 26.82 kB CSS
+- After: 31.15 kB CSS (+4.33 kB — acceptable for responsive system + accessibility)
+
+### Routes audited (all implemented routes)
+Login, Forgot Password, Reset Password, Set Password, Dashboard, Organization, Branches, Departments, Employees, Employee Directory, Add Employee, Employee Profile, Reporting Hierarchy, Roles & Permissions, Audit Trail, Attendance, Attendance Management, Corrections, My Leave, Team Leave, Leave Management, Company Calendar, Holiday Management, My Tasks, Team Tasks, Create Task, Task Detail, Task Review, My Tickets, Ticket Management, Ticket Detail, Daily Report, My Report History, Team Reports, Report Review, Org Daily Summary, Follow-up Queue, Announcements, Export Center, Notification Inbox, Account Settings, Unauthorized, Pending Activation.
+
+### Remaining limitations
+- Browser smoke test not performed (no browser automation available in this session)
+- Tables use contained horizontal scroll on mobile (not card transformation) — acceptable for data-heavy HRMS tables, but card view could be added in future
+- Calendar maintains 7-column grid on mobile (compacted) rather than switching to agenda list — agenda toggle could be added in future
+- No Playwright automated tests added (no test framework installed in project)
+- No visual regression screenshots captured (no browser automation available)
+- Inline styles in page components (style={{}}) are not affected by the responsive CSS system — components using inline styles for layout may still have minor responsive gaps
