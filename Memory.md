@@ -1232,12 +1232,35 @@ Use `mcp__supabase__list_edge_function_secrets` to verify. If not present, confi
 - **Insecure context (HTTP)**: Push, service worker, and geolocation not available. In-app notifications still work.
 
 ### Remaining Limitations
-- VAPID private key must be manually configured as edge function secret (cannot be automated from this environment).
+- VAPID keys are configured as edge function secrets (confirmed via list_edge_function_secrets).
 - Browser smoke testing not performed (no browser automation available).
 - No Playwright automated tests added (no test framework installed).
 - Install prompt UI (custom "Install Navjyoti HRMS" button) not added — browsers show their own install prompt.
 - Employee offboarding does not yet auto-deactivate push subscriptions (can be added as a DB trigger in future).
 - Email delivery still uses placeholder implementation (no real SMTP provider configured).
+
+### Production Push Notification Infrastructure — completed 2026-07-23 (second pass)
+
+#### Edge Functions (3 deployed, all ACTIVE, JWT-verified)
+1. **subscribe-device** — Stores push subscription server-side. Receives endpoint, p256dh, auth, browser, platform, user_agent. Verifies JWT, loads user's organization_id from profile, prevents duplicates by checking existing endpoint+user_id (refreshes if found, re-activates if revoked). Uses service-role client for write.
+2. **send-test-push** — Sends a test push notification only to the current authenticated user's active subscriptions. Reads VAPID keys from server secrets. Generates VAPID JWT using Web Crypto API. Deactivates invalid subscriptions (404/410). Never exposes private keys.
+3. **send-push-notification** — Handles real notification delivery (from previous pass). Receives notificationId, checks preferences/quiet hours, sends Web Push, records delivery with idempotency.
+
+#### Frontend Changes
+- **src/lib/webPush.ts**: `saveSubscriptionToServer()` now calls `subscribe-device` edge function instead of direct DB write (server-side validation, duplicate prevention, org_id resolution). `sendTestPushNotification()` now calls `send-test-push` edge function.
+- **src/components/NotificationBell.tsx**: Triggers `send-push-notification` edge function for real notification delivery on realtime events.
+- **src/pages/AccountSettingsPage.tsx**: "Send Test Push Notification" button calls `send-test-push` via `sendTestPushNotification()`.
+- **src/auth/PermissionSetupPage.tsx**: Post-login permission setup flow (Enable Notifications → requestPermission → register SW → subscribe → save to server → Continue).
+- **src/components/AppShell.tsx**: Redirects to /permission-setup when not completed.
+- **src/auth/AuthContext.tsx**: Clears permission setup state on signOut.
+
+#### Confirmed Secrets (via list_edge_function_secrets)
+- VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT — all configured.
+
+#### Build Status
+- TypeScript: PASS
+- Production build: PASS (143 modules, 683.87 kB JS / 31.15 kB CSS)
+- PWA files in dist: sw.js, manifest.json, icon-192.png, icon-512.png, badge-72.png
 
 ### Manual UAT Checklist
 1. Login → Permission Setup page appears.

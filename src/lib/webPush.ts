@@ -127,15 +127,8 @@ export async function subscribeToPush(): Promise<PushSubscription | null> {
 }
 
 export async function saveSubscriptionToServer(sub: PushSubscription): Promise<boolean> {
-  const { data: userData } = await supabase.auth.getUser()
-  if (!userData.user) return false
-
-  const { data: profile } = await supabase
-    .from('user_profiles')
-    .select('organization_id')
-    .eq('id', userData.user.id)
-    .maybeSingle()
-  if (!profile?.organization_id) return false
+  const { data: session } = await supabase.auth.getSession()
+  if (!session.session) return false
 
   const { browser, platform, deviceName } = parseUserAgent()
   const subJson = sub.toJSON()
@@ -144,27 +137,29 @@ export async function saveSubscriptionToServer(sub: PushSubscription): Promise<b
   const auth = subJson.keys?.auth
   if (!endpoint || !p256dh || !auth) return false
 
-  const { error } = await supabase
-    .from('push_subscriptions')
-    .upsert(
-      {
-        user_id: userData.user.id,
-        organization_id: profile.organization_id,
+  try {
+    const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/subscribe-device`
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.session.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({
         endpoint,
-        p256dh_key: p256dh,
-        auth_key: auth,
-        user_agent: navigator.userAgent,
-        device_name: deviceName,
+        p256dh,
+        auth,
+        userAgent: navigator.userAgent,
+        deviceName,
         platform,
         browser,
-        is_active: true,
-        permission_status: 'granted',
-        last_used_at: new Date().toISOString(),
-      },
-      { onConflict: 'endpoint,user_id' }
-    )
-
-  return !error
+      }),
+    })
+    return response.ok
+  } catch {
+    return false
+  }
 }
 
 export async function unsubscribeFromPush(endpoint: string): Promise<boolean> {
@@ -198,7 +193,7 @@ export async function sendTestPushNotification(): Promise<{ success: boolean; me
     const { data: session } = await supabase.auth.getSession()
     if (!session.session) return { success: false, message: 'Not authenticated' }
 
-    const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-push-notification`
+    const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-test-push`
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -206,14 +201,13 @@ export async function sendTestPushNotification(): Promise<{ success: boolean; me
         Authorization: `Bearer ${session.session.access_token}`,
         apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
       },
-      body: JSON.stringify({ test: true }),
     })
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
       return { success: false, message: err.error || `Request failed (${response.status})` }
     }
     const result = await response.json()
-    return { success: true, message: result.message || 'Test push sent' }
+    return { success: result.success !== false, message: result.message || 'Test push sent' }
   } catch (e) {
     return { success: false, message: (e as Error).message }
   }
@@ -232,3 +226,6 @@ export function markPermissionSetupComplete(): void {
 export function clearPermissionSetup(): void {
   localStorage.removeItem(PERMISSION_SETUP_KEY)
 }
+
+
+export { hasCompletedPermissionSetup }
