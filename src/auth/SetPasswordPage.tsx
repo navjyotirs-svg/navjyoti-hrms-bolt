@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
+import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import '@/styles/auth.css'
 
 export function SetPasswordPage() {
@@ -93,6 +94,9 @@ export function SetPasswordPage() {
     return (
       <div className="auth-page">
         <div className="auth-card">
+          <div className="auth-logo">
+            <NavjyotiLogo width={240} maxHeight={70} clickable />
+          </div>
           <div className="auth-brand">
             <h1 className="auth-title">Setting up your account</h1>
             <p className="auth-subtitle">Verifying your invitation link…</p>
@@ -109,6 +113,9 @@ export function SetPasswordPage() {
     return (
       <div className="auth-page">
         <div className="auth-card">
+          <div className="auth-logo">
+            <NavjyotiLogo width={240} maxHeight={70} clickable />
+          </div>
           <div className="auth-brand">
             <h1 className="auth-title">Invalid or Expired Link</h1>
             <p className="auth-subtitle">This invitation link is no longer valid</p>
@@ -131,6 +138,9 @@ export function SetPasswordPage() {
     return (
       <div className="auth-page">
         <div className="auth-card">
+          <div className="auth-logo">
+            <NavjyotiLogo width={240} maxHeight={70} clickable />
+          </div>
           <div className="auth-brand">
             <h1 className="auth-title">Password Created</h1>
           </div>
@@ -153,6 +163,9 @@ export function SetPasswordPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <div className="auth-logo">
+          <NavjyotiLogo width={240} maxHeight={70} clickable />
+        </div>
         <div className="auth-brand">
           <h1 className="auth-title">Create Your Password</h1>
           <p className="auth-subtitle">Set a password to activate your account</p>

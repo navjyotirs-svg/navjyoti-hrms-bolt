@@ -3,6 +3,7 @@ import { useAuth } from '@/auth/AuthContext'
 import { ROLE_LABELS } from '@/types/roles'
 import { NotificationBell } from '@/components/NotificationBell'
 import { CheckoutModal } from '@/components/CheckoutModal'
+import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import { supabase } from '@/lib/supabase'
 import { checkIn, fetchTodayAttendance, formatTimeRemaining } from '@/lib/attendance'
 import '@/styles/shell.css'
@@ -76,7 +77,12 @@ export function Topbar({ title, soundEnabled }: TopbarProps) {
 
   return (
     <header className="topbar">
-      <h1 className="topbar-title">{title}</h1>
+      <div className="topbar-left">
+        <div className="topbar-mobile-logo">
+          <NavjyotiLogo width={95} maxHeight={32} clickable />
+        </div>
+        <h1 className="topbar-title">{title}</h1>
+      </div>
       <div className="topbar-right">
         {canCheckIn && (
           <div className="topbar-attendance">

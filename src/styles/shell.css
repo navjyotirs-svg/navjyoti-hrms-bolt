@@ -21,9 +21,23 @@
 }
 
 .sidebar-brand {
-  padding: 0 20px 18px;
+  padding: 16px 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   margin-bottom: 14px;
+  text-align: center;
+}
+
+.sidebar-brand-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-brand-logo img {
+  width: 195px;
+  height: auto;
+  max-height: 75px;
+  object-fit: contain;
 }
 
 .sidebar-brand-name {
@@ -237,6 +251,26 @@
   z-index: 50;
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.topbar-mobile-logo {
+  display: none;
+}
+
+.topbar-mobile-logo img {
+  width: 95px;
+  height: auto;
+  max-height: 32px;
+  object-fit: contain;
+  display: block;
+}
+
 .topbar-title {
   font-family: var(--font-heading);
   font-size: var(--fs-page-title);
@@ -410,6 +444,14 @@
   .topbar {
     padding-left: 60px;
   }
+
+  .topbar-mobile-logo {
+    display: block;
+  }
+
+  .topbar-title {
+    display: none;
+  }
 }
 
 /* Small mobile: collapse topbar user info, compact attendance */
@@ -443,6 +485,10 @@
   .topbar-checkout-btn {
     padding: 6px 8px;
     font-size: 11px;
+  }
+
+  .topbar-mobile-logo img {
+    width: 80px;
   }
 }
 

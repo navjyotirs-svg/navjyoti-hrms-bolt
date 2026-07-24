@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { navItemsForPermissions, NAV_ITEMS, ROLE_LABELS } from '@/types/roles'
+import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import '@/styles/shell.css'
 
 export function Sidebar() {
@@ -65,8 +66,9 @@ export function Sidebar() {
 
       <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
         <div className="sidebar-brand">
-          <p className="sidebar-brand-name">Navjyoti HRMS</p>
-          <p className="sidebar-brand-sub">Unified Ops Portal</p>
+          <div className="sidebar-brand-logo">
+            <NavjyotiLogo width={195} maxHeight={75} clickable />
+          </div>
         </div>
 
         <nav className="sidebar-nav">

@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
+import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import '@/styles/auth.css'
 
 export function ResetPasswordPage() {
@@ -82,6 +83,9 @@ export function ResetPasswordPage() {
     return (
       <div className="auth-page">
         <div className="auth-card">
+          <div className="auth-logo">
+            <NavjyotiLogo width={240} maxHeight={70} clickable />
+          </div>
           <div className="auth-brand">
             <h1 className="auth-title">Reset Password</h1>
             <p className="auth-subtitle">Verifying your reset link…</p>
@@ -98,6 +102,9 @@ export function ResetPasswordPage() {
     return (
       <div className="auth-page">
         <div className="auth-card">
+          <div className="auth-logo">
+            <NavjyotiLogo width={240} maxHeight={70} clickable />
+          </div>
           <div className="auth-brand">
             <h1 className="auth-title">Invalid or Expired Link</h1>
             <p className="auth-subtitle">This password reset link is no longer valid</p>
@@ -120,6 +127,9 @@ export function ResetPasswordPage() {
     return (
       <div className="auth-page">
         <div className="auth-card">
+          <div className="auth-logo">
+            <NavjyotiLogo width={240} maxHeight={70} clickable />
+          </div>
           <div className="auth-brand">
             <h1 className="auth-title">Password Reset</h1>
           </div>
@@ -142,6 +152,9 @@ export function ResetPasswordPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <div className="auth-logo">
+          <NavjyotiLogo width={240} maxHeight={70} clickable />
+        </div>
         <div className="auth-brand">
           <h1 className="auth-title">Set New Password</h1>
           <p className="auth-subtitle">Choose a new password for your account</p>

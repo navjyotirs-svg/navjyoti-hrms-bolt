@@ -1,34 +1,34 @@
 {
   "name": "Navjyoti HRMS",
   "short_name": "Navjyoti HRMS",
-  "description": "Unified HRMS for employee identity, hierarchy, attendance, leave, tasks, tickets, daily reports, calendar, notifications and audit trails.",
+  "description": "Navjyoti Unified Operations and Human Resource Management Portal",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#F7F5F0",
-  "theme_color": "#0E6E63",
+  "theme_color": "#0F766E",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "/android-chrome-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "/icon-512.png",
+      "src": "/android-chrome-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "/maskable-icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/maskable-icon-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

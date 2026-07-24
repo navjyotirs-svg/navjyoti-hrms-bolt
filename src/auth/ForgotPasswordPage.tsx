@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from './AuthContext'
+import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import '@/styles/auth.css'
 
 const COOLDOWN_SECONDS = 30
@@ -41,6 +42,9 @@ export function ForgotPasswordPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <div className="auth-logo">
+          <NavjyotiLogo width={240} maxHeight={70} clickable />
+        </div>
         <div className="auth-brand">
           <h1 className="auth-title">Reset Password</h1>
           <p className="auth-subtitle">Enter your email to receive a reset link</p>

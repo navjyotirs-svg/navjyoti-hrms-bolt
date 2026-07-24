@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from './AuthContext'
+import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import '@/styles/auth.css'
 
 export function UnauthorizedPage() {
@@ -8,6 +9,9 @@ export function UnauthorizedPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <div className="auth-logo">
+          <NavjyotiLogo width={240} maxHeight={70} clickable />
+        </div>
         <div className="auth-brand">
           <h1 className="auth-title">Access Denied</h1>
           <p className="auth-subtitle">You do not have permission to view this page</p>

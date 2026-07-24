@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { supabase } from '@/lib/supabase'
+import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import {
   getNotificationPermission,
   requestNotificationPermission,
@@ -122,6 +123,9 @@ export function PermissionSetupPage() {
     return (
       <div className="auth-page">
         <div className="auth-card">
+          <div className="auth-logo">
+            <NavjyotiLogo width={240} maxHeight={70} clickable />
+          </div>
           <p style={{ color: 'var(--slate)', fontSize: '14px' }}>Loading…</p>
         </div>
       </div>
@@ -131,6 +135,9 @@ export function PermissionSetupPage() {
   return (
     <div className="auth-page">
       <div className="auth-card" style={{ maxWidth: '560px' }}>
+        <div className="auth-logo">
+          <NavjyotiLogo width={240} maxHeight={70} clickable />
+        </div>
         <h1 className="auth-title">Permission Setup</h1>
         <p style={{ fontSize: '13.5px', color: 'var(--slate)', lineHeight: 1.6, marginBottom: 'var(--space-5)' }}>
           Enable notifications and location to get the most out of Navjyoti HRMS.

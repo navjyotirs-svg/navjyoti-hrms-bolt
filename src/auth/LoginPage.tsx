@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from './AuthContext'
+import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import '@/styles/auth.css'
 
 export function LoginPage() {
@@ -52,8 +53,11 @@ export function LoginPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <div className="auth-logo">
+          <NavjyotiLogo width={240} maxHeight={70} clickable />
+        </div>
         <div className="auth-brand">
-          <h1 className="auth-title">Navjyoti HRMS</h1>
+          <h1 className="auth-title">Sign In</h1>
           <p className="auth-subtitle">Unified Operations Portal</p>
         </div>
 

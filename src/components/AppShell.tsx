@@ -5,6 +5,7 @@ import { Topbar } from './Topbar'
 import { useAuth } from '@/auth/AuthContext'
 import { PendingActivationPage } from '@/auth/PendingActivationPage'
 import { hasCompletedPermissionSetup } from '@/lib/webPush'
+import { usePageTitle } from '@/lib/usePageTitle'
 import '@/styles/shell.css'
 
 const PAGE_TITLES: Record<string, string> = {
@@ -53,6 +54,7 @@ export function AppShell() {
   const { profile, loading, profileError } = useAuth()
   const title = getPageTitle(location.pathname)
   const [soundEnabled, setSoundEnabled] = useState(false)
+  usePageTitle()
 
   useEffect(() => {
     const stored = localStorage.getItem(SOUND_PREF_KEY)
