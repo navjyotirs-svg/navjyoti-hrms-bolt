@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from './AuthContext'
 import { NavjyotiLogo } from '@/components/NavjyotiLogo'
+import { HrmsBadge } from '@/components/HrmsLabel'
 import '@/styles/auth.css'
 
 export function LoginPage() {
@@ -56,6 +57,7 @@ export function LoginPage() {
         <div className="auth-logo">
           <NavjyotiLogo width={240} maxHeight={70} clickable />
         </div>
+        <HrmsBadge />
         <div className="auth-brand">
           <h1 className="auth-title">Sign In</h1>
           <p className="auth-subtitle">Unified Operations Portal</p>

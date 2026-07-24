@@ -156,3 +156,65 @@
 .auth-link:hover {
   text-decoration: underline;
 }
+
+.hrms-title-divider {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 20px 0 18px;
+}
+
+.hrms-line {
+  width: 110px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(23, 59, 114, 0.75)
+  );
+}
+
+.hrms-line:last-child {
+  background: linear-gradient(
+    90deg,
+    rgba(23, 59, 114, 0.75),
+    transparent
+  );
+}
+
+.hrms-badge {
+  min-width: 110px;
+  padding: 7px 22px;
+  border: 1px solid rgba(23, 59, 114, 0.75);
+  border-radius: 999px;
+  color: #173B72;
+  background: #FFFFFF;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .auth-logo img {
+    width: 190px;
+  }
+
+  .hrms-title-divider {
+    gap: 10px;
+    margin: 16px 0;
+  }
+
+  .hrms-line {
+    width: 55px;
+  }
+
+  .hrms-badge {
+    min-width: 90px;
+    padding: 6px 16px;
+    font-size: 18px;
+  }
+}

@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { navItemsForPermissions, NAV_ITEMS, ROLE_LABELS } from '@/types/roles'
 import { NavjyotiLogo } from '@/components/NavjyotiLogo'
+import { SidebarHrmsLabel } from '@/components/HrmsLabel'
 import '@/styles/shell.css'
 
 export function Sidebar() {
@@ -70,6 +71,8 @@ export function Sidebar() {
             <NavjyotiLogo width={195} maxHeight={75} clickable />
           </div>
         </div>
+
+        <SidebarHrmsLabel />
 
         <nav className="sidebar-nav">
           {items.map((item) => (

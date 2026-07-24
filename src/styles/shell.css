@@ -58,6 +58,46 @@
   letter-spacing: 1px;
 }
 
+.sidebar-hrms-label {
+  min-height: 58px;
+  margin: 14px 14px 18px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: #FFFFFF;
+  background: linear-gradient(
+    135deg,
+    rgba(20, 139, 205, 0.08),
+    rgba(7, 29, 53, 0.5)
+  );
+  border: 1px solid rgba(20, 139, 205, 0.28);
+  border-radius: 14px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 5px;
+  line-height: 1;
+}
+
+.sidebar-hrms-line {
+  width: 54px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    #148BCD
+  );
+}
+
+.sidebar-hrms-line:last-child {
+  background: linear-gradient(
+    90deg,
+    #148BCD,
+    transparent
+  );
+}
+
 .sidebar-nav {
   padding: 6px 12px;
   display: flex;
@@ -477,6 +517,20 @@
 }
 
 /* Very small: 320px — stack attendance items if needed */
+@media (max-width: 480px) {
+  .sidebar-hrms-label {
+    min-height: 52px;
+    margin: 10px 12px 14px;
+    padding: 10px 14px;
+    font-size: 17px;
+    letter-spacing: 4px;
+  }
+
+  .sidebar-hrms-line {
+    width: 38px;
+  }
+}
+
 @media (max-width: 359px) {
   .topbar-attendance {
     gap: 4px;
