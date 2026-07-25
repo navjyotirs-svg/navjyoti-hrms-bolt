@@ -251,7 +251,7 @@ function AppRoutes() {
           <PermissionRoute permissions={['announcement.create', 'announcement.edit_all', 'announcement.manage']}><AnnouncementManagementPage /></PermissionRoute>
         } />
         <Route path="/export-center" element={
-          <PermissionRoute permissions={['export.request', 'export.download_own', 'export.download_all', 'export.audit_read', 'export.manage']}><ExportCenterPage /></PermissionRoute>
+          <PermissionRoute permissions={['export.organization', 'export.team', 'export.self', 'export.audit_read']}><ExportCenterPage /></PermissionRoute>
         } />
         <Route path="/notification-inbox" element={<NotificationInboxPage />} />
         <Route path="/settings" element={<AccountSettingsPage />} />

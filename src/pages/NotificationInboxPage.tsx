@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, archiveNotification, type NotificationRow } from '@/lib/notifications'
 import { NotificationSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
@@ -7,8 +8,15 @@ export function NotificationInboxPage() {
   const [notifications, setNotifications] = useState<NotificationRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'all' | 'unread'>('all')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [filter, setFilter] = useState<'all' | 'unread'>(searchParams.get('read') === 'false' ? 'unread' : 'all')
   const [categoryFilter, setCategoryFilter] = useState('all')
+
+  useEffect(() => {
+    const params: Record<string, string> = {}
+    if (filter === 'unread') params.read = 'false'
+    setSearchParams(params, { replace: true })
+  }, [filter, setSearchParams])
 
   useEffect(() => { loadNotifications() }, [filter, categoryFilter])
 

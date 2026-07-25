@@ -2302,3 +2302,79 @@ NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com
 4. notification-worker does not trigger Web Push for queued jobs yet
 5. Multiple HR/directors all receive notifications (by design)
 6. Reporting manager lookup requires employee_reporting_lines setup
+
+
+---
+
+## Dashboard Drill-Downs and Export Center Fix — completed 2026-07-25
+
+### 1. Interactive Dashboard Drill-Downs
+
+Every metric card on the Director/HR dashboard is now clickable, keyboard accessible (Enter/Space), with hover/focus states and a View details affordance. Clicking opens either a drill-down drawer (for quick summaries) or navigates to a filtered route (for large datasets).
+
+Attendance cards: Checked In, Pending Checkout, Full Day, Half Day open drill-down drawers with employee code, name, branch, department, check-in/checkout times, elapsed minutes, and status. Pending Corrections navigates to /corrections?status=pending.
+
+Organization cards: Active Employees opens a drawer with code, name, designation, branch, department, role, work mode, status. Pending Activation shows incomplete account states. Onboarding Pending shows checklist progress. Documents Pending Verification shows document type and upload date. Branches and Departments show summary counts.
+
+Notification card: Unread count navigates to /notifications?read=false.
+
+### 2. Filtered Route State
+
+Destination pages now read URL query parameters:
+- /attendance-management?date=today&status=checked_in
+- /corrections?status=pending
+- /notifications?read=false
+- /employees?access_status=active
+
+Each page syncs filter changes back to the URL and provides a Clear Filters option.
+
+### 3. Export Center Permission Fix
+
+Root cause: The DB had canonical permissions (export.organization, export.team, export.self, export.audit_read, export.sensitive) but the frontend route checked nonexistent codes (export.request, export.download_own, export.download_all, export.manage) and the backend checked export.request. Director had export.organization in the DB but the frontend/backend checked for export.request which Director did not have.
+
+Fix: Aligned frontend route guard, backend permission checks, and TypeScript Permission type to the canonical DB permissions. Director now correctly sees the Export Center with full organization export access.
+
+### 4. Export Handler Improvements
+
+- Fixed attendance_summary query to actually apply date filters (was a no-op before)
+- Added date range validation (from <= to, max 365 days)
+- Added audit records for export request, completion, and failure
+- Added UTF-8 BOM for spreadsheet compatibility
+- CSV formula injection protection already existed
+- Export job now starts as QUEUED then transitions to PROCESSING
+
+### 5. Export Shortcuts in Drill-Downs
+
+Drill-down drawers for attendance and employee lists show an Export this list button for users with export.organization or export.team permission, preserving the active date filters.
+
+### 6. Files Changed
+
+- src/pages/Dashboard.tsx — complete rewrite with interactive cards and drill-down drawers
+- src/components/DrillDownDrawer.tsx — NEW: drill-down drawer component
+- src/styles/dashboard.css — interactive card and drawer styles
+- src/pages/AttendanceManagementPage.tsx — reads URL query params
+- src/pages/AttendanceCorrectionsPage.tsx — reads URL query params, added filter dropdown
+- src/pages/EmployeeDirectoryPage.tsx — reads URL query params
+- src/pages/NotificationInboxPage.tsx — reads URL query params
+- src/types/roles.ts — updated Permission type to canonical export permissions
+- src/App.tsx — updated Export Center route guard
+- supabase/functions/export-handler/index.ts — fixed permissions, date validation, attendance query, audit records
+
+### 7. Tests
+
+- Notification: 40/40 PASS, Invitation: 23/23 PASS, Push: 41/41 PASS, Skeleton: 22/22 PASS
+- Total: 126/126 PASS, TypeScript: PASS, Build: PASS
+
+### 8. Edge Functions Deployed
+
+- export-handler: DEPLOYED
+
+### 9. Manual Verification
+
+NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com
+
+### 10. Remaining Risks
+
+1. Browser smoke test not performed
+2. Drill-down drawers use client-side queries (RLS-enforced) — pagination may be needed for very large orgs
+3. Realtime updates rely on existing RealtimeProvider invalidating queries

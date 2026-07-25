@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { reviewCorrection, formatDate } from '@/lib/attendance'
@@ -28,6 +29,14 @@ export function AttendanceCorrectionsPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [reviewing, setReviewing] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'all')
+
+  useEffect(() => {
+    const params: Record<string, string> = {}
+    if (statusFilter !== 'all') params.status = statusFilter
+    setSearchParams(params, { replace: true })
+  }, [statusFilter, setSearchParams])
 
   const canManage = permissions.includes('attendance.correct_manage')
   const canRequest = permissions.includes('attendance.correct_request_self')
@@ -133,6 +142,18 @@ export function AttendanceCorrectionsPage() {
     <div className="page">
       <div className="page-header">
         <h2 className="page-title">Attendance Corrections</h2>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
+            <option value="all">All Statuses</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          {statusFilter !== 'all' && (
+            <button className="btn btn-sm btn-secondary" onClick={() => setStatusFilter('all')}>Clear Filters</button>
+          )}
+        </div>
       </div>
 
       {error && <div className="form-error" style={{ marginBottom: '12px' }}>{error}</div>}
@@ -157,7 +178,7 @@ export function AttendanceCorrectionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {corrections.map((c) => (
+                {(statusFilter === 'all' ? corrections : corrections.filter(c => c.status.toLowerCase() === statusFilter.toLowerCase())).map((c) => (
                   <tr key={c.id}>
                     {canManage && <td>{c.employees?.full_name ?? '—'} <span className="mono" style={{ fontSize: '11px', color: 'var(--slate)' }}>({c.employees?.employee_code ?? '—'})</span></td>}
                     <td>{CORRECTION_TYPE_LABELS[c.correction_type as CorrectionType] ?? c.correction_type}</td>

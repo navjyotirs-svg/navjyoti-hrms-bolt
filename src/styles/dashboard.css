@@ -121,3 +121,111 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Interactive metric cards */
+.dashboard-card-interactive {
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  position: relative;
+  outline: none;
+}
+.dashboard-card-interactive:hover {
+  box-shadow: 0 4px 12px rgba(20, 24, 31, 0.08);
+  border-color: var(--teal);
+}
+.dashboard-card-interactive:focus-visible {
+  box-shadow: 0 0 0 3px var(--teal-50);
+  border-color: var(--teal);
+}
+.dashboard-card-interactive:active {
+  transform: scale(0.98);
+}
+.dashboard-card-details {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--space-2);
+  font-size: 11px;
+  color: var(--teal-dark);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.dashboard-card-details svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Drill-down drawer */
+.drilldown-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 24, 31, 0.4);
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+}
+.drilldown-panel {
+  background: var(--surface);
+  width: 100%;
+  max-width: 720px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+.drilldown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.drilldown-header-left {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.drilldown-title {
+  font-family: var(--font-heading);
+  font-size: var(--fs-section-title);
+  font-weight: 600;
+  margin: 0;
+}
+.drilldown-count {
+  font-size: 12px;
+  color: var(--slate);
+  font-weight: 600;
+}
+.drilldown-error {
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.drilldown-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5);
+}
+.drilldown-loading {
+  text-align: center;
+  padding: 48px 0;
+  color: var(--slate);
+  font-size: 14px;
+}
+.drilldown-footer {
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+@media (max-width: 600px) {
+  .drilldown-panel {
+    max-width: 100%;
+  }
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { ROLE_LABELS } from '@/types/roles'
@@ -59,8 +59,15 @@ export function EmployeeDirectoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('access_status') || 'all')
   const [resending, setResending] = useState<string | null>(null)
+
+  useEffect(() => {
+    const params: Record<string, string> = {}
+    if (statusFilter !== 'all') params.access_status = statusFilter
+    setSearchParams(params, { replace: true })
+  }, [statusFilter, setSearchParams])
   const [resendMessage, setResendMessage] = useState<string | null>(null)
   const [resendLink, setResendLink] = useState<string | null>(null)
   const [repairing, setRepairing] = useState<string | null>(null)

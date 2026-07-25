@@ -136,11 +136,11 @@ export type Permission =
   | 'announcement.view_acknowledgements'
   | 'announcement.manage'
   // Phase 6 — Exports
-  | 'export.request'
-  | 'export.download_own'
-  | 'export.download_all'
+  | 'export.organization'
+  | 'export.team'
+  | 'export.self'
   | 'export.audit_read'
-  | 'export.manage'
+  | 'export.sensitive'
 
 export type AttendanceStatus = 'PENDING_CHECKOUT' | 'FULL_DAY' | 'HALF_DAY'
 
@@ -642,11 +642,11 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'announcement.delete': 'Delete Announcement',
   'announcement.view_acknowledgements': 'View Acknowledgements',
   'announcement.manage': 'Manage Announcements',
-  'export.request': 'Request Export',
-  'export.download_own': 'Download Own Exports',
-  'export.download_all': 'Download All Exports',
+  'export.organization': 'Export Organization Data',
+  'export.team': 'Export Team Data',
+  'export.self': 'Export Own Data',
   'export.audit_read': 'Read Export Audit',
-  'export.manage': 'Manage Exports',
+  'export.sensitive': 'Export Sensitive Data',
 }
 
 export type NavItem = {
@@ -841,7 +841,7 @@ export const NAV_ITEMS: NavItem[] = [
     id: 'export-center',
     label: 'Export Center',
     icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4',
-    permissions: ['export.request', 'export.download_own', 'export.download_all', 'export.audit_read', 'export.manage'],
+    permissions: ['export.organization', 'export.team', 'export.self', 'export.audit_read', 'export.sensitive'],
   },
   {
     id: 'notification-inbox',

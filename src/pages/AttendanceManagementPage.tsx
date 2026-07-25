@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { ATTENDANCE_STATUS_LABELS, type AttendanceStatus } from '@/types/roles'
@@ -34,11 +35,14 @@ interface EvidenceDetail {
 export function AttendanceManagementPage() {
   const { profile, permissions } = useAuth()
   const [records, setRecords] = useState<AttendanceRow[]>([])
+  const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10))
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'all')
+  const [dateFilter, setDateFilter] = useState(searchParams.get('date') === 'today'
+    ? new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }).slice(0, 10)
+    : searchParams.get('date') || new Date().toISOString().slice(0, 10))
   const [evidenceLoading, setEvidenceLoading] = useState(false)
   const [evidenceModal, setEvidenceModal] = useState<{
     employeeName: string
@@ -47,6 +51,14 @@ export function AttendanceManagementPage() {
     imageUrl: string | null
     loading: boolean
   } | null>(null)
+
+  // Sync filter changes back to URL
+  useEffect(() => {
+    const params: Record<string, string> = {}
+    if (statusFilter !== 'all') params.status = statusFilter
+    if (dateFilter) params.date = dateFilter
+    setSearchParams(params, { replace: true })
+  }, [statusFilter, dateFilter, setSearchParams])
 
   const canReadAll = permissions.includes('attendance.read_all')
   const canReadEvidence = permissions.includes('attendance.evidence_read_all')

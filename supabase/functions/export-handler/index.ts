@@ -113,7 +113,11 @@ async function handleRequestExport(
   supabase: ReturnType<typeof createClient>,
   body: any, userId: string, orgId: string, perms: string[]
 ) {
-  if (!perms.includes("export.request"))
+  const hasExportPermission =
+    perms.includes("export.organization") ||
+    perms.includes("export.team") ||
+    perms.includes("export.self");
+  if (!hasExportPermission)
     return errorResponse("No permission to request exports", 403);
 
   const { export_type, format = "csv", filters = {} } = body;
@@ -125,14 +129,41 @@ async function handleRequestExport(
   if (!validTypes.includes(export_type))
     return errorResponse("Invalid export type", 400);
 
-  // Create export job
+  // Date range validation
+  if (filters.from_date && filters.to_date) {
+    if (new Date(filters.from_date as string) > new Date(filters.to_date as string))
+      return errorResponse("From date cannot be after to date", 400);
+  }
+  const MAX_RANGE_DAYS = 365;
+  if (filters.from_date && filters.to_date) {
+    const diffMs = new Date(filters.to_date as string).getTime() - new Date(filters.from_date as string).getTime();
+    const diffDays = diffMs / (1000 * 60 * 60 * 24);
+    if (diffDays > MAX_RANGE_DAYS)
+      return errorResponse(`Date range exceeds maximum of ${MAX_RANGE_DAYS} days`, 400);
+  }
+
+  // Create export job (status queued, then processing)
   const { data: job, error: jobError } = await supabase
     .from("export_jobs").insert({
       organization_id: orgId, requested_by: userId, export_type,
-      filters, format, status: "processing", started_at: new Date().toISOString(),
+      filters, format, status: "queued",
       expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     }).select().single();
   if (jobError) return errorResponse(`Failed to create export job: ${jobError.message}`, 500);
+
+  // Transition to processing
+  await supabase.from("export_jobs").update({
+    status: "processing", started_at: new Date().toISOString(),
+  }).eq("id", job.id);
+
+  // Audit record for export request
+  await supabase.from("audit_logs").insert({
+    actor_id: userId,
+    action: "export.requested",
+    entity_type: "export_job",
+    entity_id: job.id,
+    new_values: { export_type, format, filters },
+  });
 
   // Generate CSV data
   let csvData = "";
@@ -175,12 +206,31 @@ async function handleRequestExport(
       break;
     }
     case "attendance_summary": {
-      const { data } = await supabase
-        .from("attendance_records").select("employee_id, attendance_date, status, check_in_time, check_out_time")
+      let attQuery = supabase
+        .from("attendance_records")
+        .select(`
+          employee_id, attendance_date, final_status, check_in_at, check_out_at,
+          actual_elapsed_minutes, correction_version,
+          employees!inner (employee_code, full_name, branches (name), departments (name))
+        `)
         .eq("organization_id", orgId);
-      if (filters.from_date) data;
-      csvData = toCsv(data || []);
-      rowCount = data?.length || 0;
+      if (filters.from_date) attQuery = attQuery.gte("attendance_date", filters.from_date);
+      if (filters.to_date) attQuery = attQuery.lte("attendance_date", filters.to_date);
+      const { data: attData } = await attQuery.order("attendance_date", { ascending: false });
+      const attRows = (attData || []).map((r: any) => ({
+        employee_code: r.employees?.employee_code ?? "",
+        employee_name: r.employees?.full_name ?? "",
+        branch: r.employees?.branches?.name ?? "",
+        department: r.employees?.departments?.name ?? "",
+        date: r.attendance_date,
+        check_in: r.check_in_at ?? "",
+        check_out: r.check_out_at ?? "",
+        total_minutes: r.actual_elapsed_minutes ?? "",
+        status: r.final_status ?? "",
+        correction_version: r.correction_version ?? 0,
+      }));
+      csvData = toCsv(attRows);
+      rowCount = attRows.length;
       break;
     }
     case "leave_summary": {
@@ -214,17 +264,25 @@ async function handleRequestExport(
     }
   }
 
-  // Upload to storage
+  // Upload to storage (with UTF-8 BOM for spreadsheet compatibility)
   const fileName = `${orgId}/${job.id}.csv`;
   const { error: uploadError } = await supabase.storage
     .from("export-files")
-    .upload(fileName, csvData, { contentType: "text/csv" });
+    .upload(fileName, `\uFEFF${csvData}`, { contentType: "text/csv; charset=utf-8" });
 
   if (uploadError) {
     await supabase.from("export_jobs").update({
       status: "failed", failure_reason: uploadError.message,
       completed_at: new Date().toISOString(),
     }).eq("id", job.id);
+
+    await supabase.from("audit_logs").insert({
+      actor_id: userId,
+      action: "export.failed",
+      entity_type: "export_job",
+      entity_id: job.id,
+      new_values: { export_type, error: uploadError.message },
+    });
 
     // Notify the requesting user that the export failed
     await supabase.from("notifications").insert({
@@ -246,6 +304,15 @@ async function handleRequestExport(
     status: "completed", storage_path: fileName,
     completed_at: new Date().toISOString(),
   }).eq("id", job.id);
+
+  // Audit record for export completion
+  await supabase.from("audit_logs").insert({
+    actor_id: userId,
+    action: "export.completed",
+    entity_type: "export_job",
+    entity_id: job.id,
+    new_values: { export_type, format, rows: rowCount, storage_path: fileName },
+  });
 
   // Notify the requesting user that the export is ready
   await supabase.from("notifications").insert({
@@ -278,7 +345,12 @@ async function handleGetDownloadUrl(
     .eq("id", job_id).eq("organization_id", orgId).single();
   if (!job) return errorResponse("Export job not found", 404);
   if (job.status !== "completed") return errorResponse("Export not completed", 400);
-  if (job.requested_by !== userId && !perms.includes("export.audit_read"))
+  const canDownload =
+    job.requested_by === userId ||
+    perms.includes("export.audit_read") ||
+    perms.includes("export.organization") ||
+    perms.includes("export.team");
+  if (!canDownload)
     return errorResponse("Not authorized to download this export", 403);
 
   if (job.expires_at && new Date(job.expires_at) < new Date())
@@ -306,7 +378,11 @@ async function handleCancelExport(
     .from("export_jobs").select("id, status, requested_by")
     .eq("id", job_id).eq("organization_id", orgId).single();
   if (!job) return errorResponse("Export job not found", 404);
-  if (job.requested_by !== userId && !perms.includes("export.audit_read"))
+  const canCancel =
+    job.requested_by === userId ||
+    perms.includes("export.audit_read") ||
+    perms.includes("export.organization");
+  if (!canCancel)
     return errorResponse("Not authorized", 403);
   if (!["queued", "processing"].includes(job.status))
     return errorResponse("Cannot cancel completed export", 400);
