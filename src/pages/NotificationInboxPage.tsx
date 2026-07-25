@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, archiveNotification, type NotificationRow } from '@/lib/notifications'
+import { NotificationSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function NotificationInboxPage() {
@@ -75,7 +76,7 @@ export function NotificationInboxPage() {
         </div>
 
         {loading ? (
-          <div className="loading-state">Loading notifications…</div>
+          <NotificationSkeleton rows={8} />
         ) : notifications.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No notifications.</div></div>
         ) : (

@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from '@/types/roles'
 import { createTask } from '@/lib/tasks'
+import { FormSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function CreateTaskPage() {
@@ -82,6 +83,12 @@ export function CreateTaskPage() {
     }
     setLoading(false)
   }
+
+  if (loading) return (
+    <div className="page">
+      <FormSkeleton rows={10} />
+    </div>
+  )
 
   return (
     <div className="page">

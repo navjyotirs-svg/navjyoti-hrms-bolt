@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Permission } from '@/types/roles'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 interface RoleRow {
@@ -46,7 +47,7 @@ export function RolePermissionPage() {
     })
   }, [])
 
-  if (loading) return <div className="loading-state">Loading…</div>
+  if (loading) return <div className="page"><TableSkeleton rows={7} cols={4} /></div>
   if (error) return <div className="form-error">{error}</div>
 
   return (

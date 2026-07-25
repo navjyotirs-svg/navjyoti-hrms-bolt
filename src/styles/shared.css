@@ -253,6 +253,76 @@ table.data-table tbody tr:hover {
   font-size: 13.5px;
 }
 
+/* ---- Error Boundary ---- */
+.error-boundary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: var(--space-6);
+}
+.error-boundary-content {
+  max-width: 480px;
+  text-align: center;
+}
+.error-boundary-content h2 {
+  font-size: var(--fs-section-title);
+  margin-bottom: var(--space-3);
+  color: var(--ink-text);
+}
+.error-boundary-help {
+  color: var(--slate);
+  font-size: var(--fs-body);
+  margin-bottom: var(--space-5);
+}
+.error-boundary-details {
+  text-align: left;
+  margin-bottom: var(--space-4);
+  background: var(--slate-50);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+.error-boundary-details summary {
+  cursor: pointer;
+  font-size: var(--fs-label);
+  color: var(--slate);
+}
+.error-boundary-details pre {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-top: var(--space-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--rose-500);
+}
+.error-boundary-actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.error-boundary-actions .btn-primary,
+.error-boundary-actions .btn-secondary {
+  min-height: var(--field-height);
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.error-boundary-actions .btn-primary {
+  background: var(--teal);
+  color: #fff;
+  border: 1px solid var(--teal);
+}
+.error-boundary-actions .btn-secondary {
+  background: var(--surface);
+  color: var(--ink-text);
+  border: 1px solid var(--border);
+}
+
 /* ---- KPI grid ---- */
 .kpi-grid {
   display: grid;

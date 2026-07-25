@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { ROLE_LABELS, EMPLOYMENT_STATUS_LABELS, SENSITIVE_FIELDS } from '@/types/roles'
+import { ProfileSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 type TabId = 'overview' | 'personal' | 'employment' | 'documents' | 'onboarding' | 'transfers' | 'status' | 'audit'
@@ -160,7 +161,7 @@ export function EmployeeProfilePage() {
     setMsg('Onboarding item updated.'); setOnb((p) => p.map((i) => (i.id === item.id ? { ...i, status } : i)))
   }
 
-  if (loading) return <div className="loading-state">Loading…</div>
+  if (loading) return <div className="page"><ProfileSkeleton /></div>
   if (error || !emp) return (
     <div className="page">
       <div className="empty-state"><div className="empty-state-text">{error ?? 'Employee not found'}</div></div>

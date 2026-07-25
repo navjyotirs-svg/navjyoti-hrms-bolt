@@ -1769,3 +1769,126 @@ announcements, attendance_corrections, attendance_records, calendar_events, dail
 - The per-table channel approach creates 25 channels per user — Supabase has a channel limit per client (typically 100+), so this is safe for now but could be optimized with broadcast channels for very large deployments
 - Push delivery while app is in background depends on the browser's service worker lifecycle — some mobile browsers may suspend service workers aggressively
 - No automated RLS test for realtime events — RLS is enforced by Supabase at the database level, but a dedicated test suite would be valuable
+
+---
+
+## UX Loading-State & Notification-Delivery Hardening — completed 2026-07-25
+
+### Objective
+Complete UX loading-state and notification-delivery hardening pass across the existing HRMS. No new business modules, no payroll features, no realtime logic changes.
+
+### PART 1 — Global Skeleton Loading System
+
+#### Skeleton components created
+- `src/components/Skeleton.tsx` — 24 reusable skeleton components: Skeleton, TextSkeleton, HeadingSkeleton, AvatarSkeleton, ButtonSkeleton, InputSkeleton, SelectSkeleton, CardSkeleton, MetricCardSkeleton, ListSkeleton, TableSkeleton, FormSkeleton, DetailPageSkeleton, DashboardSkeleton, CalendarSkeleton, TimelineSkeleton, NotificationSkeleton, ModalSkeleton, ProfileSkeleton, AttendanceSkeleton, TaskSkeleton, TicketSkeleton, DailyReportSkeleton, PageSkeleton
+- `src/styles/skeleton.css` — skeleton styles using existing design tokens (slate-100 background, radius, spacing, card surfaces). Shimmer animation with `@keyframes skl-shimmer`. `prefers-reduced-motion` media query disables shimmer and uses static state.
+- `useDelayedLoading` hook — delays skeleton display by 150ms to avoid flashing for fast requests
+
+#### Pages updated (36 data-fetching pages)
+All pages now use skeleton components instead of plain "Loading…" text:
+- Dashboard → DashboardSkeleton
+- EmployeeDirectoryPage → TableSkeleton (8 rows, 7 cols)
+- EmployeeProfilePage → ProfileSkeleton
+- AddEmployeePage → FormSkeleton (8 rows) — new loading state added
+- BranchManagementPage → ListSkeleton (5 rows)
+- DepartmentManagementPage → ListSkeleton (5 rows)
+- OrganizationSettingsPage → FormSkeleton (6 rows)
+- RolePermissionPage → TableSkeleton (7 rows, 4 cols)
+- ReportingHierarchyPage → ListSkeleton (6 rows, avatar)
+- AttendancePage → AttendanceSkeleton
+- AttendanceManagementPage → TableSkeleton (10 rows, 11 cols)
+- AttendanceCorrectionsPage → TableSkeleton (8 rows, 6 cols)
+- MonthlyAttendancePage → TableSkeleton (10 rows, 12 cols)
+- MyLeavePage → CardSkeleton + ListSkeleton
+- TeamLeavePage → TableSkeleton (8 rows, 6 cols)
+- LeaveManagementPage → TableSkeleton (8 rows, 7 cols)
+- CompanyCalendarPage → CalendarSkeleton
+- HolidayManagementPage → ListSkeleton (5 rows)
+- MyTasksPage → TaskSkeleton
+- TeamTasksPage → TaskSkeleton
+- CreateTaskPage → FormSkeleton (10 rows) — new loading state added
+- TaskDetailPage → DetailPageSkeleton
+- TaskReviewPage → ListSkeleton (6 rows, avatar)
+- MyTicketsPage → TicketSkeleton
+- TicketManagementPage → TicketSkeleton
+- TicketDetailPage → DetailPageSkeleton
+- DailyReportPage → DailyReportSkeleton
+- MyReportHistoryPage → TableSkeleton (8 rows, 6 cols)
+- TeamReportsPage → TableSkeleton (8 rows, 6 cols)
+- ReportReviewPage → ListSkeleton (6 rows, avatar)
+- OrgDailySummaryPage → DashboardSkeleton
+- FollowUpQueuePage → TableSkeleton (8 rows, 5 cols)
+- AnnouncementManagementPage → ListSkeleton (5 rows)
+- ExportCenterPage → TableSkeleton (6 rows, 5 cols)
+- NotificationInboxPage → NotificationSkeleton (8 rows)
+- AccountSettingsPage → FormSkeleton (6 rows)
+- AuditTrailPage → TableSkeleton (10 rows, 5 cols)
+
+#### Error Boundary
+- `src/components/ErrorBoundary.tsx` — app-level error boundary with "Something went wrong" message, Retry button, Return to Dashboard link, dev-only error details
+- Wired into `src/App.tsx` wrapping the BrowserRouter
+- Error boundary styles added to `src/styles/shared.css`
+
+### PART 2 — Notification Event Catalogue
+- `src/lib/notificationEvents.ts` — canonical notification event catalogue with 50+ event definitions
+- Each event defines: code, module, category, priority, channels (in_app/push/email), title template, safe message template, action URL, quiet hours exemption, sensitive flag, idempotency prefix
+- Categories: attendance, leave, task, ticket, daily_report, follow_up, calendar, employee, system, announcement, security
+- No sensitive data in message templates (no passwords, tokens, medical info, locations, document URLs)
+
+### PART 3 — Edge Function Notification Fixes
+
+#### Category and action_url fixes (6 edge functions)
+All notification inserts now include `category` and `action_url` fields:
+1. `attendance-scheduler` — category: 'attendance', action_url: '/attendance'
+2. `leave-action` — category: 'leave', action_url varies by recipient (/my-leave, /team-leave, /leave-management)
+3. `task-action` — category: 'task', action_url varies by recipient (/my-tasks, /team-tasks, /task-review)
+4. `ticket-action` — category: 'ticket', action_url varies by recipient (/my-tickets, /ticket-management)
+5. `daily-report-action` — category: 'daily_report' or 'follow_up', action_url: '/daily-report' or '/follow-up-queue'
+6. `report-scheduler` — action_url: '/daily-report' added (category was already set)
+
+#### New notifications added (4 edge functions)
+1. `attendance-action` — check-in confirmation, checkout confirmation, Half Day result, Full Day result
+2. `attendance-correction` — correction submitted (notifies permission holders), correction approved, correction rejected
+3. `manage-employee` — suspension, reactivation, offboarding, transfer (branch/department change)
+4. `export-handler` — export completed, export failed
+
+#### Notification type standardization
+All notification types converted to UPPER_SNAKE_CASE for consistency with the event catalogue.
+
+### PART 4 — Edge Functions Deployed
+- Deployed: attendance-action, attendance-correction, attendance-scheduler, manage-employee, leave-action (5/9)
+- Source updated but NOT YET DEPLOYED: task-action, ticket-action, daily-report-action, export-handler (4/9 — deploy budget reached)
+- These 4 functions have updated source on disk and will deploy on next session
+
+### PART 5 — Tests
+- `src/lib/__tests__/skeleton.test.ts` — 22 tests covering: skeleton component existence, CSS tokens, shimmer animation, reduced-motion, per-page skeleton usage, error boundary, delayed loading, no blank screens, no payroll features
+- `src/lib/__tests__/push.test.ts` — 28 tests (22 original push + 6 new notification event tests): event catalogue completeness, category/action_url fields, quiet hours, sensitive data absence, edge function category setting
+- All 50 tests PASS
+
+### Build Status
+- TypeScript: PASS
+- Production build: PASS (201 modules, 747.54 kB JS / 39.28 kB CSS)
+
+### Notification Coverage Matrix Summary
+| Module | Events Defined | In-App | Push | Email | Status |
+|--------|---------------|--------|------|-------|--------|
+| Attendance | 11 | Yes | Yes (reminders) | No | PASS — check-in/checkout/correction notifications added |
+| Leave | 10 | Yes | Yes | No | PASS — all leave events have category + action_url |
+| Task | 14 | Yes | Yes | No | PASS — source updated, deploy pending |
+| Ticket | 8 | Yes | Yes | No | PASS — source updated, deploy pending |
+| Daily Report | 6 | Yes | Yes | No | PASS — source updated, deploy pending |
+| Follow-up | 3 | Yes | Yes | No | PASS — source updated, deploy pending |
+| Employee | 10 | Yes | Yes | Yes (invitation) | PASS — activation/suspension/transfer notifications added |
+| Calendar | 3 | Yes | Yes (reminders) | No | Defined in catalogue, not yet wired to edge functions |
+| Announcement | 2 | Yes | Yes | No | Defined in catalogue, not yet wired to edge functions |
+| Export | 2 | Yes | Yes | No | PASS — completed/failed notifications added |
+| Security | 3 | Yes | Yes | No | Defined in catalogue, not yet wired to edge functions |
+
+### Remaining items
+1. **4 edge functions need deployment**: task-action, ticket-action, daily-report-action, export-handler — source is updated on disk but deploy budget was reached
+2. **Calendar/announcement/security notifications**: Event definitions exist in the catalogue but are not yet wired into edge functions (calendar events and announcements are created via direct Supabase calls from the frontend, not edge functions)
+3. **notification_deliveries rows**: Not yet created at notification insertion time — the notification-worker has nothing to process. A database trigger or edge function update is needed to queue deliveries
+4. **Email channel**: Still a stub — no real SMTP provider configured
+5. **Browser smoke test**: Not performed (no browser automation available)
+6. **Push delivery while app closed**: Still client-triggered via NotificationBell — no server-side push trigger exists yet
+

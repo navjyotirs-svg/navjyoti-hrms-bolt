@@ -3,6 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { AuthProvider, useAuth } from '@/auth/AuthContext'
 import AppRealtimeProvider from '@/components/AppRealtimeProvider'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { queryClient } from '@/lib/queryClient'
 import { LoginPage } from '@/auth/LoginPage'
 import { ForgotPasswordPage } from '@/auth/ForgotPasswordPage'
@@ -265,9 +266,11 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <AppRealtimeProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
+          <ErrorBoundary>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </ErrorBoundary>
         </AppRealtimeProvider>
       </AuthProvider>
     </QueryClientProvider>

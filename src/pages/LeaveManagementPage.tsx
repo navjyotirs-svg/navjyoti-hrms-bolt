@@ -13,6 +13,7 @@ import {
   type LeaveType,
 } from '@/lib/leave'
 import { LEAVE_STATUS_LABELS, type LeaveStatus } from '@/types/roles'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 type Tab = 'pending' | 'all' | 'balances'
@@ -282,7 +283,7 @@ export function LeaveManagementPage() {
   if (loading) {
     return (
       <div className="page">
-        <div className="loading-state">Loading…</div>
+        <TableSkeleton rows={8} cols={7} />
       </div>
     )
   }

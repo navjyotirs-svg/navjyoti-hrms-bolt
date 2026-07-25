@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchFollowUps, resolveFollowUp, closeFollowUp, type FollowUpRow } from '@/lib/dailyReports'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function FollowUpQueuePage() {
@@ -67,7 +68,7 @@ export function FollowUpQueuePage() {
         </div>
 
         {loading ? (
-          <div className="loading-state">Loading follow-ups…</div>
+          <TableSkeleton rows={8} cols={5} />
         ) : followUps.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No follow-ups found.</div></div>
         ) : (

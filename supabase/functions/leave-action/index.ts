@@ -261,10 +261,12 @@ async function handleSubmit(
     if (managerUserId) {
       await adminClient.from("notifications").insert({
         recipient_id: managerUserId,
-        notification_type: "leave_request_submitted",
+        notification_type: "LEAVE_REQUEST_SUBMITTED",
         title: "New Leave Request",
         message: `A leave request has been submitted for your review.`,
         priority: "normal",
+        category: "leave",
+        action_url: "/team-leave",
         dedup_key: `leave:${leaveReq.id}:submitted`,
         metadata: { leave_request_id: leaveReq.id },
       });
@@ -379,10 +381,12 @@ async function handleManagerReview(
     for (const hr of hrUsers ?? []) {
       await adminClient.from("notifications").insert({
         recipient_id: hr.id,
-        notification_type: "leave_pending_hr",
+        notification_type: "LEAVE_PENDING_HR",
         title: "Leave Request Pending HR Approval",
         message: "A leave request is pending final HR approval.",
         priority: "normal",
+        category: "leave",
+        action_url: "/leave-management",
         dedup_key: `leave:${leaveReq.id}:pending_hr:${hr.id}`,
         metadata: { leave_request_id: leaveReq.id },
       });
@@ -413,10 +417,12 @@ async function handleManagerReview(
     if (emp?.user_id) {
       await adminClient.from("notifications").insert({
         recipient_id: emp.user_id,
-        notification_type: "leave_rejected",
+        notification_type: "LEAVE_REJECTED",
         title: "Leave Request Rejected",
         message: "Your leave request has been rejected by your manager.",
         priority: "normal",
+        category: "leave",
+        action_url: "/my-leave",
         dedup_key: `leave:${leaveReq.id}:rejected`,
         metadata: { leave_request_id: leaveReq.id },
       });
@@ -523,10 +529,12 @@ async function handleHRReview(
     if (emp?.user_id) {
       await adminClient.from("notifications").insert({
         recipient_id: emp.user_id,
-        notification_type: "leave_approved",
+        notification_type: "LEAVE_APPROVED",
         title: "Leave Approved",
         message: "Your leave request has been approved.",
         priority: "normal",
+        category: "leave",
+        action_url: "/my-leave",
         dedup_key: `leave:${leaveReq.id}:approved`,
         metadata: { leave_request_id: leaveReq.id },
       });
@@ -572,10 +580,12 @@ async function handleHRReview(
     if (emp?.user_id) {
       await adminClient.from("notifications").insert({
         recipient_id: emp.user_id,
-        notification_type: "leave_rejected",
+        notification_type: "LEAVE_REJECTED",
         title: "Leave Rejected",
         message: "Your leave request has been rejected by HR.",
         priority: "normal",
+        category: "leave",
+        action_url: "/my-leave",
         dedup_key: `leave:${leaveReq.id}:hr_rejected`,
         metadata: { leave_request_id: leaveReq.id },
       });

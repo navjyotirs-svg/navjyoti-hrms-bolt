@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { ROLE_LABELS } from '@/types/roles'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 interface Employee {
@@ -345,7 +346,7 @@ export function EmployeeDirectoryPage() {
           </div>
         </div>
 
-        {loading ? <div className="loading-state">Loading…</div>
+        {loading ? <TableSkeleton rows={8} cols={7} />
           : filtered.length === 0 ? <div className="empty-state"><div className="empty-state-text">No employees found.</div></div>
           : (
           <div className="table-wrap">

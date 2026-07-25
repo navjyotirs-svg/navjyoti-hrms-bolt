@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getKolkataDate, fetchTeamReports } from '@/lib/dailyReports'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function TeamReportsPage() {
@@ -54,7 +55,7 @@ export function TeamReportsPage() {
         )}
 
         {loading ? (
-          <div className="loading-state">Loading team reports…</div>
+          <TableSkeleton rows={8} cols={6} />
         ) : reports.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No reports for this date.</div></div>
         ) : (

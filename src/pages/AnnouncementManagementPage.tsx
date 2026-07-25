@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchAllAnnouncements, createAnnouncement, deleteAnnouncement, type AnnouncementRow } from '@/lib/announcements'
+import { ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function AnnouncementManagementPage() {
@@ -100,7 +101,7 @@ export function AnnouncementManagementPage() {
 
       <div className="card">
         {loading ? (
-          <div className="loading-state">Loading announcements…</div>
+          <ListSkeleton rows={5} />
         ) : announcements.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No announcements yet.</div></div>
         ) : (

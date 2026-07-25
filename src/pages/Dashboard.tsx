@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { ATTENDANCE_STATUS_LABELS, ROLE_LABELS, type AttendanceStatus } from '@/types/roles'
 import { formatTimeRemaining, formatTimestamp, checkIn, fetchTodayAttendance } from '@/lib/attendance'
 import { CheckoutModal } from '@/components/CheckoutModal'
+import { DashboardSkeleton } from '@/components/Skeleton'
 import '@/styles/dashboard.css'
 
 export function Dashboard() {
@@ -298,7 +299,7 @@ export function Dashboard() {
   }
 
   if (loading) {
-    return <div className="dashboard"><div className="loading-state">Loading dashboard…</div></div>
+    return <div className="dashboard"><DashboardSkeleton /></div>
   }
 
   if (error) {

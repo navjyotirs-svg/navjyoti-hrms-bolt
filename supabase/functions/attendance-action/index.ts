@@ -207,6 +207,18 @@ async function handleCheckIn(
     },
   });
 
+  // Notify the employee that check-in was recorded
+  await admin.from("notifications").insert({
+    recipient_id: callerId,
+    notification_type: "ATTENDANCE_CHECK_IN_CONFIRMED",
+    title: "Check-in Recorded",
+    message: "Your check-in has been recorded successfully.",
+    priority: "low",
+    category: "attendance",
+    action_url: "/attendance",
+    dedup_key: `att:check_in:${record.id}`,
+  });
+
   return jsonResponse(200, {
     message: "Checked in successfully",
     record_id: record.id,
@@ -363,6 +375,46 @@ async function handleCheckOut(
       final_status: finalStatus,
     },
   });
+
+  // Notify the employee that check-out was recorded
+  const checkoutNotifications: any[] = [
+    {
+      recipient_id: callerId,
+      notification_type: "ATTENDANCE_CHECKOUT_CONFIRMED",
+      title: "Check-out Recorded",
+      message: "Your check-out has been recorded successfully.",
+      priority: "normal",
+      category: "attendance",
+      action_url: "/attendance",
+      dedup_key: `att:checkout:${record.id}`,
+    },
+  ];
+
+  if (finalStatus === "HALF_DAY") {
+    checkoutNotifications.push({
+      recipient_id: callerId,
+      notification_type: "ATTENDANCE_HALF_DAY",
+      title: "Half-Day Attendance",
+      message: "Your attendance has been recorded as a half-day.",
+      priority: "normal",
+      category: "attendance",
+      action_url: "/attendance",
+      dedup_key: `att:checkout:${record.id}:half_day`,
+    });
+  } else if (finalStatus === "FULL_DAY") {
+    checkoutNotifications.push({
+      recipient_id: callerId,
+      notification_type: "ATTENDANCE_FULL_DAY",
+      title: "Full-Day Attendance",
+      message: "Your attendance has been recorded as a full day.",
+      priority: "low",
+      category: "attendance",
+      action_url: "/attendance",
+      dedup_key: `att:checkout:${record.id}:full_day`,
+    });
+  }
+
+  await admin.from("notifications").insert(checkoutNotifications);
 
   return jsonResponse(200, {
     message: "Checked out successfully",

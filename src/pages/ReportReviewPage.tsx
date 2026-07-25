@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchPendingReviews, reviewReport, reopenReport } from '@/lib/dailyReports'
+import { ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function ReportReviewPage() {
@@ -48,7 +49,7 @@ export function ReportReviewPage() {
 
       <div className="card">
         {loading ? (
-          <div className="loading-state">Loading pending reviews…</div>
+          <ListSkeleton rows={6} avatar />
         ) : reports.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No reports pending review.</div></div>
         ) : (

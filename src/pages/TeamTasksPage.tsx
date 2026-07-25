@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { TASK_STATUS_LABELS, TASK_PRIORITY_LABELS, type TaskStatus, type TaskPriority } from '@/types/roles'
 import { fetchTeamTasks, formatDate, type TaskWithAssignments } from '@/lib/tasks'
+import { TaskSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function TeamTasksPage() {
@@ -62,7 +63,7 @@ export function TeamTasksPage() {
         </div>
 
         {loading ? (
-          <div className="loading-state">Loading…</div>
+          <TaskSkeleton />
         ) : filtered.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No tasks found.</div></div>
         ) : (

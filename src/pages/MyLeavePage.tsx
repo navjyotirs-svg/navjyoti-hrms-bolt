@@ -21,6 +21,7 @@ import {
   type LeaveRequest,
 } from '@/lib/leave'
 import { LEAVE_STATUS_LABELS as ROLE_LEAVE_STATUS_LABELS, type LeaveStatus } from '@/types/roles'
+import { CardSkeleton, ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 type Tab = 'balances' | 'apply' | 'requests'
@@ -236,7 +237,17 @@ export function MyLeavePage() {
     }
   }
 
-  if (loading) return <div className="page"><div className="loading-state">Loading…</div></div>
+  if (loading) return (
+    <div className="page">
+      <div className="attendance-status-grid">
+        <CardSkeleton />
+        <CardSkeleton />
+      </div>
+      <div className="card" style={{ marginTop: '16px' }}>
+        <ListSkeleton rows={5} />
+      </div>
+    </div>
+  )
 
   return (
     <div className="page">

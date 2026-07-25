@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { ROLES, type Role } from '@/types/roles'
+import { FormSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 interface Branch { id: string; name: string }
@@ -16,6 +17,7 @@ export function AddEmployeePage() {
   const [departments, setDepartments] = useState<Department[]>([])
   const [managers, setManagers] = useState<Manager[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [setupLink, setSetupLink] = useState<string | null>(null)
@@ -43,6 +45,7 @@ export function AddEmployeePage() {
       if (bRes.data) setBranches(bRes.data as Branch[])
       if (dRes.data) setDepartments(dRes.data as Department[])
       if (mRes.data) setManagers(mRes.data as Manager[])
+      setLoading(false)
     })
   }, [profile?.organization_id])
 
@@ -97,6 +100,8 @@ export function AddEmployeePage() {
       setSubmitting(false)
     }
   }
+
+  if (loading) return <div className="page"><FormSkeleton rows={8} /></div>
 
   return (
     <div className="page">

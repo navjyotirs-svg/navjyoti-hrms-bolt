@@ -10,6 +10,7 @@ import {
   type LeaveRequest,
 } from '@/lib/leave'
 import { CALENDAR_EVENT_LABELS, type CalendarEventType } from '@/types/roles'
+import { CalendarSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 type ViewMode = 'month' | 'agenda'
@@ -171,7 +172,11 @@ export function CompanyCalendarPage() {
     try { await deleteCalendarEvent(id); await loadAll() } catch (e) { setError((e as Error).message) }
   }
 
-  if (loading) return <div className="page"><div className="loading-state">Loading calendar…</div></div>
+  if (loading) return (
+    <div className="page">
+      <CalendarSkeleton />
+    </div>
+  )
 
   return (
     <div className="page">

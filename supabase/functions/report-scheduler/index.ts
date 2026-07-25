@@ -65,6 +65,7 @@ Deno.serve(async (req: Request) => {
               title: "Daily Report Due",
               message: `Your daily report for ${today} is due. Please submit before ${cutoffTime}.`,
               priority: "normal", dedup_key: dedupKey, category: "daily_report",
+              action_url: "/daily-report",
             });
             remindersSent++;
           }
@@ -82,6 +83,7 @@ Deno.serve(async (req: Request) => {
               title: "Missing Daily Report",
               message: `Your daily report for ${today} was not submitted. Please submit it.`,
               priority: "high", dedup_key: dedupKey, category: "daily_report",
+              action_url: "/daily-report",
             });
             missingReports++;
           }

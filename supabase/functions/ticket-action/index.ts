@@ -106,7 +106,9 @@ async function createNotification(
   title: string,
   message: string,
   priority: string = "normal",
-  dedupKey?: string
+  dedupKey?: string,
+  category: string = "ticket",
+  actionUrl: string = "/my-tickets"
 ) {
   const notif: Record<string, unknown> = {
     recipient_id: recipientId,
@@ -114,6 +116,8 @@ async function createNotification(
     title,
     message,
     priority,
+    category,
+    action_url: actionUrl,
   };
   if (dedupKey) notif.dedup_key = dedupKey;
   await supabase.from("notifications").insert(notif);
@@ -226,11 +230,13 @@ async function handleCreate(
       await createNotification(
         supabase,
         a.id,
-        "ticket_created",
+        "TICKET_CREATED",
         "New Ticket Created",
         `Ticket ${ticketCode}: ${subject}`,
         priority === "CRITICAL" || priority === "HIGH" ? "high" : "normal",
-        `ticket_created:${ticket.id}:${a.id}`
+        `ticket_created:${ticket.id}:${a.id}`,
+        "ticket",
+        "/ticket-management"
       );
     }
   }
@@ -288,11 +294,13 @@ async function handleAssign(
     await createNotification(
       supabase,
       assigned_to,
-      "ticket_assigned",
+      "TICKET_ASSIGNED",
       "Ticket Assigned to You",
       `Ticket ${ticket.ticket_code}: ${ticket.subject}`,
       "normal",
-      `ticket_assigned:${ticket_id}:${assigned_to}`
+      `ticket_assigned:${ticket_id}:${assigned_to}`,
+      "ticket",
+      "/my-tickets"
     );
   }
 
@@ -300,11 +308,13 @@ async function handleAssign(
   await createNotification(
     supabase,
     ticket.raised_by,
-    "ticket_assigned_raiser",
+    "TICKET_ASSIGNED_RAISER",
     "Ticket Assigned",
     `Your ticket ${ticket.ticket_code} has been assigned for resolution`,
     "normal",
-    `ticket_assigned_raiser:${ticket_id}`
+    `ticket_assigned_raiser:${ticket_id}`,
+    "ticket",
+    "/my-tickets"
   );
 
   await writeAudit(supabase, userId, "ticket.assign", "ticket", ticket_id, { status: oldStatus }, { status: newStatus });
@@ -373,11 +383,13 @@ async function handleEscalate(
     await createNotification(
       supabase,
       escalated_to,
-      "ticket_escalated",
+      "TICKET_ESCALATED",
       "Ticket Escalated to You",
       `Ticket ${ticket.ticket_code}: ${ticket.subject} has been escalated. Reason: ${reason}`,
       "high",
-      `ticket_escalated:${ticket_id}:${nextLevel}`
+      `ticket_escalated:${ticket_id}:${nextLevel}`,
+      "ticket",
+      "/my-tickets"
     );
   }
 
@@ -385,11 +397,13 @@ async function handleEscalate(
   await createNotification(
     supabase,
     ticket.raised_by,
-    "ticket_escalated_raiser",
+    "TICKET_ESCALATED_RAISER",
     "Ticket Escalated",
     `Your ticket ${ticket.ticket_code} has been escalated to level ${nextLevel}`,
     "high",
-    `ticket_escalated_raiser:${ticket_id}:${nextLevel}`
+    `ticket_escalated_raiser:${ticket_id}:${nextLevel}`,
+    "ticket",
+    "/my-tickets"
   );
 
   await writeAudit(supabase, userId, "ticket.escalate", "ticket", ticket_id, { status: oldStatus }, { status: "ESCALATED" });
@@ -447,11 +461,13 @@ async function handleResolve(
   await createNotification(
     supabase,
     ticket.raised_by,
-    "ticket_resolved",
+    "TICKET_RESOLVED",
     "Ticket Resolved",
     `Ticket ${ticket.ticket_code}: ${ticket.subject} has been resolved`,
     "normal",
-    `ticket_resolved:${ticket_id}`
+    `ticket_resolved:${ticket_id}`,
+    "ticket",
+    "/my-tickets"
   );
 
   await writeAudit(supabase, userId, "ticket.resolve", "ticket", ticket_id, { status: oldStatus }, { status: "RESOLVED" });
@@ -500,11 +516,13 @@ async function handleClose(
   await createNotification(
     supabase,
     ticket.raised_by,
-    "ticket_closed",
+    "TICKET_CLOSED",
     "Ticket Closed",
     `Ticket ${ticket.ticket_code}: ${ticket.subject} has been closed`,
     "normal",
-    `ticket_closed:${ticket_id}`
+    `ticket_closed:${ticket_id}`,
+    "ticket",
+    "/my-tickets"
   );
 
   await writeAudit(supabase, userId, "ticket.close", "ticket", ticket_id, { status: oldStatus }, { status: "CLOSED" });
@@ -564,11 +582,13 @@ async function handleReopen(
       await createNotification(
         supabase,
         a.id,
-        "ticket_reopened",
+        "TICKET_REOPENED",
         "Ticket Reopened",
         `Ticket ${ticket.ticket_code}: ${ticket.subject} has been reopened. Reason: ${reason}`,
         "normal",
-        `ticket_reopened:${ticket_id}:${a.id}`
+        `ticket_reopened:${ticket_id}:${a.id}`,
+        "ticket",
+        "/ticket-management"
       );
     }
   }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
+import { ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 interface EmployeeNode {
@@ -70,7 +71,7 @@ export function ReportingHierarchyPage() {
     })
   }, [profile?.organization_id])
 
-  if (loading) return <div className="loading-state">Loading…</div>
+  if (loading) return <div className="page"><ListSkeleton rows={6} avatar /></div>
   if (error) return <div className="form-error">{error}</div>
 
   // Build tree

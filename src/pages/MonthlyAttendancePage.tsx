@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/auth/AuthContext'
 import { fetchMonthlyAttendanceSummary, type MonthlyAttendanceSummaryRow } from '@/lib/attendance'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 const MONTHS = [
@@ -64,7 +65,7 @@ export function MonthlyAttendancePage() {
         </label>
       </div>
 
-      {loading && <p>Loading…</p>}
+      {loading && <TableSkeleton rows={10} cols={12} />}
       {error && <div className="form-error">{error}</div>}
       {!loading && !error && rows.length === 0 && <p>No attendance data for this period.</p>}
 

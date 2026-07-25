@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchMyReportHistory, type DailyReportRow } from '@/lib/dailyReports'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function MyReportHistoryPage() {
@@ -33,7 +34,7 @@ export function MyReportHistoryPage() {
 
       <div className="card">
         {loading ? (
-          <div className="loading-state">Loading history…</div>
+          <TableSkeleton rows={8} cols={6} />
         ) : reports.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No reports submitted yet.</div></div>
         ) : (

@@ -111,10 +111,13 @@ async function createNotification(
   title: string,
   message: string,
   priority: string = "normal",
-  dedupKey?: string
+  dedupKey?: string,
+  category: string = "system",
+  actionUrl: string = "/"
 ) {
   const notif: Record<string, unknown> = {
     recipient_id: recipientId, notification_type: type, title, message, priority,
+    category, action_url: actionUrl,
   };
   if (dedupKey) notif.dedup_key = dedupKey;
   await supabase.from("notifications").insert(notif);
@@ -331,9 +334,9 @@ async function handleReview(
     const msg = decision === "approved"
       ? `Your daily report for ${report.report_date} has been approved.`
       : `Your daily report for ${report.report_date} has been returned for correction. Reason: ${manager_comments || "No comments"}`;
-    await createNotification(supabase, emp.user_id, "daily_report_reviewed", title, msg,
+    await createNotification(supabase, emp.user_id, "DAILY_REPORT_REVIEWED", title, msg,
       decision === "approved" ? "normal" : "high",
-      `daily_report_${decision}:${report_id}`);
+      `daily_report_${decision}:${report_id}`, "daily_report", "/daily-report");
   }
 
   await writeAudit(supabase, userId, `daily_report.${decision}`, "daily_report", report_id,
@@ -373,10 +376,10 @@ async function handleReopen(
   const { data: emp } = await supabase
     .from("employees").select("user_id").eq("id", report.employee_id).single();
   if (emp) {
-    await createNotification(supabase, emp.user_id, "daily_report_reopened",
+    await createNotification(supabase, emp.user_id, "DAILY_REPORT_REOPENED",
       "Daily Report Reopened",
       `Your daily report for ${report.report_date} has been reopened. Reason: ${reason}`,
-      "high", `daily_report_reopened:${report_id}`);
+      "high", `daily_report_reopened:${report_id}`, "daily_report", "/daily-report");
   }
 
   await writeAudit(supabase, userId, "daily_report.reopen", "daily_report", report_id,
@@ -484,9 +487,9 @@ async function handleCreateFollowUp(
   if (error) return errorResponse(`Failed to create follow-up: ${error.message}`, 500);
 
   if (assigned_to) {
-    await createNotification(supabase, assigned_to, "follow_up_assigned",
+    await createNotification(supabase, assigned_to, "FOLLOW_UP_ASSIGNED",
       "Follow-up Assigned", `A follow-up has been assigned to you: ${subject}`,
-      priority, `follow_up_assigned:${followUp.id}`);
+      priority, `follow_up_assigned:${followUp.id}`, "follow_up", "/follow-up-queue");
   }
 
   await writeAudit(supabase, userId, "follow_up.create", "management_follow_up", followUp.id, null, { subject });
@@ -512,9 +515,9 @@ async function handleAssignFollowUp(
     assigned_to, status: "assigned",
   }).eq("id", follow_up_id);
 
-  await createNotification(supabase, assigned_to, "follow_up_assigned",
+  await createNotification(supabase, assigned_to, "FOLLOW_UP_ASSIGNED",
     "Follow-up Assigned", `A follow-up has been assigned to you.`,
-    "normal", `follow_up_assigned:${follow_up_id}`);
+    "normal", `follow_up_assigned:${follow_up_id}`, "follow_up", "/follow-up-queue");
 
   return successResponse({ message: "Follow-up assigned" });
 }

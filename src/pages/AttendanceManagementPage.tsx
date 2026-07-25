@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { ATTENDANCE_STATUS_LABELS, type AttendanceStatus } from '@/types/roles'
 import { formatTimestamp, formatDate, createEvidenceSignedUrl } from '@/lib/attendance'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 interface AttendanceRow {
@@ -168,7 +169,7 @@ export function AttendanceManagementPage() {
         </div>
 
         {loading ? (
-          <div className="loading-state">Loading…</div>
+          <TableSkeleton rows={10} cols={11} />
         ) : filtered.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No attendance records for this date.</div></div>
         ) : (

@@ -16,6 +16,7 @@ import {
   addProgressUpdate, submitTask, addTaskComment, uploadTaskAttachment,
   createTaskAttachmentSignedUrl, formatDate, formatDateTime,
 } from '@/lib/tasks'
+import { DetailPageSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function TaskDetailPage() {
@@ -147,7 +148,11 @@ export function TaskDetailPage() {
     }
   }
 
-  if (loading) return <div className="page"><div className="loading-state">Loading task…</div></div>
+  if (loading) return (
+    <div className="page">
+      <DetailPageSkeleton />
+    </div>
+  )
   if (error) return <div className="page"><div className="form-error">{error}</div></div>
   if (!task) return <div className="page"><div className="empty-state"><div className="empty-state-text">Task not found.</div></div></div>
 

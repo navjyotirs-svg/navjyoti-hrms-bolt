@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getKolkataDate, fetchOrgSummary } from '@/lib/dailyReports'
+import { DashboardSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function OrgDailySummaryPage() {
@@ -36,7 +37,7 @@ export function OrgDailySummaryPage() {
         </div>
 
         {loading ? (
-          <div className="loading-state">Loading summary…</div>
+          <DashboardSkeleton />
         ) : !latest ? (
           <div className="empty-state"><div className="empty-state-text">No summary available for this date.</div></div>
         ) : (

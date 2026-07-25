@@ -65,6 +65,8 @@ Deno.serve(async (req: Request) => {
             title: "Checkout Approaching",
             message: `Your checkout time is approaching in ${preAlertMinutes} minute${preAlertMinutes === 1 ? "" : "s"}. Please get ready to check out and ensure your daily report is submitted.`,
             priority: "high",
+            category: "attendance",
+            action_url: "/attendance",
             dedup_key: dedupKey,
             metadata: {
               attendance_record_id: record.id,
@@ -92,6 +94,8 @@ Deno.serve(async (req: Request) => {
             title: "Standard Shift Completed",
             message: "You have completed the standard 9-hour attendance duration. You may now check out.",
             priority: "high",
+            category: "attendance",
+            action_url: "/attendance",
             dedup_key: dedupKey,
             metadata: {
               attendance_record_id: record.id,

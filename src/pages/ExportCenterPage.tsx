@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchExportJobs, requestExport, getDownloadUrl, cancelExport, EXPORT_TYPES, type ExportJobRow } from '@/lib/exports'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function ExportCenterPage() {
@@ -86,7 +87,7 @@ export function ExportCenterPage() {
       <div className="card">
         <h3 style={{ marginBottom: 'var(--space-3)' }}>Export History</h3>
         {loading ? (
-          <div className="loading-state">Loading exports…</div>
+          <TableSkeleton rows={6} cols={5} />
         ) : jobs.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No exports yet.</div></div>
         ) : (

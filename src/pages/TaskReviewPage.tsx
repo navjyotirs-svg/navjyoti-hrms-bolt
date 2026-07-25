@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { type TaskRequestStatus, type SubmissionReviewStatus } from '@/types/roles'
 import { TASK_REQUEST_TYPE_LABELS } from '@/types/roles'
 import { fetchPendingActionRequests, fetchPendingSubmissions, reviewTaskRequest, reviewSubmission, formatDate, formatDateTime } from '@/lib/tasks'
+import { ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function TaskReviewPage() {
@@ -78,7 +79,7 @@ export function TaskReviewPage() {
         </div>
 
         {loading ? (
-          <div className="loading-state">Loading…</div>
+          <ListSkeleton rows={6} avatar />
         ) : tab === 'requests' ? (
           requests.length === 0 ? (
             <div className="empty-state"><div className="empty-state-text">No pending change requests.</div></div>

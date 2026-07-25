@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
+import { FormSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 interface Organization {
@@ -57,7 +58,7 @@ export function OrganizationSettingsPage() {
     }
   }
 
-  if (loading) return <div className="loading-state">Loading…</div>
+  if (loading) return <div className="page"><FormSkeleton rows={6} /></div>
   if (!org) return <div className="empty-state"><div className="empty-state-text">No organization assigned.</div></div>
 
   return (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getKolkataDate, fetchMyReport, saveDraft, submitReport, type DailyReportRow, type DailyReportTaskItem } from '@/lib/dailyReports'
+import { DailyReportSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function DailyReportPage() {
@@ -101,7 +102,7 @@ export function DailyReportPage() {
         </div>
 
         {loading ? (
-          <div className="loading-state">Loading report…</div>
+          <DailyReportSkeleton />
         ) : (
           <>
             {isReadOnly && (

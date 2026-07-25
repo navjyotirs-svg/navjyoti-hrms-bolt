@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TASK_STATUS_LABELS, TASK_PRIORITY_LABELS, type TaskStatus, type TaskPriority } from '@/types/roles'
 import { fetchMyTasks, formatDate, type TaskWithAssignments } from '@/lib/tasks'
+import { TaskSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function MyTasksPage() {
@@ -61,7 +62,7 @@ export function MyTasksPage() {
         </div>
 
         {loading ? (
-          <div className="loading-state">Loading tasks…</div>
+          <TaskSkeleton />
         ) : filtered.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No tasks found.</div></div>
         ) : (

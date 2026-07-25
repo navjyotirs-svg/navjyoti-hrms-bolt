@@ -16,6 +16,7 @@ import {
   type PushSubscriptionRow,
   type NotifPermissionState,
 } from '@/lib/webPush'
+import { FormSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 const SELF_SERVICE_FIELDS = [
@@ -229,7 +230,15 @@ export function AccountSettingsPage() {
   }
 
   if (!profile) return null
-  if (loading) return <div className="page"><div className="card"><div className="card-body">Loading…</div></div></div>
+  if (loading) return (
+    <div className="page">
+      <div className="card">
+        <div className="card-body">
+          <FormSkeleton rows={6} />
+        </div>
+      </div>
+    </div>
+  )
 
   const readonlyFields: { label: string; value: string | null }[] = [
     { label: 'Full Name', value: emp?.full_name ?? null },

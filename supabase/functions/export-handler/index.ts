@@ -225,6 +225,20 @@ async function handleRequestExport(
       status: "failed", failure_reason: uploadError.message,
       completed_at: new Date().toISOString(),
     }).eq("id", job.id);
+
+    // Notify the requesting user that the export failed
+    await supabase.from("notifications").insert({
+      recipient_id: userId,
+      notification_type: "EXPORT_FAILED",
+      title: "Export Failed",
+      message: "Your export request could not be completed. Please try again or contact support.",
+      priority: "high",
+      category: "system",
+      action_url: "/export-center",
+      dedup_key: `export:${job.id}:failed`,
+      metadata: { job_id: job.id, export_type },
+    });
+
     return errorResponse(`Failed to upload export: ${uploadError.message}`, 500);
   }
 
@@ -232,6 +246,19 @@ async function handleRequestExport(
     status: "completed", storage_path: fileName,
     completed_at: new Date().toISOString(),
   }).eq("id", job.id);
+
+  // Notify the requesting user that the export is ready
+  await supabase.from("notifications").insert({
+    recipient_id: userId,
+    notification_type: "EXPORT_COMPLETED",
+    title: "Export Ready",
+    message: "Your export is ready to download from the Export Center.",
+    priority: "normal",
+    category: "system",
+    action_url: "/export-center",
+    dedup_key: `export:${job.id}:completed`,
+    metadata: { job_id: job.id, export_type, rows: rowCount },
+  });
 
   return successResponse({ message: "Export completed", job_id: job.id, rows: rowCount });
 }

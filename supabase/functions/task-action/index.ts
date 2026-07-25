@@ -131,7 +131,9 @@ async function createNotification(
   title: string,
   message: string,
   priority: string = "normal",
-  dedupKey?: string
+  dedupKey?: string,
+  category: string = "task",
+  actionUrl: string = "/my-tasks"
 ) {
   const notif: Record<string, unknown> = {
     recipient_id: recipientId,
@@ -139,6 +141,8 @@ async function createNotification(
     title,
     message,
     priority,
+    category,
+    action_url: actionUrl,
   };
   if (dedupKey) notif.dedup_key = dedupKey;
   await supabase.from("notifications").insert(notif);
@@ -315,11 +319,13 @@ async function handleCreate(
   await createNotification(
     supabase,
     assignee_id,
-    "task_assigned",
+    "TASK_ASSIGNED",
     "New Task Assigned",
     `Task ${taskCode}: ${title}`,
     "normal",
-    `task_assigned:${task.id}:${assignee_id}`
+    `task_assigned:${task.id}:${assignee_id}`,
+    "task",
+    "/my-tasks"
   );
 
   // Audit
@@ -400,11 +406,13 @@ async function handleAccept(
     await createNotification(
       supabase,
       task2.created_by,
-      "task_accepted",
+      "TASK_ACCEPTED",
       "Task Accepted",
       `Task ${task.task_code}: ${task.title} has been accepted`,
       "normal",
-      `task_accepted:${task_id}`
+      `task_accepted:${task_id}`,
+      "task",
+      "/team-tasks"
     );
   }
 
@@ -503,11 +511,13 @@ async function handleReject(
   await createNotification(
     supabase,
     task.created_by,
-    "task_rejected",
+    "TASK_REJECTED",
     "Task Rejected",
     `Task ${task.task_code}: ${task.title} has been rejected. Reason: ${reason}`,
     "high",
-    `task_rejected:${task_id}`
+    `task_rejected:${task_id}`,
+    "task",
+    "/task-review"
   );
 
   await writeAudit(supabase, userId, "task.reject", "task", task_id, { status: task.status }, { status: "REJECTED" });
@@ -618,11 +628,13 @@ async function handleRequestChange(
   await createNotification(
     supabase,
     task.created_by,
-    "task_change_request",
+    "TASK_CHANGE_REQUEST",
     `${request_type.replace(/_/g, " ")} Request`,
     `Task ${task.task_code}: ${request_type} requested. Reason: ${reason}`,
     "normal",
-    `task_change_request:${request.id}`
+    `task_change_request:${request.id}`,
+    "task",
+    "/task-review"
   );
 
   await writeAudit(supabase, userId, "task.request_change", "task_action_request", request.id, null, { request_type, task_id });
@@ -743,11 +755,13 @@ async function handleReviewRequest(
     await createNotification(
       supabase,
       request.employee_id,
-      "task_request_approved",
+      "TASK_REQUEST_APPROVED",
       "Request Approved",
       `Your ${request.request_type} request for task ${task.task_code} has been approved`,
       "normal",
-      `task_request_approved:${request.id}`
+      `task_request_approved:${request.id}`,
+      "task",
+      "/my-tasks"
     );
   } else if (decision === "REJECTED") {
     // Revert task status
@@ -766,22 +780,26 @@ async function handleReviewRequest(
     await createNotification(
       supabase,
       request.employee_id,
-      "task_request_rejected",
+      "TASK_REQUEST_REJECTED",
       "Request Rejected",
       `Your ${request.request_type} request for task ${task.task_code} has been rejected`,
       "normal",
-      `task_request_rejected:${request.id}`
+      `task_request_rejected:${request.id}`,
+      "task",
+      "/my-tasks"
     );
   } else {
     // RETURNED_FOR_DETAILS
     await createNotification(
       supabase,
       request.employee_id,
-      "task_request_returned",
+      "TASK_REQUEST_RETURNED",
       "Request Returned for Details",
       `Your ${request.request_type} request for task ${task.task_code} needs more details`,
       "normal",
-      `task_request_returned:${request.id}`
+      `task_request_returned:${request.id}`,
+      "task",
+      "/my-tasks"
     );
   }
 
@@ -865,11 +883,13 @@ async function handleAddProgress(
       await createNotification(
         supabase,
         task2.created_by,
-        "task_blocker",
+        "TASK_BLOCKER",
         "Task Blocker Reported",
         `Task ${task2.task_code}: Blocker reported - ${blocker}`,
         "high",
-        `task_blocker:${task_id}:${new Date().toISOString().slice(0, 10)}`
+        `task_blocker:${task_id}:${new Date().toISOString().slice(0, 10)}`,
+        "task",
+        "/task-review"
       );
     }
   }
@@ -947,11 +967,13 @@ async function handleSubmit(
   await createNotification(
     supabase,
     task.created_by,
-    "task_submitted",
+    "TASK_SUBMITTED",
     "Task Submitted for Review",
     `Task ${task.task_code}: ${task.title} has been submitted for review`,
     "normal",
-    `task_submitted:${task_id}:${submission.id}`
+    `task_submitted:${task_id}:${submission.id}`,
+    "task",
+    "/task-review"
   );
 
   await writeAudit(supabase, userId, "task.submit", "task_submissions", submission.id, null, { task_id });
@@ -1056,11 +1078,13 @@ async function handleReviewSubmission(
   await createNotification(
     supabase,
     submission.submitted_by,
-    "task_reviewed",
+    "TASK_REVIEWED",
     `Submission ${reviewLabel}`,
     `Task ${task.task_code}: Your submission has been ${reviewLabel.toLowerCase()}`,
     decision === "APPROVED" ? "normal" : "high",
-    `task_reviewed:${submission_id}`
+    `task_reviewed:${submission_id}`,
+    "task",
+    "/my-tasks"
   );
 
   await writeAudit(
@@ -1148,11 +1172,13 @@ async function handleReassign(
   await createNotification(
     supabase,
     new_assignee_id,
-    "task_reassigned",
+    "TASK_REASSIGNED",
     "Task Reassigned to You",
     `Task ${task.task_code}: ${task.title} has been reassigned to you`,
     "normal",
-    `task_reassigned:${task_id}:${new_assignee_id}`
+    `task_reassigned:${task_id}:${new_assignee_id}`,
+    "task",
+    "/my-tasks"
   );
 
   await writeAudit(supabase, userId, "task.reassign", "task", task_id, { owner_id: task.owner_id }, { owner_id: new_assignee_id });
@@ -1203,11 +1229,13 @@ async function handleChangeDeadline(
   await createNotification(
     supabase,
     task.owner_id,
-    "task_deadline_changed",
+    "TASK_DEADLINE_CHANGED",
     "Task Deadline Changed",
     `Task ${task.task_code}: Deadline changed from ${oldDeadline} to ${new_deadline}. Reason: ${reason}`,
     "normal",
-    `task_deadline_changed:${task_id}:${new_deadline}`
+    `task_deadline_changed:${task_id}:${new_deadline}`,
+    "task",
+    "/my-tasks"
   );
 
   await writeAudit(supabase, userId, "task.change_deadline", "task", task_id, { current_deadline: oldDeadline }, { current_deadline: new_deadline });
@@ -1267,11 +1295,13 @@ async function handleCancel(
   await createNotification(
     supabase,
     task.owner_id,
-    "task_cancelled",
+    "TASK_CANCELLED",
     "Task Cancelled",
     `Task ${task.task_code}: ${task.title} has been cancelled. Reason: ${reason}`,
     "high",
-    `task_cancelled:${task_id}`
+    `task_cancelled:${task_id}`,
+    "task",
+    "/my-tasks"
   );
 
   await writeAudit(supabase, userId, "task.cancel", "task", task_id, { status: task.status }, { status: "CANCELLED" });

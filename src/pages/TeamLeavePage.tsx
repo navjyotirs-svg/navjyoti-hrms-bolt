@@ -8,6 +8,7 @@ import {
   type LeaveRequest,
 } from '@/lib/leave'
 import { LEAVE_STATUS_LABELS, type LeaveStatus } from '@/types/roles'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 type Tab = 'pending' | 'all'
@@ -173,7 +174,7 @@ export function TeamLeavePage() {
   if (loading) {
     return (
       <div className="page">
-        <div className="loading-state">Loading…</div>
+        <TableSkeleton rows={8} cols={6} />
       </div>
     )
   }

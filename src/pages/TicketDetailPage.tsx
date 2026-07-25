@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { TICKET_CATEGORY_LABELS, TICKET_STATUS_LABELS, TASK_PRIORITY_LABELS, type TicketCategory, type TicketStatus, type TaskPriority } from '@/types/roles'
 import { fetchTicketById, addTicketComment, resolveTicket, closeTicket, reopenTicket, escalateTicket, uploadTicketAttachment, createTicketAttachmentSignedUrl, formatTicketDate, formatTicketDateTime } from '@/lib/tickets'
+import { DetailPageSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function TicketDetailPage() {
@@ -110,7 +111,11 @@ export function TicketDetailPage() {
     } catch (e) { setError((e as Error).message) }
   }
 
-  if (loading) return <div className="page"><div className="loading-state">Loading ticket…</div></div>
+  if (loading) return (
+    <div className="page">
+      <DetailPageSkeleton />
+    </div>
+  )
   if (error) return <div className="page"><div className="form-error">{error}</div></div>
   if (!ticket) return <div className="page"><div className="empty-state"><div className="empty-state-text">Ticket not found.</div></div></div>
 

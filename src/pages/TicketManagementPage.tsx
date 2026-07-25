@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TICKET_CATEGORY_LABELS, TICKET_STATUS_LABELS, TASK_PRIORITY_LABELS, type TicketCategory, type TicketStatus, type TaskPriority } from '@/types/roles'
 import { fetchTeamTickets, formatTicketDate, type TicketRow } from '@/lib/tickets'
+import { TicketSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function TicketManagementPage() {
@@ -57,7 +58,7 @@ export function TicketManagementPage() {
         </div>
 
         {loading ? (
-          <div className="loading-state">Loading…</div>
+          <TicketSkeleton />
         ) : filtered.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No tickets found.</div></div>
         ) : (

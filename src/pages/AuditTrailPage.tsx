@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
+import { TableSkeleton } from '@/components/Skeleton'
 
 import '@/styles/shared.css'
 
@@ -65,7 +66,11 @@ export function AuditTrailPage() {
   }, [canRead])
 
   if (!canRead) return <div className="empty-state"><div className="empty-state-text">You do not have permission to view audit logs.</div></div>
-  if (loading) return <div className="loading-state">Loading…</div>
+  if (loading) return (
+    <div className="page">
+      <TableSkeleton rows={10} cols={5} />
+    </div>
+  )
   if (error) return <div className="form-error">{error}</div>
 
   function actorName(id: string | null): string {

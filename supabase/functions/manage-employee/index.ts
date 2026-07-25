@@ -207,6 +207,51 @@ async function handleChangeStatus(
     new_values: { employment_status: body.new_status, reason: body.reason },
   });
 
+  // Notify the employee of significant status changes
+  const employeeUserId = employee.user_id as string | null;
+  if (employeeUserId) {
+    let statusNotification: Record<string, unknown> | null = null;
+
+    if (body.new_status === "suspended") {
+      statusNotification = {
+        recipient_id: employeeUserId,
+        notification_type: "EMPLOYEE_SUSPENDED",
+        title: "Account Suspended",
+        message: "Your account has been suspended. Please contact your administrator.",
+        priority: "high",
+        category: "employee",
+        action_url: "/",
+        dedup_key: `emp:status:${employee.id}:suspended`,
+      };
+    } else if (["active", "confirmed", "on_probation"].includes(body.new_status)) {
+      statusNotification = {
+        recipient_id: employeeUserId,
+        notification_type: "EMPLOYEE_REACTIVATED",
+        title: "Account Reactivated",
+        message: "Your account has been reactivated. You can now access the system.",
+        priority: "normal",
+        category: "employee",
+        action_url: "/",
+        dedup_key: `emp:status:${employee.id}:reactivated`,
+      };
+    } else if (body.new_status === "offboarded") {
+      statusNotification = {
+        recipient_id: employeeUserId,
+        notification_type: "EMPLOYEE_OFFBOARDED",
+        title: "Offboarding Initiated",
+        message: "Your offboarding process has been initiated. Please coordinate with your administrator.",
+        priority: "high",
+        category: "employee",
+        action_url: "/",
+        dedup_key: `emp:status:${employee.id}:offboarded`,
+      };
+    }
+
+    if (statusNotification) {
+      await admin.from("notifications").insert(statusNotification);
+    }
+  }
+
   return jsonResponse(200, {
     message: "Status updated successfully",
     employee_id: employee.id,
@@ -303,6 +348,39 @@ async function handleTransfer(
       reason: body.reason,
     },
   });
+
+  // Notify the employee of the transfer
+  const transferUserId = employee.user_id as string | null;
+  if (transferUserId) {
+    const branchChanged =
+      body.to_branch_id !== undefined &&
+      body.to_branch_id !== (employee.branch_id as string | null);
+    const deptChanged =
+      body.to_department_id !== undefined &&
+      body.to_department_id !== (employee.department_id as string | null);
+
+    // Prefer department-change notification when the department changed;
+    // otherwise notify on a branch change. (If neither changed but a transfer
+    // was still recorded, default to a generic department-changed notice.)
+    const isBranchChange = branchChanged && !deptChanged;
+
+    await admin.from("notifications").insert({
+      recipient_id: transferUserId,
+      notification_type: isBranchChange
+        ? "EMPLOYEE_BRANCH_CHANGED"
+        : "EMPLOYEE_DEPARTMENT_CHANGED",
+      title: isBranchChange
+        ? "Branch Transfer"
+        : "Department Transfer",
+      message: isBranchChange
+        ? "Your branch assignment has been updated."
+        : "Your department assignment has been updated.",
+      priority: "normal",
+      category: "employee",
+      action_url: "/",
+      dedup_key: `emp:transfer:${employee.id}:${isBranchChange ? "branch" : "department"}`,
+    });
+  }
 
   return jsonResponse(200, {
     message: "Transfer completed successfully",

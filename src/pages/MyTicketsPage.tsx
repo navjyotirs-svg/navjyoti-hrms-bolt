@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { TICKET_CATEGORY_LABELS, TICKET_STATUS_LABELS, TASK_PRIORITY_LABELS, type TicketCategory, type TicketStatus, type TaskPriority } from '@/types/roles'
 import { fetchMyTickets, createTicket, formatTicketDate, type TicketRow } from '@/lib/tickets'
+import { TicketSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 export function MyTicketsPage() {
@@ -107,7 +108,7 @@ export function MyTicketsPage() {
 
       <div className="card">
         {loading ? (
-          <div className="loading-state">Loading tickets…</div>
+          <TicketSkeleton />
         ) : tickets.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No tickets found.</div></div>
         ) : (

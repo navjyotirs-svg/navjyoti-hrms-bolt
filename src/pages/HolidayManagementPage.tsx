@@ -11,6 +11,7 @@ import {
   type HolidayCalendar,
   type HolidayCalendarDate,
 } from '@/lib/leave'
+import { ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 interface Branch {
@@ -155,7 +156,7 @@ export function HolidayManagementPage() {
       {error && <div className="form-error">{error}</div>}
 
       {loading ? (
-        <div className="card"><div className="loading-state">Loading…</div></div>
+        <div className="card"><ListSkeleton rows={5} /></div>
       ) : calendars.length === 0 ? (
         <div className="card"><div className="empty-state"><div className="empty-state-text">No holiday calendars yet.</div></div></div>
       ) : (

@@ -167,6 +167,23 @@ async function handleRequestCorrection(
     },
   });
 
+  // Notify HR/managers who have the attendance.correct_manage permission
+  await notifyPermissionHolders(
+    admin,
+    profile.organization_id,
+    "attendance.correct_manage",
+    {
+      notification_type: "ATTENDANCE_CORRECTION_SUBMITTED",
+      title: "Attendance Correction Request",
+      message: "An attendance correction request has been submitted for your review.",
+      priority: "normal",
+      category: "attendance",
+      action_url: "/attendance/corrections",
+      dedup_key: `att:correction:${correction.id}:submitted`,
+      metadata: { correction_id: correction.id },
+    }
+  );
+
   return jsonResponse(200, {
     message: "Correction request submitted",
     correction_id: correction.id,
@@ -360,6 +377,34 @@ async function handleReviewCorrection(
     });
   }
 
+  // Notify the employee of the review decision
+  const { data: emp } = await admin
+    .from("employees")
+    .select("user_id")
+    .eq("id", correction.employee_id)
+    .maybeSingle();
+
+  if (emp?.user_id) {
+    const approved = body.decision === "APPROVED";
+    await admin.from("notifications").insert({
+      recipient_id: emp.user_id,
+      notification_type: approved
+        ? "ATTENDANCE_CORRECTION_APPROVED"
+        : "ATTENDANCE_CORRECTION_REJECTED",
+      title: approved
+        ? "Correction Request Approved"
+        : "Correction Request Rejected",
+      message: approved
+        ? "Your attendance correction request has been approved."
+        : "Your attendance correction request has been rejected.",
+      priority: "normal",
+      category: "attendance",
+      action_url: approved ? "/attendance" : "/attendance/corrections",
+      dedup_key: `att:correction:${correction.id}:${body.decision.toLowerCase()}`,
+      metadata: { correction_id: correction.id },
+    });
+  }
+
   return jsonResponse(200, {
     message: `Correction ${body.decision.toLowerCase()}`,
     correction_id: correction.id,
@@ -403,6 +448,70 @@ async function checkPermission(
     .maybeSingle();
 
   return !!rp;
+}
+
+// Find all active users in an organization whose role grants the given
+// permission code, and insert a notification to each of them.
+async function notifyPermissionHolders(
+  admin: ReturnType<typeof createClient>,
+  organizationId: string,
+  permCode: string,
+  notification: {
+    notification_type: string;
+    title: string;
+    message: string;
+    priority: string;
+    category: string;
+    action_url: string;
+    dedup_key: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  const { data: permRow } = await admin
+    .from("permissions")
+    .select("id")
+    .eq("code", permCode)
+    .maybeSingle();
+  if (!permRow) return;
+
+  // Find roles that grant this permission
+  const { data: rolePerms } = await admin
+    .from("role_permissions")
+    .select("role_id")
+    .eq("permission_id", permRow.id);
+  const roleIds = (rolePerms ?? []).map((rp: any) => rp.role_id);
+  if (!roleIds.length) return;
+
+  const { data: roles } = await admin
+    .from("roles")
+    .select("code")
+    .in("id", roleIds);
+  const roleCodes = (roles ?? []).map((r: any) => r.code);
+  if (!roleCodes.length) return;
+
+  // Find active users in the org with one of those roles
+  const { data: users } = await admin
+    .from("user_profiles")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("status", "active")
+    .in("role", roleCodes);
+
+  if (!users || users.length === 0) return;
+
+  const inserts = users.map((u: any) => ({
+    recipient_id: u.id,
+    notification_type: notification.notification_type,
+    title: notification.title,
+    message: notification.message,
+    priority: notification.priority,
+    category: notification.category,
+    action_url: notification.action_url,
+    dedup_key: `${notification.dedup_key}:${u.id}`,
+    metadata: notification.metadata ?? null,
+  }));
+
+  await admin.from("notifications").insert(inserts);
 }
 
 function jsonResponse(status: number, data: unknown): Response {

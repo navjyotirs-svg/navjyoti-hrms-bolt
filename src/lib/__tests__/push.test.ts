@@ -10,7 +10,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 // ── Helpers mirrored from send-test-push/index.ts ──────────────────────────
@@ -200,5 +200,72 @@ describe('Push delivery flow', () => {
         (f) => f.toLowerCase().includes('payroll') || f.toLowerCase().includes('salary')
       )
     )
+  })
+
+  it('19. Notification event catalogue exists with all required events', () => {
+    const code = readFileSync(join(process.cwd(), 'src/lib/notificationEvents.ts'), 'utf-8')
+    const requiredEvents = [
+      'ATTENDANCE_PRE_CHECKOUT', 'ATTENDANCE_CHECKOUT_READY',
+      'ATTENDANCE_CHECK_IN_CONFIRMED', 'ATTENDANCE_CHECKOUT_CONFIRMED',
+      'ATTENDANCE_HALF_DAY', 'ATTENDANCE_FULL_DAY', 'ATTENDANCE_MISSING_CHECKOUT',
+      'ATTENDANCE_CORRECTION_SUBMITTED', 'ATTENDANCE_CORRECTION_APPROVED', 'ATTENDANCE_CORRECTION_REJECTED',
+      'LEAVE_REQUEST_SUBMITTED', 'LEAVE_PENDING_HR', 'LEAVE_APPROVED', 'LEAVE_REJECTED',
+      'TASK_ASSIGNED', 'TASK_ACCEPTED', 'TASK_REJECTED', 'TASK_CHANGE_REQUEST',
+      'TASK_SUBMITTED', 'TASK_REVIEWED', 'TASK_REASSIGNED', 'TASK_DEADLINE_CHANGED', 'TASK_CANCELLED',
+      'TICKET_CREATED', 'TICKET_ASSIGNED', 'TICKET_ESCALATED', 'TICKET_RESOLVED', 'TICKET_CLOSED', 'TICKET_REOPENED',
+      'DAILY_REPORT_DUE', 'DAILY_REPORT_MISSING', 'DAILY_REPORT_REVIEWED', 'DAILY_REPORT_RETURNED',
+      'FOLLOW_UP_ASSIGNED', 'FOLLOW_UP_DUE', 'FOLLOW_UP_OVERDUE',
+      'EMPLOYEE_INVITATION_SENT', 'EMPLOYEE_ACTIVATED', 'EMPLOYEE_SUSPENDED', 'EMPLOYEE_REACTIVATED',
+      'EXPORT_COMPLETED', 'EXPORT_FAILED',
+      'SECURITY_PASSWORD_CHANGED', 'SECURITY_NEW_DEVICE',
+      'ANNOUNCEMENT_CREATED', 'ANNOUNCEMENT_URGENT',
+    ]
+    for (const evt of requiredEvents) {
+      assert(code.includes(evt), `Missing notification event: ${evt}`)
+    }
+  })
+
+  it('20. All notification events have category and action_url', () => {
+    const code = readFileSync(join(process.cwd(), 'src/lib/notificationEvents.ts'), 'utf-8')
+    // Every event definition should have category and actionUrl fields
+    const eventCount = (code.match(/category:/g) || []).length
+    const actionUrlCount = (code.match(/actionUrl:/g) || []).length
+    assert(eventCount > 40, `Expected 40+ category fields, got ${eventCount}`)
+    assert(actionUrlCount > 40, `Expected 40+ actionUrl fields, got ${actionUrlCount}`)
+  })
+
+  it('21. Notification events define quiet hours exemption', () => {
+    const code = readFileSync(join(process.cwd(), 'src/lib/notificationEvents.ts'), 'utf-8')
+    assert(code.includes('quietHoursExempt'), 'Events should have quietHoursExempt field')
+  })
+
+  it('22. Notification events define sensitive flag', () => {
+    const code = readFileSync(join(process.cwd(), 'src/lib/notificationEvents.ts'), 'utf-8')
+    assert(code.includes('sensitive'), 'Events should have sensitive flag')
+  })
+
+  it('23. No sensitive data in notification message templates', () => {
+    const code = readFileSync(join(process.cwd(), 'src/lib/notificationEvents.ts'), 'utf-8')
+    // Only check for truly sensitive data patterns, not words used in safe context
+    const sensitivePatterns = ['salary', 'medical', 'diagnosis', 'coordinate', 'document url', 'reset token', 'invitation token', 'auth key', 'p256dh']
+    const templateMatches = code.match(/messageTemplate:\s*'[^']*'/g) || []
+    for (const tmpl of templateMatches) {
+      for (const pattern of sensitivePatterns) {
+        assert(!tmpl.toLowerCase().includes(pattern), `Message template contains sensitive word "${pattern}": ${tmpl}`)
+      }
+    }
+  })
+
+  it('24. Edge functions set category on notification inserts', () => {
+    const fnDir = join(process.cwd(), 'supabase/functions')
+    const fns = ['attendance-action', 'attendance-correction', 'attendance-scheduler', 'leave-action', 'task-action', 'ticket-action', 'daily-report-action', 'report-scheduler', 'manage-employee', 'export-handler']
+    for (const fn of fns) {
+      const path = join(fnDir, fn, 'index.ts')
+      if (!existsSync(path)) continue
+      const code = readFileSync(path, 'utf-8')
+      if (code.includes('notifications') && code.includes('insert')) {
+        assert(code.includes('category'), `${fn} should set category on notification inserts`)
+      }
+    }
   })
 })

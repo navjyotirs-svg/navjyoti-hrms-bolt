@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
+import { ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 interface Department {
@@ -85,7 +86,7 @@ export function DepartmentManagementPage() {
 
       <div className="card">
         {loading ? (
-          <div className="loading-state">Loading…</div>
+          <ListSkeleton rows={5} />
         ) : departments.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No departments yet.</div></div>
         ) : (

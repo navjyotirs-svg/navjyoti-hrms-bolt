@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { reviewCorrection, formatDate } from '@/lib/attendance'
 import { CORRECTION_TYPE_LABELS, CORRECTION_STATUS_LABELS, type CorrectionType, type CorrectionStatus } from '@/types/roles'
+import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 interface CorrectionRow {
@@ -119,7 +120,11 @@ export function AttendanceCorrectionsPage() {
     setReviewing(null)
   }
 
-  if (loading) return <div className="page"><div className="loading-state">Loading…</div></div>
+  if (loading) return (
+    <div className="page">
+      <TableSkeleton rows={8} cols={6} />
+    </div>
+  )
   if (!canManage && !canRequest) {
     return <div className="page"><div className="empty-state"><div className="empty-state-text">You do not have permission to view corrections.</div></div></div>
   }

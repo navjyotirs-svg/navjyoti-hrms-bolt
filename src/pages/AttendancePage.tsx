@@ -16,6 +16,7 @@ import {
 } from '@/lib/attendance'
 import { ATTENDANCE_STATUS_LABELS, CORRECTION_TYPE_LABELS, type AttendanceStatus } from '@/types/roles'
 import { CheckoutModal } from '@/components/CheckoutModal'
+import { AttendanceSkeleton } from '@/components/Skeleton'
 import '@/styles/attendance.css'
 
 type Tab = 'today' | 'history' | 'corrections'
@@ -145,7 +146,11 @@ export function AttendancePage() {
     year: 'numeric',
   })
 
-  if (loading) return <div className="page"><div className="loading-state">Loading…</div></div>
+  if (loading) return (
+    <div className="page">
+      <AttendanceSkeleton />
+    </div>
+  )
 
   return (
     <div className="page">
