@@ -114,24 +114,31 @@ Deno.serve(async (req: Request) => {
     const callerPerms =
       permRows?.map((p: { permissions: { code: string } }) => p.permissions.code) ?? [];
 
-    if (!callerPerms.includes("employee.create")) {
-      return jsonError(403, "You do not have permission to create employees");
-    }
-
     const body: FunctionRequest = await req.json();
     const orgId = callerProfile.organization_id;
     const appUrl = getAppUrl();
 
-    if (body.action === "resend_invitation") {
-      return handleResendInvitation(admin, callerId, callerProfile, body as ResendInvitationRequest, appUrl);
-    }
-
+    // activate_account is called by the employee themselves after setting their
+    // password — it must NOT require employee.create permission.
     if (body.action === "activate_account") {
       return handleActivateAccount(admin, callerId, callerProfile);
     }
 
+    // repair_activation is an admin action — require employee.create permission.
     if (body.action === "repair_activation") {
+      if (!callerPerms.includes("employee.create")) {
+        return jsonError(403, "You do not have permission to repair account activation");
+      }
       return handleRepairActivation(admin, callerId, callerProfile, body as RepairActivationRequest);
+    }
+
+    // resend_invitation and default invite require employee.create permission.
+    if (!callerPerms.includes("employee.create")) {
+      return jsonError(403, "You do not have permission to create employees");
+    }
+
+    if (body.action === "resend_invitation") {
+      return handleResendInvitation(admin, callerId, callerProfile, body as ResendInvitationRequest, appUrl);
     }
 
     return handleInvite(admin, callerId, callerProfile, body as InviteEmployeeRequest, orgId, appUrl);
@@ -215,7 +222,7 @@ async function handleInvite(
   } else {
     // No profile row, but there may still be an orphaned auth user (e.g. employee
     // row was deleted but auth user was left behind). Check and clean up.
-    const { data: existingAuthUsers } = await admin.auth.admin.listUsers();
+    const { data: existingAuthUsers } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
     const orphanedAuth = existingAuthUsers?.users?.find(
       (u: { email?: string; last_sign_in_at?: string | null }) =>
         u.email === body.work_email && !u.last_sign_in_at
@@ -341,7 +348,7 @@ async function handleResendInvitation(
 ): Promise<Response> {
   const { data: employee, error: empError } = await admin
     .from("employees")
-    .select("id, user_id, organization_id, work_email, full_name, employment_status")
+    .select("id, user_id, organization_id, work_email, full_name, employment_status, employee_code")
     .eq("id", body.employee_id)
     .maybeSingle();
 
@@ -488,9 +495,10 @@ async function handleActivateAccount(
     // 3. Write employee status history
     await admin.from("employee_status_history").insert({
       employee_id: employee.id,
-      previous_status: prevStatus,
+      old_status: prevStatus,
       new_status: "active",
-      changed_by: callerId,
+      actor_id: callerId,
+      effective_date: new Date().toISOString().slice(0, 10),
       reason: "Account activated after password setup",
     });
   }
@@ -554,24 +562,19 @@ async function handleRepairActivation(
   // 1. Ensure auth user exists
   const { data: authUser, error: authError } = await admin.auth.admin.getUserById(userId);
   if (authError || !authUser.user) {
-    // Re-invite to recreate the auth user link
-    const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(
-      employee.work_email as string,
-      { redirectTo: `${Deno.env.get("APP_URL") ?? ""}/set-password` }
-    );
-    if (inviteError) {
-      return jsonError(500, `Auth user missing and re-invite failed: ${inviteError.message}`);
-    }
+    // Auth user missing — cannot repair without re-inviting. Return instructions.
+    return jsonError(409, "Auth account missing for this employee. Please re-invite the employee with their work email to recreate the account.");
   }
 
   // 2. Synchronize user_profiles
   const { data: profile } = await admin
     .from("user_profiles")
-    .select("id, status")
+    .select("id, status, role")
     .eq("id", userId)
     .maybeSingle();
 
   const prevProfileStatus = profile?.status ?? "missing";
+  const profileRole = profile?.role ?? "employee";
   await admin
     .from("user_profiles")
     .upsert({
@@ -579,11 +582,11 @@ async function handleRepairActivation(
       email: employee.work_email,
       full_name: employee.full_name,
       organization_id: callerProfile.organization_id,
+      role: profileRole,
       status: "active",
       is_active: true,
       updated_at: nowIso,
-    })
-    .eq("id", userId);
+    });
 
   // 3. Synchronize employee record
   const prevEmpStatus = employee.employment_status;
@@ -599,9 +602,10 @@ async function handleRepairActivation(
   // 4. Write employee status history
   await admin.from("employee_status_history").insert({
     employee_id: employee.id,
-    previous_status: prevEmpStatus,
+    old_status: prevEmpStatus,
     new_status: "active",
-    changed_by: callerId,
+    actor_id: callerId,
+    effective_date: new Date().toISOString().slice(0, 10),
     reason: "Account activation repaired by administrator",
   });
 

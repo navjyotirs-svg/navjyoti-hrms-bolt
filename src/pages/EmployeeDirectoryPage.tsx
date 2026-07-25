@@ -52,6 +52,7 @@ export function EmployeeDirectoryPage() {
   const [resendLink, setResendLink] = useState<string | null>(null)
   const [activating, setActivating] = useState<string | null>(null)
   const [repairing, setRepairing] = useState<string | null>(null)
+  const [statusChanging, setStatusChanging] = useState<string | null>(null)
   const canCreate = permissions.includes('employee.create')
   const canManageStatus = permissions.includes('employee.status.manage')
 
@@ -238,6 +239,93 @@ export function EmployeeDirectoryPage() {
     setRepairing(null)
   }
 
+  async function handleStatusChange(employeeId: string, newStatus: string) {
+    setStatusChanging(employeeId)
+    setResendMessage(null)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) throw new Error('No session')
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-employee`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          action: 'change_status',
+          employee_id: employeeId,
+          new_status: newStatus,
+          reason: 'Status changed by administrator',
+        }),
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        setResendMessage(data.error || 'Failed to change status')
+      } else {
+        setResendMessage(data.message || 'Status updated successfully.')
+        const isActive = !['inactive', 'offboarded', 'terminated', 'suspended'].includes(newStatus)
+        setEmployees((prev) =>
+          prev.map((e) =>
+            e.id === employeeId
+              ? { ...e, employment_status: newStatus, is_active: isActive }
+              : e
+          )
+        )
+      }
+    } catch (err) {
+      setResendMessage(err instanceof Error ? err.message : 'Failed to change status')
+    }
+    setStatusChanging(null)
+  }
+
+  async function handleOffboard(employeeId: string) {
+    const lastWorkingDate = prompt('Enter last working date (YYYY-MM-DD) or leave blank for today:')
+    if (lastWorkingDate === null) return
+    setStatusChanging(employeeId)
+    setResendMessage(null)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) throw new Error('No session')
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-employee`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          action: 'offboard',
+          employee_id: employeeId,
+          last_working_date: lastWorkingDate || null,
+          reason: 'Offboarded by administrator',
+        }),
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        setResendMessage(data.error || 'Failed to offboard employee')
+      } else {
+        setResendMessage(data.message || 'Employee offboarded successfully.')
+        setEmployees((prev) =>
+          prev.map((e) =>
+            e.id === employeeId
+              ? { ...e, employment_status: 'offboarded', is_active: false }
+              : e
+          )
+        )
+      }
+    } catch (err) {
+      setResendMessage(err instanceof Error ? err.message : 'Failed to offboard employee')
+    }
+    setStatusChanging(null)
+  }
+
   return (
     <div className="page">
       <div className="page-header">
@@ -338,6 +426,51 @@ export function EmployeeDirectoryPage() {
                             {repairing === e.id ? 'Repairing…' : 'Repair Account Activation'}
                           </button>
                         </>
+                      )}
+                      {canManageStatus && deriveDirectoryStatus(e) === 'Active' && (
+                        <select
+                          className="btn btn-sm"
+                          value=""
+                          disabled={statusChanging === e.id}
+                          onChange={(ev) => {
+                            const ns = ev.target.value
+                            if (!ns) return
+                            if (ns === 'offboarded') {
+                              handleOffboard(e.id)
+                            } else {
+                              handleStatusChange(e.id, ns)
+                            }
+                            ev.target.value = ''
+                          }}
+                          style={{ fontSize: '12px', padding: '4px 8px' }}
+                        >
+                          <option value="">Actions…</option>
+                          <option value="suspended">Suspend</option>
+                          <option value="inactive">Deactivate</option>
+                          <option value="notice_period">Notice Period</option>
+                          <option value="offboarded">Offboard</option>
+                        </select>
+                      )}
+                      {canManageStatus && deriveDirectoryStatus(e) === 'Offboarded' && (
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          disabled={statusChanging === e.id}
+                          onClick={() => handleStatusChange(e.id, 'active')}
+                        >
+                          {statusChanging === e.id ? 'Reactivating…' : 'Reactivate'}
+                        </button>
+                      )}
+                      {canManageStatus && (deriveDirectoryStatus(e) === 'Suspended' || deriveDirectoryStatus(e) === 'Inactive') && (
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          disabled={statusChanging === e.id}
+                          onClick={() => handleStatusChange(e.id, 'active')}
+                          style={{ marginLeft: 'var(--space-2)' }}
+                        >
+                          {statusChanging === e.id ? 'Reactivating…' : 'Reactivate'}
+                        </button>
                       )}
                     </td>
                   </tr>
