@@ -2146,3 +2146,98 @@ NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com. The us
 6. Verify checkout before 540 minutes = HALF_DAY
 7. Verify checkout at/after 540 minutes = FULL_DAY
 8. Verify existing 16 records are still readable in monthly reports
+
+---
+
+## Push Diagnostics, Tiered Alert Sound, and Supervisory Notifications — completed 2026-07-25
+
+### What was built
+
+#### Part 1 — End-to-end push diagnostic tracing
+- New `push_diagnostic_events` table with 5 event types: PUSH_PROVIDER_ACCEPTED, SERVICE_WORKER_PUSH_RECEIVED, SHOW_NOTIFICATION_CALLED, SHOW_NOTIFICATION_SUCCEEDED, SHOW_NOTIFICATION_FAILED
+- Stores only safe metadata: correlation ID, notification title, action route, SW version, error category
+- Never stores VAPID keys, subscription endpoints, p256dh/auth keys, JWTs, or access tokens
+- `send-test-push` edge function records PUSH_PROVIDER_ACCEPTED on successful provider delivery
+- `send-push-notification` edge function records PUSH_PROVIDER_ACCEPTED for real notifications
+- Service worker v3 reports SERVICE_WORKER_PUSH_RECEIVED, SHOW_NOTIFICATION_CALLED, SHOW_NOTIFICATION_SUCCEEDED/FAILED back to the page via postMessage
+- Frontend `startPushDiagnosticListener` in webPush.ts receives SW messages and records them to the database via `recordPushDiagnostic`
+- AccountSettingsPage shows a live "Delivery Trace" panel grouping events by correlation ID
+
+#### Part 2 — Service worker v3
+- Updated to v3 with `self.skipWaiting()` and `self.clients.claim()` for immediate activation
+- Push handler uses `event.waitUntil(self.registration.showNotification(title, options))` with:
+  - `silent: false` (never silent)
+  - `requireInteraction: true` for HIGH/CRITICAL (urgent) notifications
+  - `tag` for notification grouping
+  - `data.actionUrl` for click navigation
+  - `icon` and `badge` from local assets
+  - Safe fallback payload when JSON parsing fails
+- Reports diagnostic events to all controlled pages
+- Responds to GET_SW_VERSION message for version reporting
+- Notification click handler validates action URL against same-origin (prevents open redirect)
+- Focuses existing tab or opens new window on click
+
+#### Part 3 — Tiered in-app alert sound system
+- New `src/lib/alertSound.ts` module with three levels:
+  - NORMAL: in-app toast only, no sound
+  - HIGH: in-app toast + one two-note ascending chime (A5→E6) while HRMS is open
+  - CRITICAL: persistent in-app alert overlay + repeating chime every 3 seconds until acknowledged
+- Audio unlocked via user gesture during notification permission setup (`unlockAlertSound`)
+- Sound preference respected from `soundEnabled` in AppShell context
+- "Test Alert Sound" button added to AccountSettingsPage
+- Help message: "If a push is delivered but no sound is heard, enable notification banners and sound for Chrome/Navjyoti HRMS in Windows Settings."
+- Does NOT claim to force system volume or bypass Windows Do Not Disturb
+- System notification sound controlled by `silent: false` + Windows/browser default
+- In-app sound stops cleanly after tone duration, no overlapping sounds
+
+#### Part 4 — Canonical event catalogue
+- 20+ new event codes added to `notificationEvents.ts` covering all spec categories:
+  - Employee/account: invitation resent, password setup, activation failed, onboarding completed, offboarding initiated
+  - Attendance: supervisory check-in/checkout
+  - Tasks: task overdue
+  - Leave: leave conflict
+  - Tickets: urgent ticket
+  - Daily reports: blocker reported, follow-up assigned supervisory
+  - Documents/security: sensitive document uploaded, verification required, document rejected, suspicious login, repeated failed auth, account disabled, unusual export, permission change
+
+#### Part 5 — Supervisory notification routing
+- New `supervisory_notification_routing` table maps event codes to recipient roles and channels
+- 45 routing rules seeded covering all Director/HR supervisory events
+- `send-push-notification` edge function creates supervisory in-app notifications for routed events
+- Supervisors (Director, HR Admin, Manager) receive `[Supervisory]` prefixed notifications when subordinates trigger business events
+- Supervisory notifications are best-effort and never block the main notification flow
+
+### Database migration
+- `push_diagnostics_and_supervisory_routing` — created push_diagnostic_events and supervisory_notification_routing tables with RLS
+
+### Files changed
+- `public/sw.js` — service worker v3 with diagnostic reporting
+- `src/lib/webPush.ts` — added push diagnostic recording, SW version query, SW update, diagnostic listener
+- `src/lib/alertSound.ts` — new tiered alert sound module
+- `src/lib/notificationEvents.ts` — 20+ new event codes added
+- `src/components/NotificationBell.tsx` — rewritten with tiered alerts, diagnostic listener, critical overlay
+- `src/pages/AccountSettingsPage.tsx` — added Test Alert Sound button, delivery trace panel, help message
+- `src/styles/attendance.css` — added critical alert overlay and toast animations
+- `supabase/functions/send-test-push/index.ts` — records PUSH_PROVIDER_ACCEPTED diagnostic
+- `supabase/functions/send-push-notification/index.ts` — records diagnostic + creates supervisory notifications
+
+### Edge functions deployed
+- send-test-push: DEPLOYED
+- send-push-notification: DEPLOYED
+
+### Tests and exact results
+- Invitation tests: 23/23 PASS
+- Push tests: 41/41 PASS
+- Skeleton tests: 22/22 PASS
+- Total: 86/86 PASS
+- TypeScript: PASS
+- Production build: PASS
+
+### Production verification
+NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com. The user should:
+1. Sign in and open Account Settings
+2. Click "Test Alert Sound" — should hear a two-note chime
+3. Click "Send Test Push Notification" — should see the notification banner
+4. Check the Delivery Trace panel — should show PUSH_PROVIDER_ACCEPTED and SHOW_NOTIFICATION_SUCCEEDED events
+5. Verify Service Worker Version shows "v3"
+6. As Director, trigger a subordinate action (e.g., approve leave) — should see [Supervisory] notifications

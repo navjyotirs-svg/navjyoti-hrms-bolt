@@ -159,6 +159,12 @@ Deno.serve(async (req: Request) => {
 
         if (response.statusCode === 201 || response.statusCode === 202 || response.statusCode === 200) {
           sent++;
+          await adminClient.from("push_diagnostic_events").insert({
+            correlation_id: correlationId,
+            event_type: "PUSH_PROVIDER_ACCEPTED",
+            notification_title: "Navjyoti HRMS Test",
+            action_route: "/settings",
+          }).catch(() => {});
         } else {
           failed++;
           lastProviderStatus = response.statusCode;

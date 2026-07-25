@@ -13,6 +13,8 @@ import {
   saveSubscriptionToServer,
   repairPushSubscription,
   getPushDiagnostics,
+  fetchPushDiagnostics,
+  getServiceWorkerVersion,
   type PushSubscriptionRow,
   type NotifPermissionState,
 } from '@/lib/webPush'
@@ -334,7 +336,7 @@ export function AccountSettingsPage() {
             <div>
               <div style={{ fontWeight: 600, fontSize: '13.5px' }}>Enable Notification Sound</div>
               <div style={{ fontSize: '12px', color: 'var(--slate)', marginTop: '2px' }}>
-                Play a sound alert for attendance reminders. Sound only plays when the browser tab is open.
+                Play an alert sound for HIGH and CRITICAL notifications. Sound only plays when the browser tab is open.
               </div>
             </div>
             <button
@@ -345,8 +347,23 @@ export function AccountSettingsPage() {
               {soundEnabled ? 'Enabled' : 'Disabled'}
             </button>
           </div>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)', flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-sm btn-outline"
+              onClick={async () => {
+                const { testAlertSound } = await import('@/lib/alertSound')
+                testAlertSound()
+              }}
+              type="button"
+            >
+              Test Alert Sound
+            </button>
+          </div>
           <p style={{ fontSize: '12px', color: 'var(--slate)', marginTop: 'var(--space-3)', lineHeight: 1.5 }}>
-            Note: Browser autoplay restrictions may prevent sound before interaction. If the tab is open and sound is enabled, a clear alert will play for attendance reminders. Sound does not play when the browser is fully closed.
+            Note: Browser autoplay restrictions may prevent sound before interaction. If the tab is open and sound is enabled, a clear alert will play for HIGH and CRITICAL notifications. Sound does not play when the browser is fully closed.
+          </p>
+          <p style={{ fontSize: '12px', color: 'var(--slate)', marginTop: 'var(--space-2)', lineHeight: 1.5 }}>
+            If a push is delivered but no sound is heard, enable notification banners and sound for Chrome/Navjyoti HRMS in Windows Settings.
           </p>
         </div>
       </div>
@@ -444,11 +461,74 @@ export function AccountSettingsPage() {
                 <div>Service Worker: <strong style={{ color: diagnostics.serviceWorkerActive ? 'var(--success)' : 'var(--error)' }}>{diagnostics.serviceWorkerActive ? 'Active' : 'Inactive'}</strong></div>
                 <div>Browser Subscription: <strong style={{ color: diagnostics.subscriptionActive ? 'var(--success)' : 'var(--error)' }}>{diagnostics.subscriptionActive ? 'Active' : 'None'}</strong></div>
                 <div>Registered Devices: <strong>{diagnostics.subscriptionCount}</strong></div>
+                <div style={{ marginTop: 'var(--space-3)', marginBottom: 'var(--space-1)', fontWeight: 600, color: 'var(--ink)' }}>Delivery Trace</div>
+                <PushDeliveryTrace />
               </div>
             )}
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function PushDeliveryTrace() {
+  const [events, setEvents] = useState<Array<{
+    id: string
+    correlation_id: string
+    event_type: string
+    notification_title: string | null
+    action_route: string | null
+    service_worker_version: string | null
+    error_category: string | null
+    created_at: string
+  }>>([])
+  const [swVersion, setSwVersion] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetchPushDiagnostics(10).then(setEvents)
+    getServiceWorkerVersion().then(setSwVersion)
+    const interval = setInterval(() => {
+      fetchPushDiagnostics(10).then(setEvents)
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  if (events.length === 0) {
+    return (
+      <div style={{ fontSize: '11px', color: 'var(--slate)' }}>
+        <div>Service Worker Version: <strong>{swVersion || 'unknown'}</strong></div>
+        <div style={{ marginTop: '4px' }}>No push delivery events yet. Send a test push to see the trace.</div>
+      </div>
+    )
+  }
+
+  // Group events by correlation_id
+  const grouped = events.reduce((acc, e) => {
+    if (!acc[e.correlation_id]) acc[e.correlation_id] = []
+    acc[e.correlation_id].push(e)
+    return acc
+  }, {} as Record<string, typeof events>)
+
+  return (
+    <div style={{ fontSize: '11px', color: 'var(--slate)' }}>
+      <div>Service Worker Version: <strong>{swVersion || 'unknown'}</strong></div>
+      {Object.entries(grouped).slice(0, 3).map(([corrId, evts]) => (
+        <div key={corrId} style={{ marginTop: '6px', padding: '4px 6px', background: 'var(--bg)', borderRadius: '4px' }}>
+          <div style={{ fontWeight: 600, color: 'var(--ink)', fontSize: '10.5px' }}>
+            {evts[0].notification_title || 'Unknown'} — {corrId.slice(0, 8)}
+          </div>
+          {evts.map((e) => (
+            <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+              <span style={{ color: e.event_type.includes('FAILED') ? 'var(--error)' : e.event_type.includes('SUCCEEDED') ? 'var(--success)' : 'var(--slate)' }}>
+                {e.event_type.replace(/_/g, ' ')}
+              </span>
+              <span style={{ fontSize: '10px' }}>{new Date(e.created_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}</span>
+              {e.error_category && <span style={{ color: 'var(--error)', fontSize: '10px' }}>({e.error_category})</span>}
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }

@@ -7,6 +7,18 @@ import {
   markAllNotificationsRead,
   type Notification,
 } from '@/lib/attendance'
+import {
+  startPushDiagnosticListener,
+  recordPushDiagnostic,
+  getServiceWorkerVersion,
+  type PushDiagnosticEvent,
+} from '@/lib/webPush'
+import {
+  playAlertForPriority,
+  stopCriticalAlert,
+  unlockAlertSound,
+  priorityToLevel,
+} from '@/lib/alertSound'
 import '@/styles/attendance.css'
 
 interface Props {
@@ -19,36 +31,37 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
   const [toast, setToast] = useState<Notification | null>(null)
+  const [criticalAlert, setCriticalAlert] = useState<Notification | null>(null)
   const [connected, setConnected] = useState(false)
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default')
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const shownIdsRef = useRef<Set<string>>(new Set())
+  const swVersionRef = useRef<string | null>(null)
 
-  const playSound = useCallback(() => {
-    if (!soundEnabled) return
-    try {
-      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.frequency.value = 880
-      osc.type = 'sine'
-      gain.gain.setValueAtTime(0.3, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5)
-      osc.start(ctx.currentTime)
-      osc.stop(ctx.currentTime + 0.5)
-    } catch {
-      // AudioContext not available
+  // Initialize service worker version and push diagnostic listener
+  useEffect(() => {
+    getServiceWorkerVersion().then((v) => {
+      swVersionRef.current = v
+    })
+
+    const stopListener = startPushDiagnosticListener(async (event: PushDiagnosticEvent) => {
+      await recordPushDiagnostic({
+        ...event,
+        serviceWorkerVersion: event.serviceWorkerVersion || swVersionRef.current || undefined,
+      })
+    })
+
+    return () => {
+      stopListener()
     }
-  }, [soundEnabled])
+  }, [])
 
   const sendBrowserNotification = useCallback((notif: Notification) => {
     if (!('Notification' in window)) return
     if (Notification.permission !== 'granted') return
 
-    const priority = notif.priority || 'normal'
-    const isHigh = priority === 'high' || priority === 'urgent'
+    const level = priorityToLevel(notif.priority || 'normal')
+    const isHigh = level === 'HIGH' || level === 'CRITICAL'
 
     const title = isHigh ? `\u26A0 ${notif.title}` : notif.title
     const body = notif.message
@@ -57,7 +70,7 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
       const n = new Notification(title, {
         body,
         tag: notif.id,
-        requireInteraction: isHigh,
+        requireInteraction: level === 'CRITICAL',
         silent: false,
       })
       n.onclick = () => {
@@ -81,6 +94,10 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
     }
     const result = await Notification.requestPermission()
     setNotifPermission(result)
+    // Unlock audio on this user gesture
+    if (result === 'granted') {
+      unlockAlertSound()
+    }
   }, [])
 
   const loadUnread = useCallback(async () => {
@@ -114,13 +131,15 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
           setUnreadCount((prev) => prev + 1)
           setNotifications((prev) => [notif, ...prev])
 
-          const priority = notif.priority || 'normal'
-          const isHigh = priority === 'high' || priority === 'urgent'
+          const level = priorityToLevel(notif.priority || 'normal')
 
-          if (isHigh) {
+          if (level === 'CRITICAL') {
+            setCriticalAlert(notif)
+            playAlertForPriority(notif.priority, soundEnabled)
+          } else if (level === 'HIGH') {
             setToast(notif)
             setTimeout(() => setToast(null), 8000)
-            playSound()
+            playAlertForPriority(notif.priority, soundEnabled)
           }
 
           sendBrowserNotification(notif)
@@ -163,8 +182,9 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
       supabase.removeChannel(channel)
       channelRef.current = null
       window.removeEventListener('focus', handleFocus)
+      stopCriticalAlert()
     }
-  }, [userId, loadUnread, playSound, sendBrowserNotification, requestPermission])
+  }, [userId, loadUnread, sendBrowserNotification, requestPermission, soundEnabled])
 
   async function handleMarkRead(id: string) {
     await markNotificationRead(id)
@@ -176,6 +196,16 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
     await markAllNotificationsRead()
     setNotifications([])
     setUnreadCount(0)
+  }
+
+  function handleAcknowledgeCritical() {
+    if (criticalAlert) {
+      markNotificationRead(criticalAlert.id)
+      setNotifications((prev) => prev.filter((n) => n.id !== criticalAlert.id))
+      setUnreadCount((prev) => Math.max(0, prev - 1))
+    }
+    setCriticalAlert(null)
+    stopCriticalAlert()
   }
 
   return (
@@ -216,7 +246,7 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
                 <div className="notif-empty">No new notifications</div>
               ) : (
                 notifications.map((n) => (
-                  <div key={n.id} className={`notif-item ${n.priority === 'high' ? 'notif-high' : ''}`}>
+                  <div key={n.id} className={`notif-item ${n.priority === 'high' || n.priority === 'urgent' ? 'notif-high' : ''}`}>
                     <div className="notif-item-title">{n.title}</div>
                     <div className="notif-item-msg">{n.message}</div>
                     <div className="notif-item-time">
@@ -242,6 +272,25 @@ export function NotificationBell({ userId, soundEnabled }: Props) {
           <div className="notif-toast-content">
             <div className="notif-toast-title">{toast.title}</div>
             <div className="notif-toast-msg">{toast.message}</div>
+          </div>
+        </div>
+      )}
+
+      {criticalAlert && (
+        <div className="notif-critical-overlay">
+          <div className="notif-critical-card">
+            <div className="notif-critical-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </div>
+            <div className="notif-critical-title">{criticalAlert.title}</div>
+            <div className="notif-critical-msg">{criticalAlert.message}</div>
+            <button className="notif-critical-ack" onClick={handleAcknowledgeCritical}>
+              Acknowledge
+            </button>
           </div>
         </div>
       )}

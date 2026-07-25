@@ -1,8 +1,9 @@
-// Navjyoti HRMS Service Worker v2
+// Navjyoti HRMS Service Worker v3
 // Handles push events, notification clicks, and service-worker updates.
+// Reports diagnostic events back to the page for end-to-end push tracing.
 // Does NOT cache authenticated/private API responses.
 
-const SW_VERSION = 'v2'
+const SW_VERSION = 'v3'
 const CACHE_NAME = `navjyoti-hrms-shell-${SW_VERSION}`
 const STATIC_ASSETS = [
   '/',
@@ -69,12 +70,25 @@ self.addEventListener('fetch', (event) => {
   }
 })
 
-// Message handler — allows page to trigger service worker update
+// Message handler — allows page to trigger service worker update and query version
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting()
   }
+  if (event.data && event.data.type === 'GET_SW_VERSION') {
+    event.source && event.source.postMessage({ type: 'SW_VERSION', version: SW_VERSION })
+  }
 })
+
+// Helper: post a diagnostic event to all controlled pages
+function reportDiagnostic(eventType, data) {
+  const payload = { type: 'PUSH_DIAGNOSTIC', eventType, swVersion: SW_VERSION, ...data }
+  self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    for (const client of clients) {
+      client.postMessage(payload)
+    }
+  })
+}
 
 // Push event handler
 self.addEventListener('push', (event) => {
@@ -86,21 +100,57 @@ self.addEventListener('push', (event) => {
   }
 
   const title = payload.title || 'Navjyoti HRMS'
+  const safeActionUrl = payload.actionUrl || '/'
+  const notificationId = payload.notificationId || null
+  const priority = payload.priority || 'normal'
+  const isHigh = priority === 'urgent' || priority === 'high'
+
+  // Report that the service worker received the push
+  reportDiagnostic('SERVICE_WORKER_PUSH_RECEIVED', {
+    title,
+    actionRoute: safeActionUrl,
+    notificationId,
+  })
+
   const options = {
     body: payload.body || payload.message || '',
     icon: payload.icon || '/icon-192.png',
     badge: payload.badge || '/badge-72.png',
-    tag: payload.tag || payload.notificationId || undefined,
+    tag: payload.tag || notificationId || `navjyoti-${Date.now()}`,
     data: {
-      actionUrl: payload.actionUrl || '/',
-      notificationId: payload.notificationId || null,
+      actionUrl: safeActionUrl,
+      notificationId,
       category: payload.category || 'system',
     },
-    requireInteraction: payload.priority === 'urgent' || payload.priority === 'high',
+    requireInteraction: isHigh,
     silent: false,
   }
 
-  event.waitUntil(self.registration.showNotification(title, options))
+  // Report that showNotification is about to be called
+  reportDiagnostic('SHOW_NOTIFICATION_CALLED', {
+    title,
+    actionRoute: safeActionUrl,
+    notificationId,
+  })
+
+  event.waitUntil(
+    self.registration.showNotification(title, options)
+      .then(() => {
+        reportDiagnostic('SHOW_NOTIFICATION_SUCCEEDED', {
+          title,
+          actionRoute: safeActionUrl,
+          notificationId,
+        })
+      })
+      .catch((err) => {
+        reportDiagnostic('SHOW_NOTIFICATION_FAILED', {
+          title,
+          actionRoute: safeActionUrl,
+          notificationId,
+          errorCategory: err && err.name ? err.name : 'UNKNOWN',
+        })
+      })
+  )
 })
 
 // Notification click handler

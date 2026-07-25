@@ -315,6 +315,12 @@ async function sendPushForNotification(supabase: ReturnType<typeof createClient>
 
       if (response.statusCode === 201 || response.statusCode === 202 || response.statusCode === 200) {
         sent++;
+        await supabase.from("push_diagnostic_events").insert({
+          correlation_id: correlationId,
+          event_type: "PUSH_PROVIDER_ACCEPTED",
+          notification_title: notif.title,
+          action_route: notif.action_url || "/notifications",
+        }).catch(() => {});
       } else {
         failed++;
         if (shouldDeactivate(mapProviderStatus(response.statusCode))) {
@@ -342,7 +348,68 @@ async function sendPushForNotification(supabase: ReturnType<typeof createClient>
     .eq("notification_id", notificationId)
     .eq("channel", "web_push");
 
+  // Create supervisory notifications for Director/HR if this event is routed
+  await createSupervisoryNotifications(supabase, notif, correlationId);
+
   return json({ success: sent > 0, message: `Push sent to ${sent} device(s)`, sent, failed, deactivated, correlationId });
+}
+
+async function createSupervisoryNotifications(supabase: ReturnType<typeof createClient>, notif: { id: string; recipient_id: string; title: string; message: string; priority: string; category: string; action_url: string | null }, correlationId: string): Promise<void> {
+  try {
+    // Look up the notification_type to check if it has supervisory routing
+    const { data: notifWithType } = await supabase
+      .from("notifications")
+      .select("notification_type")
+      .eq("id", notif.id)
+      .maybeSingle();
+
+    if (!notifWithType?.notification_type) return;
+
+    // Check if this event code has supervisory routing configured
+    const { data: routing } = await supabase
+      .from("supervisory_notification_routing")
+      .select("recipient_roles, channels")
+      .eq("event_code", notifWithType.notification_type)
+      .maybeSingle();
+
+    if (!routing || !routing.recipient_roles || routing.recipient_roles.length === 0) return;
+
+    // Find all users with the recipient roles in the same organization as the original recipient
+    const { data: originalProfile } = await supabase
+      .from("user_profiles")
+      .select("organization_id")
+      .eq("id", notif.recipient_id)
+      .maybeSingle();
+
+    if (!originalProfile?.organization_id) return;
+
+    const { data: supervisors } = await supabase
+      .from("user_profiles")
+      .select("id")
+      .eq("organization_id", originalProfile.organization_id)
+      .in("role", routing.recipient_roles)
+      .eq("status", "active")
+      .neq("id", notif.recipient_id); // Don't notify the original recipient again
+
+    if (!supervisors || supervisors.length === 0) return;
+
+    // Create supervisory in-app notifications
+    const supervisoryNotifs = supervisors.map((sup: { id: string }) => ({
+      recipient_id: sup.id,
+      notification_type: `SUPERVISORY_${notifWithType.notification_type}`,
+      title: `[Supervisory] ${notif.title}`,
+      message: notif.message,
+      priority: notif.priority,
+      category: notif.category,
+      action_url: notif.action_url || "/notifications",
+      dedup_key: `sup:${notif.id}:${sup.id}`,
+      metadata: { supervisory: true, original_notification_id: notif.id, correlation_id: correlationId },
+    }));
+
+    await supabase.from("notifications").insert(supervisoryNotifs);
+  } catch {
+    // Supervisory notifications are best-effort — never block the main flow
+  }
 }
 
 function validateVapidConfig(): VapidConfig | { errorCategory: string; message: string } {

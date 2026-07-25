@@ -382,3 +382,108 @@ export function markPermissionSetupComplete(): void {
 export function clearPermissionSetup(): void {
   localStorage.removeItem(PERMISSION_SETUP_KEY)
 }
+
+// ---------------------------------------------------------------------------
+// Push diagnostic recording
+// ---------------------------------------------------------------------------
+
+export interface PushDiagnosticEvent {
+  eventType: 'PUSH_PROVIDER_ACCEPTED' | 'SERVICE_WORKER_PUSH_RECEIVED' | 'SHOW_NOTIFICATION_CALLED' | 'SHOW_NOTIFICATION_SUCCEEDED' | 'SHOW_NOTIFICATION_FAILED'
+  correlationId: string
+  notificationTitle?: string
+  actionRoute?: string
+  serviceWorkerVersion?: string
+  errorCategory?: string
+}
+
+export function startPushDiagnosticListener(onEvent: (event: PushDiagnosticEvent) => void): () => void {
+  if (!('serviceWorker' in navigator)) return () => {}
+
+  const listener = (event: MessageEvent) => {
+    if (event.data && event.data.type === 'PUSH_DIAGNOSTIC') {
+      onEvent({
+        eventType: event.data.eventType,
+        correlationId: event.data.correlationId || crypto.randomUUID(),
+        notificationTitle: event.data.title,
+        actionRoute: event.data.actionRoute,
+        serviceWorkerVersion: event.data.swVersion,
+        errorCategory: event.data.errorCategory,
+      })
+    }
+  }
+
+  navigator.serviceWorker.addEventListener('message', listener)
+
+  return () => {
+    navigator.serviceWorker.removeEventListener('message', listener)
+  }
+}
+
+export async function recordPushDiagnostic(event: PushDiagnosticEvent): Promise<void> {
+  try {
+    await supabase.from('push_diagnostic_events').insert({
+      correlation_id: event.correlationId,
+      event_type: event.eventType,
+      notification_title: event.notificationTitle || null,
+      action_route: event.actionRoute || null,
+      service_worker_version: event.serviceWorkerVersion || null,
+      error_category: event.errorCategory || null,
+    })
+  } catch {
+    // Diagnostics are best-effort — never block user flow
+  }
+}
+
+export async function fetchPushDiagnostics(limit = 20): Promise<Array<{
+  id: string
+  correlation_id: string
+  event_type: string
+  notification_title: string | null
+  action_route: string | null
+  service_worker_version: string | null
+  error_category: string | null
+  created_at: string
+}>> {
+  const { data, error } = await supabase
+    .from('push_diagnostic_events')
+    .select('id, correlation_id, event_type, notification_title, action_route, service_worker_version, error_category, created_at')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) return []
+  return data || []
+}
+
+export async function getServiceWorkerVersion(): Promise<string | null> {
+  if (!('serviceWorker' in navigator)) return null
+  try {
+    const reg = await navigator.serviceWorker.ready
+    if (!reg || !reg.active) return null
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve(null), 2000)
+      const handler = (event: MessageEvent) => {
+        if (event.data && event.data.type === 'SW_VERSION') {
+          clearTimeout(timeout)
+          navigator.serviceWorker.removeEventListener('message', handler)
+          resolve(event.data.version)
+        }
+      }
+      navigator.serviceWorker.addEventListener('message', handler)
+      reg.active!.postMessage({ type: 'GET_SW_VERSION' })
+    })
+  } catch {
+    return null
+  }
+}
+
+export async function updateServiceWorker(): Promise<void> {
+  if (!('serviceWorker' in navigator)) return
+  try {
+    const reg = await navigator.serviceWorker.getRegistration()
+    if (reg) {
+      await reg.update()
+      reg.waiting?.postMessage({ type: 'SKIP_WAITING' })
+    }
+  } catch {
+    // best-effort
+  }
+}
