@@ -123,6 +123,117 @@ async function createNotification(
   await supabase.from("notifications").insert(notif);
 }
 
+async function notifyBusinessEvent(
+  adminClient: any,
+  params: {
+    eventCode: string;
+    actorUserId: string;
+    employeeId?: string;
+    organizationId: string;
+    entityType: string;
+    entityId: string;
+    title: string;
+    message: string;
+    priority?: "low" | "normal" | "high" | "urgent";
+    category: string;
+    actionUrl?: string;
+    recipientRoles?: string[];
+    includeEmployee?: boolean;
+    includeActor?: boolean;
+    acknowledgementRequired?: boolean;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  try {
+    const recipientUserIds = new Set<string>();
+
+    if (params.recipientRoles && params.recipientRoles.length > 0) {
+      const { data: roleUsers } = await adminClient
+        .from("user_profiles")
+        .select("id")
+        .eq("organization_id", params.organizationId)
+        .eq("status", "active")
+        .eq("is_active", true)
+        .in("role", params.recipientRoles);
+      (roleUsers ?? []).forEach((u: { id: string }) => recipientUserIds.add(u.id));
+    }
+
+    if (params.employeeId) {
+      const { data: managerLink } = await adminClient
+        .from("employee_reporting_lines")
+        .select("manager_id")
+        .eq("employee_id", params.employeeId)
+        .limit(1)
+        .maybeSingle();
+      if (managerLink) {
+        const { data: managerEmp } = await adminClient
+          .from("employees")
+          .select("user_id")
+          .eq("id", managerLink.manager_id)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (managerEmp?.user_id) recipientUserIds.add(managerEmp.user_id);
+      }
+      if (params.includeEmployee) {
+        const { data: emp } = await adminClient
+          .from("employees")
+          .select("user_id")
+          .eq("id", params.employeeId)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (emp?.user_id) recipientUserIds.add(emp.user_id);
+      }
+    }
+
+    if (params.includeActor) recipientUserIds.add(params.actorUserId);
+    if (!params.includeActor) recipientUserIds.delete(params.actorUserId);
+    if (recipientUserIds.size === 0) return;
+
+    const notificationsToInsert: Array<Record<string, unknown>> = [];
+    for (const recipientId of recipientUserIds) {
+      const idempotencyKey = `${params.organizationId}:${params.eventCode}:${params.entityId}:${recipientId}`;
+      const { data: existing } = await adminClient
+        .from("notifications")
+        .select("id")
+        .eq("idempotency_key", idempotencyKey)
+        .maybeSingle();
+      if (existing) continue;
+      notificationsToInsert.push({
+        recipient_id: recipientId,
+        organization_id: params.organizationId,
+        notification_type: params.eventCode,
+        event_code: params.eventCode,
+        title: params.title,
+        message: params.message,
+        priority: params.priority || "normal",
+        category: params.category,
+        action_url: params.actionUrl || null,
+        dedup_key: idempotencyKey,
+        idempotency_key: idempotencyKey,
+        metadata: { ...params.metadata, entityType: params.entityType, entityId: params.entityId, actorUserId: params.actorUserId },
+        related_entity_type: params.entityType,
+        related_entity_id: params.entityId,
+        acknowledgement_required: params.acknowledgementRequired || false,
+        delivery_status: "in_app",
+      });
+    }
+    if (notificationsToInsert.length === 0) return;
+
+    const { data: inserted } = await adminClient
+      .from("notifications")
+      .insert(notificationsToInsert)
+      .select("id, recipient_id");
+    const deliveryJobs = (inserted ?? []).map((n: { id: string; recipient_id: string }) => ({
+      notification_id: n.id,
+      channel: "web_push",
+      recipient: n.recipient_id,
+      status: "queued",
+      idempotency_key: `push:${n.id}`,
+    }));
+    if (deliveryJobs.length > 0) await adminClient.from("notification_deliveries").insert(deliveryJobs);
+  } catch { /* best-effort */ }
+}
+
 async function writeAudit(
   supabase: ReturnType<typeof createClient>,
   actorId: string, action: string, entityType: string, entityId: string,
@@ -289,6 +400,42 @@ async function handleSubmit(
         hours_spent: item.hours_spent || 0, evidence_required: item.evidence_required || false,
       });
     }
+  }
+
+  // Supervisory notification: HR + Directors (blocker)
+  if (blockers && blockers.trim()) {
+    await notifyBusinessEvent(supabase, {
+      eventCode: "DAILY_REPORT_BLOCKER",
+      actorUserId: userId,
+      employeeId: employee.id,
+      organizationId: orgId,
+      entityType: "daily_report",
+      entityId: reportId,
+      title: "Daily Report Blocker Reported",
+      message: "A blocker has been reported in a daily report.",
+      priority: "high",
+      category: "daily_report",
+      actionUrl: "/team-reports",
+      recipientRoles: ["hr_admin", "director"],
+    });
+  }
+
+  // Supervisory notification: HR + Directors (support required)
+  if (support_required && support_required.trim()) {
+    await notifyBusinessEvent(supabase, {
+      eventCode: "DAILY_REPORT_SUPPORT_REQUESTED",
+      actorUserId: userId,
+      employeeId: employee.id,
+      organizationId: orgId,
+      entityType: "daily_report",
+      entityId: reportId,
+      title: "Daily Report Support Requested",
+      message: "Support has been requested in a daily report.",
+      priority: "high",
+      category: "daily_report",
+      actionUrl: "/team-reports",
+      recipientRoles: ["hr_admin", "director"],
+    });
   }
 
   await writeAudit(supabase, userId, "daily_report.submit", "daily_report", reportId, null, { report_date: reportDate });
@@ -491,6 +638,22 @@ async function handleCreateFollowUp(
       "Follow-up Assigned", `A follow-up has been assigned to you: ${subject}`,
       priority, `follow_up_assigned:${followUp.id}`, "follow_up", "/follow-up-queue");
   }
+
+  // Supervisory notification: HR + Directors
+  await notifyBusinessEvent(supabase, {
+    eventCode: "FOLLOW_UP_ASSIGNED_SUPERVISORY",
+    actorUserId: userId,
+    employeeId: employee_id,
+    organizationId: orgId,
+    entityType: "daily_report",
+    entityId: followUp.id,
+    title: "Follow-Up Created",
+    message: "A follow-up has been created and requires supervisory awareness.",
+    priority: "normal",
+    category: "follow_up",
+    actionUrl: "/follow-up-queue",
+    recipientRoles: ["hr_admin", "director"],
+  });
 
   await writeAudit(supabase, userId, "follow_up.create", "management_follow_up", followUp.id, null, { subject });
 

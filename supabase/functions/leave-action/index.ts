@@ -36,7 +36,6 @@ Deno.serve(async (req: Request) => {
     } = await admin.auth.getUser(token);
     if (authError || !user) return jsonError(401, "Invalid token");
 
-    // Get caller profile
     const { data: callerProfile } = await admin
       .from("user_profiles")
       .select("id, role, organization_id")
@@ -44,7 +43,6 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
     if (!callerProfile) return jsonError(403, "Profile not found");
 
-    // Get caller permissions
     const permissions = await getCallerPermissions(admin, callerProfile.role);
 
     const body = await req.json();
@@ -73,7 +71,6 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-// Fetch role_id and then permissions for a given role code
 async function getCallerPermissions(adminClient: any, roleCode: string): Promise<string[]> {
   const { data: role } = await adminClient
     .from("roles")
@@ -90,12 +87,159 @@ async function getCallerPermissions(adminClient: any, roleCode: string): Promise
   return (perms ?? []).map((p: any) => p.permissions?.code).filter(Boolean);
 }
 
+// ============ Central notification helper ============
+// Calls the create-business-notification edge function to resolve recipients
+// server-side (manager, HR, directors) and create notifications idempotently.
+async function notifyBusinessEvent(
+  adminClient: any,
+  params: {
+    eventCode: string;
+    actorUserId: string;
+    employeeId?: string;
+    organizationId: string;
+    entityType: string;
+    entityId: string;
+    title: string;
+    message: string;
+    priority?: "low" | "normal" | "high" | "urgent";
+    category: string;
+    actionUrl?: string;
+    recipientRoles?: string[];
+    includeEmployee?: boolean;
+    includeActor?: boolean;
+    acknowledgementRequired?: boolean;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  try {
+    // Resolve recipients and insert notifications directly (avoid HTTP call overhead)
+    const recipientUserIds = new Set<string>();
+
+    // Resolve by roles
+    if (params.recipientRoles && params.recipientRoles.length > 0) {
+      const { data: roleUsers } = await adminClient
+        .from("user_profiles")
+        .select("id")
+        .eq("organization_id", params.organizationId)
+        .eq("status", "active")
+        .eq("is_active", true)
+        .in("role", params.recipientRoles);
+
+      (roleUsers ?? []).forEach((u: { id: string }) => recipientUserIds.add(u.id));
+    }
+
+    // Resolve direct reporting manager
+    if (params.employeeId) {
+      const { data: managerLink } = await adminClient
+        .from("employee_reporting_lines")
+        .select("manager_id")
+        .eq("employee_id", params.employeeId)
+        .limit(1)
+        .maybeSingle();
+
+      if (managerLink) {
+        const { data: managerEmp } = await adminClient
+          .from("employees")
+          .select("user_id")
+          .eq("id", managerLink.manager_id)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (managerEmp?.user_id) {
+          recipientUserIds.add(managerEmp.user_id);
+        }
+      }
+
+      // Include the affected employee
+      if (params.includeEmployee) {
+        const { data: emp } = await adminClient
+          .from("employees")
+          .select("user_id")
+          .eq("id", params.employeeId)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (emp?.user_id) {
+          recipientUserIds.add(emp.user_id);
+        }
+      }
+    }
+
+    // Include actor for confirmation
+    if (params.includeActor) {
+      recipientUserIds.add(params.actorUserId);
+    }
+
+    // Exclude actor from supervisory notifications unless explicitly included
+    if (!params.includeActor) {
+      recipientUserIds.delete(params.actorUserId);
+    }
+
+    if (recipientUserIds.size === 0) return;
+
+    // Create notification rows with idempotency keys
+    const notificationsToInsert: Array<Record<string, unknown>> = [];
+    for (const recipientId of recipientUserIds) {
+      const idempotencyKey = `${params.organizationId}:${params.eventCode}:${params.entityId}:${recipientId}`;
+
+      // Check for existing (idempotent)
+      const { data: existing } = await adminClient
+        .from("notifications")
+        .select("id")
+        .eq("idempotency_key", idempotencyKey)
+        .maybeSingle();
+
+      if (existing) continue;
+
+      notificationsToInsert.push({
+        recipient_id: recipientId,
+        organization_id: params.organizationId,
+        notification_type: params.eventCode,
+        event_code: params.eventCode,
+        title: params.title,
+        message: params.message,
+        priority: params.priority || "normal",
+        category: params.category,
+        action_url: params.actionUrl || null,
+        dedup_key: idempotencyKey,
+        idempotency_key: idempotencyKey,
+        metadata: { ...params.metadata, entityType: params.entityType, entityId: params.entityId, actorUserId: params.actorUserId },
+        related_entity_type: params.entityType,
+        related_entity_id: params.entityId,
+        acknowledgement_required: params.acknowledgementRequired || false,
+        delivery_status: "in_app",
+      });
+    }
+
+    if (notificationsToInsert.length === 0) return;
+
+    const { data: inserted } = await adminClient
+      .from("notifications")
+      .insert(notificationsToInsert)
+      .select("id, recipient_id");
+
+    // Create WEB_PUSH delivery jobs
+    const deliveryJobs = (inserted ?? []).map((n: { id: string; recipient_id: string }) => ({
+      notification_id: n.id,
+      channel: "web_push",
+      recipient: n.recipient_id,
+      status: "queued",
+      idempotency_key: `push:${n.id}`,
+    }));
+
+    if (deliveryJobs.length > 0) {
+      await adminClient.from("notification_deliveries").insert(deliveryJobs);
+    }
+  } catch {
+    // Notification failure must not roll back the business transaction
+  }
+}
+
 // ============ calculate_days ============
 async function handleCalculateDays(body: any, callerProfile: any) {
   const { from_date, to_date, branch_id, half_day_type, organization_id } = body;
   if (!from_date || !to_date) return jsonError(400, "from_date and to_date required");
 
-  // Fetch holidays for the org/branch
   let holidays: string[] = [];
   const { data: holidayDates } = await admin
     .from("holiday_calendar_dates")
@@ -103,14 +247,12 @@ async function handleCalculateDays(body: any, callerProfile: any) {
     .eq("holiday_calendars.organization_id", organization_id || callerProfile.organization_id)
     .eq("holiday_calendars.branch_id", branch_id ?? null);
 
-  // Also fetch calendar events that are holidays
   const { data: calEvents } = await admin
     .from("calendar_events")
     .select("start_date, end_date, is_working_day_override, event_type")
     .eq("organization_id", organization_id || callerProfile.organization_id)
     .in("event_type", ["PUBLIC_HOLIDAY", "COMPANY_HOLIDAY", "BRANCH_HOLIDAY", "WORKING_DAY_OVERRIDE"]);
 
-  // Build holiday set
   const holidaySet = new Set<string>();
   const workingOverrideSet = new Set<string>();
 
@@ -127,7 +269,6 @@ async function handleCalculateDays(body: any, callerProfile: any) {
     }
   }
 
-  // Calculate leave days
   const start = new Date(from_date);
   const end = new Date(to_date);
   let leaveDays = 0;
@@ -135,7 +276,7 @@ async function handleCalculateDays(body: any, callerProfile: any) {
 
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const dateStr = d.toISOString().slice(0, 10);
-    const dayOfWeek = d.getDay(); // 0 = Sunday
+    const dayOfWeek = d.getDay();
 
     if (dayOfWeek === 0 && !workingOverrideSet.has(dateStr)) {
       dayDetails.push({ date: dateStr, is_leave: false, reason: "Sunday (weekly off)" });
@@ -151,7 +292,6 @@ async function handleCalculateDays(body: any, callerProfile: any) {
     dayDetails.push({ date: dateStr, is_leave: true, reason: "Leave day" });
   }
 
-  // Handle half-day
   if (half_day_type && leaveDays > 0) {
     leaveDays = 0.5;
   }
@@ -178,16 +318,14 @@ async function handleSubmit(
     return jsonError(400, "Missing required fields");
   }
 
-  // Get employee
   const { data: employee } = await adminClient
     .from("employees")
-    .select("id, organization_id, branch_id")
+    .select("id, organization_id, branch_id, full_name")
     .eq("user_id", callerProfile.id)
     .eq("is_active", true)
     .maybeSingle();
   if (!employee) return jsonError(403, "Active employee record not found");
 
-  // Server-side calculate days
   const calcResult = await calculateLeaveDays(
     adminClient,
     employee.organization_id,
@@ -197,7 +335,6 @@ async function handleSubmit(
     half_day_type
   );
 
-  // Check for overlapping approved/pending leave
   const { data: overlap } = await adminClient
     .from("leave_requests")
     .select("id, status")
@@ -210,7 +347,6 @@ async function handleSubmit(
     return jsonError(409, "Overlapping leave request already exists for this date range");
   }
 
-  // Create leave request
   const { data: leaveReq, error: insertError } = await adminClient
     .from("leave_requests")
     .insert({
@@ -232,7 +368,6 @@ async function handleSubmit(
 
   if (insertError) return jsonError(500, `Failed to create leave request: ${insertError.message}`);
 
-  // Write history
   await adminClient.from("leave_request_history").insert({
     leave_request_id: leaveReq.id,
     action: "SUBMITTED",
@@ -240,7 +375,6 @@ async function handleSubmit(
     new_values: { status: "PENDING_MANAGER", requested_days: calcResult.requested_days },
   });
 
-  // Write audit
   await adminClient.from("audit_logs").insert({
     actor_id: callerProfile.id,
     action: "leave.request_submitted",
@@ -249,29 +383,40 @@ async function handleSubmit(
     new_values: { from_date, to_date, requested_days: calcResult.requested_days, leave_type_id },
   });
 
-  // Create notification for manager
-  const { data: managers } = await adminClient
-    .from("employee_reporting_lines")
-    .select("manager_id, employees!inner(user_id)")
-    .eq("employee_id", employee.id)
-    .limit(1);
+  // Central notification: notify manager + HR + directors (supervisory)
+  await notifyBusinessEvent(adminClient, {
+    eventCode: "LEAVE_REQUEST_SUBMITTED",
+    actorUserId: callerProfile.id,
+    employeeId: employee.id,
+    organizationId: employee.organization_id,
+    entityType: "leave_request",
+    entityId: leaveReq.id,
+    title: "New Leave Request",
+    message: `${employee.full_name || "An employee"} submitted a leave request for review.`,
+    priority: "normal",
+    category: "leave",
+    actionUrl: `/leave/requests/${leaveReq.id}`,
+    recipientRoles: ["hr_admin", "director"],
+    metadata: { leave_request_id: leaveReq.id },
+  });
 
-  if (managers && managers.length > 0) {
-    const managerUserId = managers[0].employees?.user_id;
-    if (managerUserId) {
-      await adminClient.from("notifications").insert({
-        recipient_id: managerUserId,
-        notification_type: "LEAVE_REQUEST_SUBMITTED",
-        title: "New Leave Request",
-        message: `A leave request has been submitted for your review.`,
-        priority: "normal",
-        category: "leave",
-        action_url: "/team-leave",
-        dedup_key: `leave:${leaveReq.id}:submitted`,
-        metadata: { leave_request_id: leaveReq.id },
-      });
-    }
-  }
+  // Confirmation notification to employee
+  await notifyBusinessEvent(adminClient, {
+    eventCode: "LEAVE_REQUEST_SUBMITTED_CONFIRMATION",
+    actorUserId: callerProfile.id,
+    employeeId: employee.id,
+    organizationId: employee.organization_id,
+    entityType: "leave_request",
+    entityId: leaveReq.id,
+    title: "Leave Request Submitted",
+    message: "Your leave request has been submitted successfully and is pending manager review.",
+    priority: "normal",
+    category: "leave",
+    actionUrl: "/my-leave",
+    includeEmployee: true,
+    includeActor: true,
+    metadata: { leave_request_id: leaveReq.id },
+  });
 
   return new Response(
     JSON.stringify({
@@ -308,7 +453,6 @@ async function handleManagerReview(
   if (!leaveReq) return jsonError(404, "Leave request not found");
   if (leaveReq.status !== "PENDING_MANAGER") return jsonError(400, "Leave request is not pending manager review");
 
-  // Prevent self-approval
   const { data: callerEmp } = await adminClient
     .from("employees")
     .select("id")
@@ -319,7 +463,6 @@ async function handleManagerReview(
   }
 
   if (decision === "APPROVED") {
-    // Reserve balance
     const idempotencyKey = `${leaveReq.id}:${leaveReq.leave_type_id}:LEAVE_RESERVED`;
     const { data: reserveResult } = await adminClient.rpc("apply_leave_transaction", {
       p_employee_id: leaveReq.employee_id,
@@ -335,7 +478,6 @@ async function handleManagerReview(
     });
 
     if (reserveResult && reserveResult[0] && reserveResult[0].balance_after < 0) {
-      // Insufficient balance — reject
       await adminClient.from("leave_requests").update({
         status: "REJECTED",
         manager_decision: "REJECTED",
@@ -351,10 +493,26 @@ async function handleManagerReview(
         remarks: "Insufficient balance",
       });
 
+      // Notify employee of insufficient balance
+      await notifyBusinessEvent(adminClient, {
+        eventCode: "LEAVE_BALANCE_INSUFFICIENT",
+        actorUserId: callerProfile.id,
+        employeeId: leaveReq.employee_id,
+        organizationId: leaveReq.organization_id,
+        entityType: "leave_request",
+        entityId: leaveReq.id,
+        title: "Leave Request Rejected - Insufficient Balance",
+        message: "Your leave request was rejected due to insufficient leave balance.",
+        priority: "high",
+        category: "leave",
+        actionUrl: "/my-leave",
+        includeEmployee: true,
+        metadata: { leave_request_id: leaveReq.id },
+      });
+
       return jsonError(400, "Insufficient leave balance");
     }
 
-    // Move to HR stage
     await adminClient.from("leave_requests").update({
       status: "PENDING_HR",
       manager_decision: "APPROVED",
@@ -370,27 +528,39 @@ async function handleManagerReview(
       remarks: remarks ?? null,
     });
 
-    // Notify HR
-    const { data: hrUsers } = await adminClient
-      .from("user_profiles")
-      .select("id")
-      .eq("organization_id", callerProfile.organization_id)
-      .eq("role", "hr_administrator")
-      .eq("status", "active");
+    // Notify HR + Director that leave is pending final approval
+    await notifyBusinessEvent(adminClient, {
+      eventCode: "LEAVE_MANAGER_APPROVED",
+      actorUserId: callerProfile.id,
+      employeeId: leaveReq.employee_id,
+      organizationId: leaveReq.organization_id,
+      entityType: "leave_request",
+      entityId: leaveReq.id,
+      title: "Leave Pending HR Approval",
+      message: "A leave request has been approved by the manager and is pending final HR approval.",
+      priority: "normal",
+      category: "leave",
+      actionUrl: `/leave/requests/${leaveReq.id}`,
+      recipientRoles: ["hr_admin", "director"],
+      metadata: { leave_request_id: leaveReq.id },
+    });
 
-    for (const hr of hrUsers ?? []) {
-      await adminClient.from("notifications").insert({
-        recipient_id: hr.id,
-        notification_type: "LEAVE_PENDING_HR",
-        title: "Leave Request Pending HR Approval",
-        message: "A leave request is pending final HR approval.",
-        priority: "normal",
-        category: "leave",
-        action_url: "/leave-management",
-        dedup_key: `leave:${leaveReq.id}:pending_hr:${hr.id}`,
-        metadata: { leave_request_id: leaveReq.id },
-      });
-    }
+    // Notify employee
+    await notifyBusinessEvent(adminClient, {
+      eventCode: "LEAVE_MANAGER_APPROVED",
+      actorUserId: callerProfile.id,
+      employeeId: leaveReq.employee_id,
+      organizationId: leaveReq.organization_id,
+      entityType: "leave_request",
+      entityId: leaveReq.id,
+      title: "Leave Approved by Manager",
+      message: "Your leave request has been approved by your manager and is now pending HR approval.",
+      priority: "normal",
+      category: "leave",
+      actionUrl: "/my-leave",
+      includeEmployee: true,
+      metadata: { leave_request_id: leaveReq.id },
+    });
   } else if (decision === "REJECTED") {
     await adminClient.from("leave_requests").update({
       status: "REJECTED",
@@ -407,26 +577,23 @@ async function handleManagerReview(
       remarks: remarks ?? null,
     });
 
-    // Notify employee
-    const { data: emp } = await adminClient
-      .from("employees")
-      .select("user_id")
-      .eq("id", leaveReq.employee_id)
-      .maybeSingle();
-
-    if (emp?.user_id) {
-      await adminClient.from("notifications").insert({
-        recipient_id: emp.user_id,
-        notification_type: "LEAVE_REJECTED",
-        title: "Leave Request Rejected",
-        message: "Your leave request has been rejected by your manager.",
-        priority: "normal",
-        category: "leave",
-        action_url: "/my-leave",
-        dedup_key: `leave:${leaveReq.id}:rejected`,
-        metadata: { leave_request_id: leaveReq.id },
-      });
-    }
+    // Notify employee + HR + Director
+    await notifyBusinessEvent(adminClient, {
+      eventCode: "LEAVE_MANAGER_REJECTED",
+      actorUserId: callerProfile.id,
+      employeeId: leaveReq.employee_id,
+      organizationId: leaveReq.organization_id,
+      entityType: "leave_request",
+      entityId: leaveReq.id,
+      title: "Leave Request Rejected by Manager",
+      message: "A leave request has been rejected by the reporting manager.",
+      priority: "high",
+      category: "leave",
+      actionUrl: `/leave/requests/${leaveReq.id}`,
+      recipientRoles: ["hr_admin", "director"],
+      includeEmployee: true,
+      metadata: { leave_request_id: leaveReq.id },
+    });
   } else if (decision === "RETURNED") {
     await adminClient.from("leave_requests").update({
       status: "DRAFT",
@@ -439,6 +606,23 @@ async function handleManagerReview(
       action: "RETURNED_FOR_CLARIFICATION",
       performed_by: callerProfile.id,
       remarks: remarks ?? null,
+    });
+
+    // Notify employee
+    await notifyBusinessEvent(adminClient, {
+      eventCode: "LEAVE_RETURNED_FOR_CLARIFICATION",
+      actorUserId: callerProfile.id,
+      employeeId: leaveReq.employee_id,
+      organizationId: leaveReq.organization_id,
+      entityType: "leave_request",
+      entityId: leaveReq.id,
+      title: "Leave Request Returned for Clarification",
+      message: "Your manager has returned your leave request for clarification. Please review and resubmit.",
+      priority: "normal",
+      category: "leave",
+      actionUrl: "/my-leave",
+      includeEmployee: true,
+      metadata: { leave_request_id: leaveReq.id },
     });
   }
 
@@ -473,9 +657,8 @@ async function handleHRReview(
   if (leaveReq.status !== "PENDING_HR") return jsonError(400, "Leave request is not pending HR review");
 
   if (decision === "APPROVED") {
-    // Convert reserved to used
     const idempotencyKey = `${leaveReq.id}:${leaveReq.leave_type_id}:LEAVE_USED`;
-    const { data: useResult } = await adminClient.rpc("apply_leave_transaction", {
+    await adminClient.rpc("apply_leave_transaction", {
       p_employee_id: leaveReq.employee_id,
       p_leave_type_id: leaveReq.leave_type_id,
       p_organization_id: leaveReq.organization_id,
@@ -488,7 +671,6 @@ async function handleHRReview(
       p_created_by: callerProfile.id,
     });
 
-    // Reverse the reservation
     const reverseKey = `${leaveReq.id}:${leaveReq.leave_type_id}:REVERSAL`;
     await adminClient.rpc("apply_leave_transaction", {
       p_employee_id: leaveReq.employee_id,
@@ -519,28 +701,24 @@ async function handleHRReview(
       remarks: remarks ?? null,
     });
 
-    // Notify employee
-    const { data: emp } = await adminClient
-      .from("employees")
-      .select("user_id")
-      .eq("id", leaveReq.employee_id)
-      .maybeSingle();
-
-    if (emp?.user_id) {
-      await adminClient.from("notifications").insert({
-        recipient_id: emp.user_id,
-        notification_type: "LEAVE_APPROVED",
-        title: "Leave Approved",
-        message: "Your leave request has been approved.",
-        priority: "normal",
-        category: "leave",
-        action_url: "/my-leave",
-        dedup_key: `leave:${leaveReq.id}:approved`,
-        metadata: { leave_request_id: leaveReq.id },
-      });
-    }
+    // Notify employee + manager + director
+    await notifyBusinessEvent(adminClient, {
+      eventCode: "LEAVE_FINAL_APPROVED",
+      actorUserId: callerProfile.id,
+      employeeId: leaveReq.employee_id,
+      organizationId: leaveReq.organization_id,
+      entityType: "leave_request",
+      entityId: leaveReq.id,
+      title: "Leave Approved",
+      message: "Your leave request has been fully approved.",
+      priority: "normal",
+      category: "leave",
+      actionUrl: "/my-leave",
+      recipientRoles: ["director"],
+      includeEmployee: true,
+      metadata: { leave_request_id: leaveReq.id },
+    });
   } else if (decision === "REJECTED") {
-    // Restore reserved balance
     const restoreKey = `${leaveReq.id}:${leaveReq.leave_type_id}:RESTORE_REJECT`;
     await adminClient.rpc("apply_leave_transaction", {
       p_employee_id: leaveReq.employee_id,
@@ -570,26 +748,23 @@ async function handleHRReview(
       remarks: remarks ?? null,
     });
 
-    // Notify employee
-    const { data: emp } = await adminClient
-      .from("employees")
-      .select("user_id")
-      .eq("id", leaveReq.employee_id)
-      .maybeSingle();
-
-    if (emp?.user_id) {
-      await adminClient.from("notifications").insert({
-        recipient_id: emp.user_id,
-        notification_type: "LEAVE_REJECTED",
-        title: "Leave Rejected",
-        message: "Your leave request has been rejected by HR.",
-        priority: "normal",
-        category: "leave",
-        action_url: "/my-leave",
-        dedup_key: `leave:${leaveReq.id}:hr_rejected`,
-        metadata: { leave_request_id: leaveReq.id },
-      });
-    }
+    // Notify employee + manager + director
+    await notifyBusinessEvent(adminClient, {
+      eventCode: "LEAVE_FINAL_REJECTED",
+      actorUserId: callerProfile.id,
+      employeeId: leaveReq.employee_id,
+      organizationId: leaveReq.organization_id,
+      entityType: "leave_request",
+      entityId: leaveReq.id,
+      title: "Leave Rejected by HR",
+      message: "Your leave request has been rejected by HR.",
+      priority: "high",
+      category: "leave",
+      actionUrl: "/my-leave",
+      recipientRoles: ["director"],
+      includeEmployee: true,
+      metadata: { leave_request_id: leaveReq.id },
+    });
   }
 
   return new Response(
@@ -617,7 +792,6 @@ async function handleCancel(
 
   if (!leaveReq) return jsonError(404, "Leave request not found");
 
-  // Check permission: self cancel or manage cancel
   const { data: callerEmp } = await adminClient
     .from("employees")
     .select("id")
@@ -636,8 +810,9 @@ async function handleCancel(
     return jsonError(400, "Leave request already cancelled/withdrawn");
   }
 
-  // If was approved, restore balance
+  // Cancellation of approved leave = cancellation request (needs approval)
   if (leaveReq.status === "APPROVED") {
+    // Restore balance
     const restoreKey = `${leaveReq.id}:${leaveReq.leave_type_id}:CANCEL_RESTORE`;
     await adminClient.rpc("apply_leave_transaction", {
       p_employee_id: leaveReq.employee_id,
@@ -651,9 +826,25 @@ async function handleCancel(
       p_description: `Balance restored after cancellation: ${reason}`,
       p_created_by: callerProfile.id,
     });
+
+    // Notify manager + HR + Director of cancellation
+    await notifyBusinessEvent(adminClient, {
+      eventCode: "LEAVE_CANCELLATION_REQUESTED",
+      actorUserId: callerProfile.id,
+      employeeId: leaveReq.employee_id,
+      organizationId: leaveReq.organization_id,
+      entityType: "leave_request",
+      entityId: leaveReq.id,
+      title: "Approved Leave Cancelled",
+      message: "An approved leave request has been cancelled and balance restored.",
+      priority: "high",
+      category: "leave",
+      actionUrl: `/leave/requests/${leaveReq.id}`,
+      recipientRoles: ["hr_admin", "director"],
+      metadata: { leave_request_id: leaveReq.id, reason },
+    });
   }
 
-  // If was in PENDING_HR, reverse the reservation
   if (leaveReq.status === "PENDING_HR") {
     const reverseKey = `${leaveReq.id}:${leaveReq.leave_type_id}:CANCEL_REVERSE`;
     await adminClient.rpc("apply_leave_transaction", {
@@ -745,6 +936,23 @@ async function handleWithdraw(
     leave_request_id: leaveReq.id,
     action: "WITHDRAWN",
     performed_by: callerProfile.id,
+  });
+
+  // Notify manager + HR + Director
+  await notifyBusinessEvent(adminClient, {
+    eventCode: "LEAVE_REQUEST_WITHDRAWN",
+    actorUserId: callerProfile.id,
+    employeeId: leaveReq.employee_id,
+    organizationId: leaveReq.organization_id,
+    entityType: "leave_request",
+    entityId: leaveReq.id,
+    title: "Leave Request Withdrawn",
+    message: "An employee has withdrawn their pending leave request.",
+    priority: "normal",
+    category: "leave",
+    actionUrl: "/team-leave",
+    recipientRoles: ["hr_admin", "director"],
+    metadata: { leave_request_id: leaveReq.id },
   });
 
   return new Response(

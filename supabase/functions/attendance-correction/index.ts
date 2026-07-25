@@ -184,6 +184,22 @@ async function handleRequestCorrection(
     }
   );
 
+  // Supervisory notification: HR + Directors
+  await notifyBusinessEvent(admin, {
+    eventCode: "ATTENDANCE_CORRECTION_SUBMITTED",
+    actorUserId: callerId,
+    employeeId: record.employee_id,
+    organizationId: profile.organization_id,
+    entityType: "attendance_correction",
+    entityId: correction.id,
+    title: "Attendance Correction Submitted",
+    message: "An attendance correction request has been submitted for review.",
+    priority: "high",
+    category: "attendance",
+    actionUrl: "/attendance-corrections",
+    recipientRoles: ["hr_admin", "director"],
+  });
+
   return jsonResponse(200, {
     message: "Correction request submitted",
     correction_id: correction.id,
@@ -405,6 +421,24 @@ async function handleReviewCorrection(
     });
   }
 
+  // Supervisory notification: notify the employee (includeEmployee: true)
+  await notifyBusinessEvent(admin, {
+    eventCode: body.decision === "APPROVED" ? "ATTENDANCE_CORRECTION_APPROVED" : "ATTENDANCE_CORRECTION_REJECTED",
+    actorUserId: callerId,
+    employeeId: correction.employee_id,
+    organizationId: profile.organization_id,
+    entityType: "attendance_correction",
+    entityId: correction.id,
+    title: body.decision === "APPROVED" ? "Attendance Correction Approved" : "Attendance Correction Rejected",
+    message: body.decision === "APPROVED"
+      ? "An attendance correction request has been approved."
+      : "An attendance correction request has been rejected.",
+    priority: "normal",
+    category: "attendance",
+    actionUrl: "/attendance",
+    includeEmployee: true,
+  });
+
   return jsonResponse(200, {
     message: `Correction ${body.decision.toLowerCase()}`,
     correction_id: correction.id,
@@ -512,6 +546,117 @@ async function notifyPermissionHolders(
   }));
 
   await admin.from("notifications").insert(inserts);
+}
+
+async function notifyBusinessEvent(
+  adminClient: any,
+  params: {
+    eventCode: string;
+    actorUserId: string;
+    employeeId?: string;
+    organizationId: string;
+    entityType: string;
+    entityId: string;
+    title: string;
+    message: string;
+    priority?: "low" | "normal" | "high" | "urgent";
+    category: string;
+    actionUrl?: string;
+    recipientRoles?: string[];
+    includeEmployee?: boolean;
+    includeActor?: boolean;
+    acknowledgementRequired?: boolean;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  try {
+    const recipientUserIds = new Set<string>();
+
+    if (params.recipientRoles && params.recipientRoles.length > 0) {
+      const { data: roleUsers } = await adminClient
+        .from("user_profiles")
+        .select("id")
+        .eq("organization_id", params.organizationId)
+        .eq("status", "active")
+        .eq("is_active", true)
+        .in("role", params.recipientRoles);
+      (roleUsers ?? []).forEach((u: { id: string }) => recipientUserIds.add(u.id));
+    }
+
+    if (params.employeeId) {
+      const { data: managerLink } = await adminClient
+        .from("employee_reporting_lines")
+        .select("manager_id")
+        .eq("employee_id", params.employeeId)
+        .limit(1)
+        .maybeSingle();
+      if (managerLink) {
+        const { data: managerEmp } = await adminClient
+          .from("employees")
+          .select("user_id")
+          .eq("id", managerLink.manager_id)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (managerEmp?.user_id) recipientUserIds.add(managerEmp.user_id);
+      }
+      if (params.includeEmployee) {
+        const { data: emp } = await adminClient
+          .from("employees")
+          .select("user_id")
+          .eq("id", params.employeeId)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (emp?.user_id) recipientUserIds.add(emp.user_id);
+      }
+    }
+
+    if (params.includeActor) recipientUserIds.add(params.actorUserId);
+    if (!params.includeActor) recipientUserIds.delete(params.actorUserId);
+    if (recipientUserIds.size === 0) return;
+
+    const notificationsToInsert: Array<Record<string, unknown>> = [];
+    for (const recipientId of recipientUserIds) {
+      const idempotencyKey = `${params.organizationId}:${params.eventCode}:${params.entityId}:${recipientId}`;
+      const { data: existing } = await adminClient
+        .from("notifications")
+        .select("id")
+        .eq("idempotency_key", idempotencyKey)
+        .maybeSingle();
+      if (existing) continue;
+      notificationsToInsert.push({
+        recipient_id: recipientId,
+        organization_id: params.organizationId,
+        notification_type: params.eventCode,
+        event_code: params.eventCode,
+        title: params.title,
+        message: params.message,
+        priority: params.priority || "normal",
+        category: params.category,
+        action_url: params.actionUrl || null,
+        dedup_key: idempotencyKey,
+        idempotency_key: idempotencyKey,
+        metadata: { ...params.metadata, entityType: params.entityType, entityId: params.entityId, actorUserId: params.actorUserId },
+        related_entity_type: params.entityType,
+        related_entity_id: params.entityId,
+        acknowledgement_required: params.acknowledgementRequired || false,
+        delivery_status: "in_app",
+      });
+    }
+    if (notificationsToInsert.length === 0) return;
+
+    const { data: inserted } = await adminClient
+      .from("notifications")
+      .insert(notificationsToInsert)
+      .select("id, recipient_id");
+    const deliveryJobs = (inserted ?? []).map((n: { id: string; recipient_id: string }) => ({
+      notification_id: n.id,
+      channel: "web_push",
+      recipient: n.recipient_id,
+      status: "queued",
+      idempotency_key: `push:${n.id}`,
+    }));
+    if (deliveryJobs.length > 0) await adminClient.from("notification_deliveries").insert(deliveryJobs);
+  } catch { /* best-effort */ }
 }
 
 function jsonResponse(status: number, data: unknown): Response {

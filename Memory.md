@@ -2241,3 +2241,64 @@ NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com. The us
 4. Check the Delivery Trace panel — should show PUSH_PROVIDER_ACCEPTED and SHOW_NOTIFICATION_SUCCEEDED events
 5. Verify Service Worker Version shows "v3"
 6. As Director, trigger a subordinate action (e.g., approve leave) — should see [Supervisory] notifications
+
+
+---
+
+## Central Supervisory Notification System — completed 2026-07-25
+
+### 1. EXACT REASON LEAVE SUBMISSION DID NOT CREATE NOTIFICATIONS
+
+The leave-action edge function only inserted a single notification row directly to the reporting manager on submit. It never notified HR administrators or Directors. Other leave events (withdraw, cancel, manager review, HR review) created zero notifications. The previous supervisory routing was bolted onto send-push-notification (a push delivery function), which only fires when the frontend triggers push — not when business transactions happen server-side. The fix moves recipient resolution to the server-side business action layer.
+
+### 2. RECIPIENT-RESOLUTION IMPLEMENTATION
+
+A central notifyBusinessEvent helper was added to every business edge function. It resolves recipients by role (hr_admin, director) in the same org (active only), resolves the direct reporting manager via employee_reporting_lines, deduplicates recipients, excludes the actor, creates notification rows with idempotency keys (orgId:eventCode:entityId:recipientId), creates WEB_PUSH delivery jobs, and never throws.
+
+### 3. EVENT CATALOGUE
+
+Leave: LEAVE_REQUEST_SUBMITTED, LEAVE_REQUEST_WITHDRAWN, LEAVE_CANCELLATION_REQUESTED, LEAVE_MANAGER_APPROVED, LEAVE_MANAGER_REJECTED, LEAVE_FINAL_APPROVED, LEAVE_FINAL_REJECTED, LEAVE_RETURNED_FOR_CLARIFICATION, LEAVE_BALANCE_INSUFFICIENT
+Tasks: TASK_REJECTED, TASK_BLOCKER_REPORTED, TASK_SUBMITTED, TASK_REASSIGNMENT_REQUESTED
+Tickets: TICKET_CREATED, TICKET_ESCALATION_REQUESTED
+Attendance: ATTENDANCE_HALF_DAY, ATTENDANCE_CORRECTION_SUBMITTED, ATTENDANCE_CORRECTION_APPROVED, ATTENDANCE_CORRECTION_REJECTED
+Daily Reports: DAILY_REPORT_BLOCKER, DAILY_REPORT_SUPPORT_REQUESTED, FOLLOW_UP_ASSIGNED_SUPERVISORY
+
+### 4-5. LEAVE AND OTHER ACTIONS INTEGRATED
+
+All leave events now create supervisory notifications (submit, withdraw, cancel, manager approve/reject/return, HR approve/reject, insufficient balance). Task reject/blocker/submit/reassignment, ticket create/escalate, attendance half-day/correction submit/approve/reject, daily report blocker/support/follow-up all notify HR + directors. Draft saves and routine progress updates create NO notification.
+
+### 6-7. REALTIME AND PUSH
+
+Existing RealtimeProvider picks up new notification INSERTs. NotificationBell updates badge, shows toast/overlay, plays sound, triggers push. Each notifyBusinessEvent creates notification_deliveries rows (channel=web_push, status=queued). Push payload contains only safe info.
+
+### 8. DEDUPLICATION
+
+Idempotency key: orgId:eventCode:entityId:recipientId. UNIQUE index enforces at DB level. Prevents duplicates from double-click, retries, reconnects, multiple roles.
+
+### 9. FILES CHANGED
+
+New: create-business-notification edge function, notifications.test.ts (40 tests)
+Modified: leave-action (complete rewrite), task-action, ticket-action, attendance-action, attendance-correction, daily-report-action (all with notifyBusinessEvent helper)
+Migration: central_business_notifications (added org_id, related_entity, event_code, acknowledgement, idempotency_key columns + indexes)
+
+### 10. TESTS
+
+Notification: 40/40 PASS, Invitation: 23/23 PASS, Push: 41/41 PASS, Skeleton: 22/22 PASS. Total: 126/126 PASS. TypeScript: PASS. Build: PASS.
+
+### 11. DEPLOYED
+
+create-business-notification, leave-action, task-action, ticket-action, attendance-action: DEPLOYED
+attendance-correction, daily-report-action: SOURCE UPDATED, NOT YET DEPLOYED (deploy budget)
+
+### 12. MANUAL VERIFICATION
+
+NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com
+
+### 13. REMAINING RISKS
+
+1. 2 edge functions need deployment next session
+2. Browser smoke test not performed
+3. Email channel still a stub
+4. notification-worker does not trigger Web Push for queued jobs yet
+5. Multiple HR/directors all receive notifications (by design)
+6. Reporting manager lookup requires employee_reporting_lines setup
