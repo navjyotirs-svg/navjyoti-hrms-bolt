@@ -1,7 +1,24 @@
 import { supabase } from '@/lib/supabase'
 
 const SW_PATH = '/sw.js'
-const VAPID_PUBLIC_KEY = 'BCX187-YTkrYO57OkMTO2lYQdzMfukEqVRxidO-ue_8L8YGA1GVossDZ3kDlxyzVK-k3zQ0uYr8EKOAWXd6gIB4'
+
+let cachedVapidKey: string | null = null
+
+async function getVapidPublicKey(): Promise<string | null> {
+  if (cachedVapidKey) return cachedVapidKey
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/vapid-public-key`, {
+      headers: { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY },
+    })
+    if (!response.ok) return null
+    const data = await response.json()
+    cachedVapidKey = data.publicKey ?? null
+    return cachedVapidKey
+  } catch {
+    return null
+  }
+}
 
 export type NotifPermissionState = 'default' | 'granted' | 'denied' | 'unsupported'
 export type LocationPermissionState = 'prompt' | 'granted' | 'denied' | 'unsupported' | 'unavailable'
@@ -116,9 +133,12 @@ export async function subscribeToPush(): Promise<PushSubscription | null> {
     const existing = await reg.pushManager.getSubscription()
     if (existing) return existing
 
+    const vapidKey = await getVapidPublicKey()
+    if (!vapidKey) return null
+
     const sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY).buffer as ArrayBuffer,
+      applicationServerKey: urlBase64ToUint8Array(vapidKey).buffer as ArrayBuffer,
     })
     return sub
   } catch {
@@ -251,9 +271,14 @@ export async function repairPushSubscription(): Promise<{ success: boolean; mess
       }
     }
 
+    const vapidKey = await getVapidPublicKey()
+    if (!vapidKey) {
+      return { success: false, message: 'Push service is not configured correctly.' }
+    }
+
     const newSub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY).buffer as ArrayBuffer,
+      applicationServerKey: urlBase64ToUint8Array(vapidKey).buffer as ArrayBuffer,
     })
 
     const saved = await saveSubscriptionToServer(newSub)

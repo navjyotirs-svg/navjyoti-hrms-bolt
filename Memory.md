@@ -1622,3 +1622,150 @@ employees, user_profiles, user_organization_memberships, employee_status_history
 - The realtime subscription uses `table: '*'` filter on a single channel — for very large organizations, per-table channels with row-level filters may be needed for performance
 - TanStack Query keys are defined but not all pages use `useQuery` yet — pages using direct `useEffect` + `useState` fetching will need to migrate to `useQuery` to benefit from automatic invalidation refetch
 - The monthly summary fetches all records client-side and computes in JS — for large organizations this should be moved to a server-side RPC
+
+---
+
+## Realtime and Web Push Notification Repair — completed 2026-07-25
+
+### 1. EXACT CAUSE OF "LIVE UPDATES UNAVAILABLE"
+
+#### Root cause
+The original RealtimeProvider had three critical defects:
+
+1. **Wildcard `table: '*'` in a single `postgres_changes` filter** — The supabase-js client's `postgres_changes` filter with `table: '*'` is unreliable across versions. Many versions of realtime-js do not deliver events for wildcard table filters. Per-table subscriptions with explicit table names are required for reliable delivery.
+
+2. **Subscribe callback only captured `status`, not `error`** — The `.subscribe((status) => { ... })` callback discarded the `error` parameter. When the subscription failed with CHANNEL_ERROR or TIMED_OUT, the error object was silently lost, and the UI showed only "Live updates unavailable" with no diagnostic information.
+
+3. **No supabase client realtime config** — The supabase client was created without a `realtime` configuration object. Without explicit realtime params, the client uses defaults that may not match the server's rate limits.
+
+4. **React StrictMode double-mount race condition** — In development, React StrictMode mounts components twice. The original provider's cleanup and re-setup cycle could race, creating duplicate channels that the channel registry couldn't properly track.
+
+5. **No online/offline detection** — The provider didn't listen to `window.online`/`offline` events, so it couldn't distinguish "offline" from "server error."
+
+#### Subscribe status and safe error
+The subscribe callback now captures both `status` and `error`:
+```typescript
+.subscribe((status, error) => {
+  lastStatusRef.current = status
+  if (status === 'CHANNEL_ERROR') {
+    lastErrorRef.current = error?.message || 'Channel error'
+    setConnectionState('error')
+  }
+  // etc
+})
+```
+Status values: SUBSCRIBED, CHANNEL_ERROR, TIMED_OUT, CLOSED
+
+### 2. REALTIME PROVIDER CHANGES
+
+#### Rewritten RealtimeProvider (`src/components/RealtimeProvider.tsx`)
+- **Per-table subscriptions**: Each of the 25 tables gets its own channel (`rt:{table_name}`) with an explicit `postgres_changes` filter for that specific table. This is the reliable pattern across all supabase-js versions.
+- **Full error capture**: The subscribe callback captures both `status` and `error`. Errors are stored in `lastErrorRef` and exposed via diagnostics.
+- **Connection state machine**: 6 states — connecting, connected, reconnecting, unavailable, offline, error. Transitions are driven by subscribe status callbacks and online/offline events.
+- **StrictMode safety**: Uses `isSettingUpRef` guard to prevent concurrent setup. Uses `isMountedRef` to prevent state updates after unmount. Channel registry is a `Map` that is properly cleared on teardown.
+- **Channel registry**: `channelRef` is a `Map<string, RealtimeChannel>`. Each channel is tracked by name. Teardown iterates all channels and removes each. Prevents duplicates.
+- **Online/offline detection**: Listens to `window.online`/`offline` events. Offline state is distinct from error state.
+- **Exponential backoff reconnect**: Base delay 2s, doubling each attempt, max 30s. Reset to 0 on successful connection.
+- **Refetch on reconnect**: When connection is restored after >10s gap, critical query keys are invalidated.
+- **Refetch on window focus**: Critical data refetched when the tab regains focus.
+- **Fallback periodic refetch**: Critical data (notifications, attendance-today, my-attendance) refetched every 30s regardless of realtime status.
+- **Diagnostics**: Exposes `channelName`, `status`, `errorCode`, `reconnectAttempts`, `activeChannelCount`, `lastEventTimestamp` for dev debugging.
+
+#### Supabase client config (`src/lib/supabase.ts`)
+- Added `realtime: { params: { eventsPerSecond: 10 } }` to the client config.
+
+### 3. REALTIME INDICATOR UI
+
+#### Rewritten RealtimeIndicator (`src/components/RealtimeIndicator.tsx`)
+- 6 accurate states with specific labels:
+  - Connected: "Live updates connected" (green)
+  - Connecting: "Connecting live updates…" (amber, pulsing)
+  - Reconnecting: "Reconnecting live updates…" (amber, pulsing)
+  - Offline: "You appear to be offline" (red)
+  - Error/Unavailable: "Live updates could not connect. Some information may require refresh." (red)
+- Retry button (clickable indicator) for error/unavailable/offline states
+- Dev diagnostics in tooltip: channel name, status, error code, reconnect attempts, active channel count, last event timestamp
+- Production shows only the colored dot (no technical details)
+- Pulse animation for connecting/reconnecting states
+
+### 4. WEB PUSH NOTIFICATION FIX
+
+#### Exact push-notification failure cause
+The VAPID public key was **hardcoded** in `src/lib/webPush.ts`:
+```typescript
+const VAPID_PUBLIC_KEY = 'BCX187-YTkrYO57OkMTO2lYQdzMfukEqVRxidO-ue_8L8YGA1GVossDZ3kDlxyzVK-k3zQ0uYr8EKOAWXd6gIB4'
+```
+If the server-side VAPID key pair was changed (or was different from the start), the browser's push subscription was created with the wrong public key. The push provider (FCM/APNS/Mozilla) rejects all pushes with HTTP 403 when the VAPID JWT is signed with a private key that doesn't match the public key used to create the subscription.
+
+Existing subscriptions in the database have fingerprint `BFisCU4FXyYAR_el` — this does NOT match the old hardcoded key (`BCX187...`), confirming the keys were mismatched.
+
+#### VAPID/subscription status
+- VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT all exist as edge function secrets (confirmed via list_edge_function_secrets)
+- The old hardcoded key in webPush.ts has been removed
+- The frontend now fetches the public key dynamically from a new `vapid-public-key` edge function endpoint
+- The send-test-push function detects VAPID key mismatch by comparing the subscription's `vapid_key_fp` with the current server key fingerprint, and deactivates stale subscriptions
+
+#### New vapid-public-key endpoint (`supabase/functions/vapid-public-key/index.ts`)
+- GET-only, no auth required (public key is safe to expose)
+- Returns `{ publicKey: "..." }` from the VAPID_PUBLIC_KEY secret
+- Frontend caches the key in memory to avoid repeated fetches
+
+#### webPush.ts changes
+- Removed hardcoded `VAPID_PUBLIC_KEY` constant
+- Added `getVapidPublicKey()` function that fetches from the `vapid-public-key` endpoint with caching
+- `subscribeToPush()` and `repairPushSubscription()` now call `getVapidPublicKey()` dynamically
+- If the key can't be fetched, returns a clear error
+
+#### send-test-push function rewrite (`supabase/functions/send-test-push/index.ts`)
+- Returns structured result: `{ subscriptionsFound, sent, failed, invalidSubscriptionsRemoved, safeErrors }`
+- Detects VAPID key mismatch: compares subscription's `vapid_key_fp` with current server key fingerprint
+- Deactivates stale subscriptions (wrong VAPID key) automatically
+- Deactivates expired subscriptions (404/410 from push provider)
+- Maps error categories to actionable messages:
+  - no_subscription: "No active subscription was found. Enable notifications in Account Settings first."
+  - vapid_key_mismatch: "Your push subscription was created with an older key and has been deactivated. Please re-enable notifications in Account Settings."
+  - expired_subscription: "This device subscription has expired. Please register notifications again."
+  - invalid_vapid: "Push authentication configuration is invalid."
+  - missing_vapid: "Push service is not configured correctly."
+  - temporary_failure: "Push delivery is temporarily unavailable. Please retry."
+
+#### Service worker status (`public/sw.js`)
+- Already properly configured:
+  - Registered only in secure context (HTTPS or localhost)
+  - `skipWaiting()` on install, `clients.claim()` on activate
+  - Push event handler calls `registration.showNotification()` with safe payload parsing
+  - Notification click focuses existing HRMS tab or opens safe internal route (validates origin to prevent open redirect)
+  - Does not cache auth/API/Supabase responses
+  - Notification icons referenced: /icon-192.png, /badge-72.png
+
+### 5. FILES CHANGED (this session)
+
+1. `src/lib/supabase.ts` — added realtime config to supabase client
+2. `src/components/RealtimeProvider.tsx` — complete rewrite: per-table subscriptions, error capture, state machine, StrictMode safety, online/offline detection, exponential backoff, diagnostics
+3. `src/components/RealtimeIndicator.tsx` — rewritten: 6 accurate states, retry button, dev diagnostics
+4. `src/styles/shell.css` — added rt-pulse animation
+5. `src/lib/webPush.ts` — removed hardcoded VAPID key, dynamic fetch from endpoint
+6. `supabase/functions/vapid-public-key/index.ts` — NEW: public VAPID key endpoint
+7. `supabase/functions/send-test-push/index.ts` — rewritten: VAPID key mismatch detection, structured result, stale subscription cleanup
+
+### 6. EDGE FUNCTIONS DEPLOYED (this session)
+- vapid-public-key (new)
+- send-test-push (rewritten)
+
+### 7. TABLES IN REALTIME PUBLATION (confirmed)
+25 tables confirmed in supabase_realtime publication:
+announcements, attendance_corrections, attendance_records, calendar_events, daily_report_comments, daily_report_history, daily_reports, employee_status_history, employees, holiday_calendar_dates, leave_balances, leave_ledger, leave_requests, management_follow_ups, notifications, task_assignments, task_comments, task_status_history, task_submissions, tasks, ticket_comments, ticket_history, tickets, user_organization_memberships, user_profiles
+
+### 8. TESTS AND RESULTS
+- TypeScript: PASS
+- Production build: PASS (741.96 kB JS / 33.24 kB CSS)
+- Push unit tests: 22/22 PASS
+- Realtime publication: 25 tables confirmed
+
+### 9. REMAINING RISKS AND LIMITATIONS
+- Browser two-session smoke test not performed (no browser automation available) — must be verified manually on the published app
+- Existing push subscriptions with old VAPID key fingerprint will be automatically deactivated on next test-push attempt; users will need to re-enable notifications
+- TanStack Query keys are defined but not all pages use `useQuery` yet — pages using direct `useEffect` + `useState` fetching will need to migrate to `useQuery` to benefit from automatic invalidation refetch
+- The per-table channel approach creates 25 channels per user — Supabase has a channel limit per client (typically 100+), so this is safe for now but could be optimized with broadcast channels for very large deployments
+- Push delivery while app is in background depends on the browser's service worker lifecycle — some mobile browsers may suspend service workers aggressively
+- No automated RLS test for realtime events — RLS is enforced by Supabase at the database level, but a dedicated test suite would be valuable

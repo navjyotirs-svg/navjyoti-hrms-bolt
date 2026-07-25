@@ -36,35 +36,86 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // Check VAPID config first
+    const vapidConfig = validateVapidConfig();
+    if ("errorCategory" in vapidConfig) {
+      return jsonResponse({
+        success: false,
+        message: vapidConfig.message,
+        subscriptionsFound: 0,
+        sent: 0,
+        failed: 0,
+        invalidSubscriptionsRemoved: 0,
+        safeErrors: [vapidConfig.errorCategory],
+      });
+    }
+
+    // Check for VAPID key mismatch — if the subscription was created with a different key, it will fail
+    const vapidKeyFp = vapidConfig.publicKey.slice(0, 16);
+
     const { data: subs, error: subErr } = await adminClient
       .from("push_subscriptions")
-      .select("id, endpoint, p256dh_key, auth_key")
+      .select("id, endpoint, p256dh_key, auth_key, vapid_key_fp")
       .eq("user_id", userId)
       .eq("is_active", true);
 
     if (subErr) {
-      return jsonResponse({ success: false, message: "Failed to fetch subscriptions", errorCategory: "server_error" });
+      return jsonResponse({
+        success: false,
+        message: "Failed to fetch subscriptions",
+        subscriptionsFound: 0,
+        sent: 0,
+        failed: 0,
+        invalidSubscriptionsRemoved: 0,
+        safeErrors: ["server_error"],
+      });
     }
+
+    const subscriptionsFound = subs?.length ?? 0;
 
     if (!subs || subs.length === 0) {
       return jsonResponse({
         success: false,
-        message: "No active push subscriptions. Enable notifications first.",
-        errorCategory: "no_subscription",
+        message: "No active subscription was found. Enable notifications in Account Settings first.",
+        subscriptionsFound: 0,
+        sent: 0,
+        failed: 0,
+        invalidSubscriptionsRemoved: 0,
+        safeErrors: ["no_subscription"],
       });
     }
 
-    const vapidConfig = validateVapidConfig();
-    if ("errorCategory" in vapidConfig) {
-      return jsonResponse({ success: false, message: vapidConfig.message, errorCategory: vapidConfig.errorCategory });
+    // Detect VAPID key mismatch — subscriptions with old fingerprint need to be re-registered
+    const staleSubs = subs.filter((s: { vapid_key_fp?: string | null }) => s.vapid_key_fp && s.vapid_key_fp !== vapidKeyFp);
+    const validSubs = subs.filter((s: { vapid_key_fp?: string | null }) => !s.vapid_key_fp || s.vapid_key_fp === vapidKeyFp);
+
+    let invalidSubscriptionsRemoved = 0;
+    for (const sub of staleSubs) {
+      await adminClient
+        .from("push_subscriptions")
+        .update({ is_active: false, revoked_at: new Date().toISOString() })
+        .eq("id", sub.id);
+      invalidSubscriptionsRemoved++;
+    }
+
+    if (validSubs.length === 0) {
+      return jsonResponse({
+        success: false,
+        message: "Your push subscription was created with an older key and has been deactivated. Please re-enable notifications in Account Settings.",
+        subscriptionsFound,
+        sent: 0,
+        failed: 0,
+        invalidSubscriptionsRemoved,
+        safeErrors: ["vapid_key_mismatch"],
+      });
     }
 
     let sent = 0;
     let failed = 0;
     let deactivated = 0;
-    let lastErrorCategory = "";
+    const safeErrors: string[] = [];
 
-    for (const sub of subs) {
+    for (const sub of validSubs) {
       const result = await sendWebPush(sub, {
         title: "Test Notification",
         body: "This is a test push notification from Navjyoti HRMS.",
@@ -79,7 +130,7 @@ Deno.serve(async (req: Request) => {
         sent++;
       } else {
         failed++;
-        lastErrorCategory = result.errorCategory;
+        safeErrors.push(result.errorCategory);
         if (result.deactivate) {
           deactivated++;
           await adminClient
@@ -92,15 +143,16 @@ Deno.serve(async (req: Request) => {
 
     const message = sent > 0
       ? `Test push sent to ${sent} device(s).`
-      : mapErrorCategoryToMessage(lastErrorCategory);
+      : mapErrorCategoryToMessage(safeErrors[0] || "temporary_failure");
 
     return jsonResponse({
       success: sent > 0,
       message,
+      subscriptionsFound,
       sent,
       failed,
-      deactivated,
-      errorCategory: sent > 0 ? undefined : lastErrorCategory,
+      invalidSubscriptionsRemoved: invalidSubscriptionsRemoved + deactivated,
+      safeErrors: safeErrors.length > 0 ? safeErrors : undefined,
     });
   } catch (err) {
     return errorResponse((err as Error).message, 500);
@@ -187,7 +239,11 @@ async function sendWebPush(
     }
 
     if (response.status === 401 || response.status === 403) {
-      return { ok: false, deactivate: false, errorCategory: "invalid_vapid" };
+      return { ok: false, deactivate: true, errorCategory: "invalid_vapid" };
+    }
+
+    if (response.status === 429) {
+      return { ok: false, deactivate: false, errorCategory: "temporary_failure" };
     }
 
     return { ok: false, deactivate: false, errorCategory: "temporary_failure" };
@@ -200,7 +256,7 @@ async function generateVapidJWT(
   endpoint: string,
   subject: string,
   privateKeyB64: string,
-  publicKeyB64: string
+  _publicKeyB64: string
 ): Promise<string> {
   const rawKey = base64UrlDecode(privateKeyB64);
 
@@ -248,6 +304,8 @@ function mapErrorCategoryToMessage(category: string): string {
       return "Browser notifications are blocked.";
     case "no_service_worker":
       return "Push service worker is not active on this device.";
+    case "vapid_key_mismatch":
+      return "Your push subscription was created with an older key. Please re-enable notifications.";
     case "temporary_failure":
       return "Push delivery is temporarily unavailable. Please retry.";
     default:
