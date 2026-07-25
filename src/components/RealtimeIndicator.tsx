@@ -1,4 +1,4 @@
-import { useRealtime, type RealtimeConnectionState } from '@/components/RealtimeProvider'
+import { useRealtime, type RealtimeConnectionState } from '@/components/AppRealtimeProvider'
 
 const STATE_CONFIG: Record<RealtimeConnectionState, { color: string; label: string }> = {
   connected: { color: '#0E6E63', label: 'Live updates connected' },

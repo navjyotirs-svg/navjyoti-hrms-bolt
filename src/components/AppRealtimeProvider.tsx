@@ -66,7 +66,7 @@ function getOnline(): boolean {
   return typeof navigator !== 'undefined' ? navigator.onLine : true
 }
 
-export function RealtimeProvider({ children }: { children: ReactNode }) {
+function AppRealtimeProvider({ children }: { children: ReactNode }) {
   const { session, profile, permissions } = useAuth()
   const queryClient = useQueryClient()
   const [connectionState, setConnectionState] = useState<RealtimeConnectionState>('disconnected' as RealtimeConnectionState)
@@ -303,8 +303,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 // eslint-disable-next-line react-refresh/only-export-components
 export function useRealtime() {
   const ctx = useContext(RealtimeContext)
-  if (!ctx) throw new Error('useRealtime must be used within RealtimeProvider')
+  if (!ctx) throw new Error('useRealtime must be used within AppRealtimeProvider')
   return ctx
 }
 
-export { RealtimeProvider }
+export default AppRealtimeProvider
