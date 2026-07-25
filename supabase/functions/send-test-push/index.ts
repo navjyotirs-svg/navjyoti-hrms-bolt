@@ -1,5 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import webpush from "https://esm.sh/web-push@3.6.7";
+
+const PUSH_FUNCTION_VERSION = "v4-webpush-lib";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,15 +10,46 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+interface VapidConfig {
+  publicKey: string;
+  privateKey: string;
+  subject: string;
+}
+
+interface StructuredResult {
+  functionVersion: string;
+  correlationId: string;
+  subscriptionsFound: number;
+  attempted: number;
+  sent: number;
+  failed: number;
+  invalidRemoved: number;
+  errorCategory: string;
+  providerStatus: number;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
+  const correlationId = crypto.randomUUID();
+  const baseResult: StructuredResult = {
+    functionVersion: PUSH_FUNCTION_VERSION,
+    correlationId,
+    subscriptionsFound: 0,
+    attempted: 0,
+    sent: 0,
+    failed: 0,
+    invalidRemoved: 0,
+    errorCategory: "",
+    providerStatus: 0,
+  };
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return errorResponse("Missing authorization header", 401);
+      return json({ ...baseResult, errorCategory: "AUTHENTICATION_FAILED", message: "Missing authorization header" }, 401);
     }
 
     const userClient = createClient(
@@ -26,7 +60,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userData, error: userErr } = await userClient.auth.getUser();
     if (userErr || !userData.user) {
-      return errorResponse("Not authenticated", 401);
+      return json({ ...baseResult, errorCategory: "AUTHENTICATION_FAILED", message: "Not authenticated" }, 401);
     }
 
     const userId = userData.user.id;
@@ -36,24 +70,22 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Check VAPID config first
+    // 1. Validate VAPID config
     const vapidConfig = validateVapidConfig();
     if ("errorCategory" in vapidConfig) {
-      return jsonResponse({
-        success: false,
-        message: vapidConfig.message,
-        subscriptionsFound: 0,
-        attempted: 0,
-        sent: 0,
-        failed: 0,
-        invalidRemoved: 0,
-        results: [],
-        errorCategory: vapidConfig.errorCategory,
-      });
+      return json({ ...baseResult, errorCategory: vapidConfig.errorCategory, message: vapidConfig.message });
     }
+
+    // Configure web-push library
+    webpush.setVapidDetails(
+      vapidConfig.subject,
+      vapidConfig.publicKey,
+      vapidConfig.privateKey
+    );
 
     const vapidKeyFp = vapidConfig.publicKey.slice(0, 16);
 
+    // 2. Fetch active subscriptions
     const { data: subs, error: subErr } = await adminClient
       .from("push_subscriptions")
       .select("id, endpoint, p256dh_key, auth_key, vapid_key_fp")
@@ -61,36 +93,16 @@ Deno.serve(async (req: Request) => {
       .eq("is_active", true);
 
     if (subErr) {
-      return jsonResponse({
-        success: false,
-        message: "Failed to fetch subscriptions from database.",
-        subscriptionsFound: 0,
-        attempted: 0,
-        sent: 0,
-        failed: 0,
-        invalidRemoved: 0,
-        results: [{ statusCode: 0, errorCategory: "server_error" }],
-        errorCategory: "server_error",
-      });
+      return json({ ...baseResult, errorCategory: "UNKNOWN_SERVER_ERROR", message: "Failed to fetch subscriptions" }, 500);
     }
 
     const subscriptionsFound = subs?.length ?? 0;
 
     if (!subs || subs.length === 0) {
-      return jsonResponse({
-        success: false,
-        message: "No active subscription was found. Enable notifications in Account Settings first.",
-        subscriptionsFound: 0,
-        attempted: 0,
-        sent: 0,
-        failed: 0,
-        invalidRemoved: 0,
-        results: [{ statusCode: 0, errorCategory: "no_subscription" }],
-        errorCategory: "no_subscription",
-      });
+      return json({ ...baseResult, errorCategory: "NO_ACTIVE_SUBSCRIPTION", message: "No active subscription found. Enable notifications in Account Settings first." });
     }
 
-    // Detect VAPID key mismatch — subscriptions with old fingerprint need re-registration
+    // 3. Detect VAPID key mismatch
     const staleSubs = subs.filter((s: { vapid_key_fp?: string | null }) => s.vapid_key_fp && s.vapid_key_fp !== vapidKeyFp);
     const validSubs = subs.filter((s: { vapid_key_fp?: string | null }) => !s.vapid_key_fp || s.vapid_key_fp === vapidKeyFp);
 
@@ -104,26 +116,32 @@ Deno.serve(async (req: Request) => {
     }
 
     if (validSubs.length === 0) {
-      return jsonResponse({
-        success: false,
-        message: "Your push subscription was created with an older key and has been deactivated. Please repair your push subscription in Account Settings.",
+      return json({
+        ...baseResult,
         subscriptionsFound,
-        attempted: 0,
-        sent: 0,
-        failed: 0,
         invalidRemoved,
-        results: [{ statusCode: 0, errorCategory: "vapid_key_mismatch" }],
-        errorCategory: "vapid_key_mismatch",
+        errorCategory: "VAPID_KEY_INVALID",
+        message: "Your push subscription was created with an older key. Please repair your push subscription.",
       });
     }
 
+    // 4. Send push to each valid subscription
     let sent = 0;
     let failed = 0;
     let deactivated = 0;
-    const results: { statusCode: number; errorCategory: string }[] = [];
+    let lastErrorCategory = "";
+    let lastProviderStatus = 0;
 
     for (const sub of validSubs) {
-      const result = await sendWebPush(sub, {
+      const pushSubscription = {
+        endpoint: sub.endpoint,
+        keys: {
+          p256dh: sub.p256dh_key,
+          auth: sub.auth_key,
+        },
+      };
+
+      const payload = JSON.stringify({
         title: "Navjyoti HRMS Test",
         body: "Push notifications are working on this device.",
         category: "system",
@@ -131,15 +149,37 @@ Deno.serve(async (req: Request) => {
         actionUrl: "/settings",
         icon: "/icon-192.png",
         badge: "/badge-72.png",
-      }, vapidConfig);
+      });
 
-      results.push({ statusCode: result.statusCode, errorCategory: result.errorCategory });
+      try {
+        const response = await webpush.sendNotification(pushSubscription, payload, {
+          TTL: 2419200,
+          urgency: "normal",
+        });
 
-      if (result.ok) {
-        sent++;
-      } else {
+        if (response.statusCode === 201 || response.statusCode === 202 || response.statusCode === 200) {
+          sent++;
+        } else {
+          failed++;
+          lastProviderStatus = response.statusCode;
+          const category = mapProviderStatus(response.statusCode);
+          lastErrorCategory = category;
+
+          if (category === "SUBSCRIPTION_EXPIRED" || category === "PUSH_PROVIDER_BAD_REQUEST" || category === "PUSH_PROVIDER_UNAUTHORIZED") {
+            deactivated++;
+            await adminClient
+              .from("push_subscriptions")
+              .update({ is_active: false, revoked_at: new Date().toISOString() })
+              .eq("id", sub.id);
+          }
+        }
+      } catch (err: unknown) {
         failed++;
-        if (result.deactivate) {
+        const we = err as { statusCode?: number; body?: unknown; message?: string };
+        lastProviderStatus = we.statusCode || 0;
+        lastErrorCategory = mapProviderStatus(we.statusCode || 0);
+
+        if (lastErrorCategory === "SUBSCRIPTION_EXPIRED" || lastErrorCategory === "PUSH_PROVIDER_BAD_REQUEST" || lastErrorCategory === "PUSH_PROVIDER_UNAUTHORIZED") {
           deactivated++;
           await adminClient
             .from("push_subscriptions")
@@ -150,276 +190,105 @@ Deno.serve(async (req: Request) => {
     }
 
     const totalInvalidRemoved = invalidRemoved + deactivated;
-    const message = sent > 0
+    const success = sent > 0;
+    const message = success
       ? `Test push sent to ${sent} device(s).`
-      : mapErrorCategoryToMessage(results[0]?.errorCategory || "temporary_failure");
+      : mapErrorCategoryToMessage(lastErrorCategory || "UNKNOWN_SERVER_ERROR");
 
-    return jsonResponse({
-      success: sent > 0,
-      message,
+    return json({
+      ...baseResult,
       subscriptionsFound,
       attempted: validSubs.length,
       sent,
       failed,
       invalidRemoved: totalInvalidRemoved,
-      results,
-      errorCategory: sent > 0 ? undefined : results[0]?.errorCategory,
+      errorCategory: success ? "" : lastErrorCategory,
+      providerStatus: lastProviderStatus,
+      success,
+      message,
     });
   } catch (err) {
-    return errorResponse(`Server error: ${(err as Error).message}`, 500);
+    return json({
+      ...baseResult,
+      errorCategory: "UNKNOWN_SERVER_ERROR",
+      message: `Server error: ${(err as Error).message}`,
+    }, 500);
   }
 });
 
-interface VapidConfig {
-  publicKey: string;
-  privateKey: string;
-  subject: string;
-}
-
-type VapidConfigResult = VapidConfig | { errorCategory: string; message: string };
-
-function validateVapidConfig(): VapidConfigResult {
+function validateVapidConfig(): VapidConfig | { errorCategory: string; message: string } {
   const privateKey = Deno.env.get("VAPID_PRIVATE_KEY");
   const publicKey = Deno.env.get("VAPID_PUBLIC_KEY");
   const subject = Deno.env.get("VAPID_SUBJECT") || "";
 
   if (!privateKey || !publicKey) {
-    return { errorCategory: "missing_vapid", message: "Push service is not configured correctly. VAPID keys are missing." };
+    return { errorCategory: "VAPID_SECRET_MISSING", message: "VAPID keys are missing." };
   }
 
   if (!subject) {
-    return { errorCategory: "missing_vapid", message: "Push service is not configured correctly. VAPID subject is missing." };
+    return { errorCategory: "VAPID_SECRET_MISSING", message: "VAPID subject is missing." };
   }
 
   if (!subject.startsWith("mailto:") && !subject.startsWith("https://")) {
-    return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
+    return { errorCategory: "VAPID_KEY_INVALID", message: "VAPID subject format is invalid." };
   }
 
   try {
     const privBytes = base64UrlDecode(privateKey);
     if (privBytes.length !== 32) {
-      return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
+      return { errorCategory: "VAPID_KEY_INVALID", message: "VAPID private key is not 32 bytes." };
     }
     const pubBytes = base64UrlDecode(publicKey);
     if (pubBytes.length !== 65) {
-      return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
+      return { errorCategory: "VAPID_KEY_INVALID", message: "VAPID public key is not 65 bytes." };
     }
   } catch {
-    return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
+    return { errorCategory: "VAPID_KEY_INVALID", message: "VAPID keys are not valid base64url." };
   }
 
   return { publicKey, privateKey, subject };
 }
 
-interface PushPayload {
-  title: string;
-  body: string;
-  category: string;
-  priority: string;
-  actionUrl: string;
-  icon?: string;
-  badge?: string;
-}
-
-interface SendResult {
-  ok: boolean;
-  deactivate: boolean;
-  statusCode: number;
-  errorCategory: string;
-}
-
-async function sendWebPush(
-  sub: { endpoint: string; p256dh_key: string; auth_key: string },
-  payload: PushPayload,
-  vapid: VapidConfig
-): Promise<SendResult> {
-  try {
-    const jwt = await generateVapidJWT(sub.endpoint, vapid.subject, vapid.privateKey);
-    const body = JSON.stringify(payload);
-
-    const response = await fetch(sub.endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "TTL": "2419200",
-        "Authorization": `vapid t=${jwt},k=${vapid.publicKey}`,
-        "Urgency": payload.priority === "urgent" ? "high" : "normal",
-      },
-      body,
-    });
-
-    if (response.ok || response.status === 201 || response.status === 202) {
-      return { ok: true, deactivate: false, statusCode: response.status, errorCategory: "" };
-    }
-
-    if (response.status === 404 || response.status === 410) {
-      return { ok: false, deactivate: true, statusCode: response.status, errorCategory: "expired_subscription" };
-    }
-
-    if (response.status === 401 || response.status === 403) {
-      return { ok: false, deactivate: true, statusCode: response.status, errorCategory: "invalid_vapid" };
-    }
-
-    if (response.status === 400) {
-      return { ok: false, deactivate: true, statusCode: response.status, errorCategory: "malformed_subscription" };
-    }
-
-    if (response.status === 429) {
-      return { ok: false, deactivate: false, statusCode: response.status, errorCategory: "rate_limited" };
-    }
-
-    if (response.status >= 500) {
-      return { ok: false, deactivate: false, statusCode: response.status, errorCategory: "provider_error" };
-    }
-
-    return { ok: false, deactivate: false, statusCode: response.status, errorCategory: "temporary_failure" };
-  } catch (err) {
-    const msg = (err as Error).message || "";
-    if (msg.includes("timed out") || msg.includes("timeout")) {
-      return { ok: false, deactivate: false, statusCode: 0, errorCategory: "timeout" };
-    }
-    if (msg.includes("network") || msg.includes("connect") || msg.includes("fetch")) {
-      return { ok: false, deactivate: false, statusCode: 0, errorCategory: "network_error" };
-    }
-    return { ok: false, deactivate: false, statusCode: 0, errorCategory: "temporary_failure" };
-  }
-}
-
-/**
- * Generate a VAPID JWT for Web Push authentication.
- *
- * The VAPID private key is a 32-byte raw P-256 scalar stored as base64url.
- * Web Crypto's importKey for ECDSA private keys requires PKCS#8 DER format,
- * not raw scalar bytes. We construct a minimal PKCS#8 wrapper around the
- * raw key before importing it.
- */
-async function generateVapidJWT(
-  endpoint: string,
-  subject: string,
-  privateKeyB64: string
-): Promise<string> {
-  const rawKey = base64UrlDecode(privateKeyB64);
-
-  // Construct PKCS#8 DER wrapper for a P-256 ECDSA private key.
-  // The fixed prefix is the ASN.1 structure:
-  //   SEQUENCE { INTEGER 1, SEQUENCE { OID secp256r1 }, OCTET STRING { ... } }
-  // where the inner OCTET STRING contains the raw 32-byte scalar.
-  const pkcs8Prefix = new Uint8Array([
-    0x30, 0x77, 0x02, 0x01, 0x01, 0x04, 0x20,
-    ...rawKey,
-    0xa0, 0x0a, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
-    0xa1, 0x42, 0x03, 0x40, 0x00,
-    0x04,
-  ]);
-
-  // We need the public key bytes (65 bytes, uncompressed point) for the PKCS#8.
-  // However, Web Crypto can import with just the private scalar if we use
-  // the ECDSA import with "pkcs8" format and a proper PKCS#8 structure.
-  // For VAPID, we only need the private key for signing — the public key is
-  // sent separately in the Authorization header.
-
-  // Actually, the simplest correct approach: use the JWK format for import.
-  // P-256 private key JWK only needs: kty, crv, d (private scalar), x, y (public point).
-  // But we don't have x, y from the raw private key alone.
-
-  // Alternative: Use the raw scalar directly with a minimal PKCS#8 wrapper.
-  // The PKCS#8 for ECDSA P-256 is:
-  // SEQUENCE { version=1, privateKeyAlgorithm, privateKey }
-  // We can build this with just the 32-byte scalar.
-
-  // Build the full PKCS#8 DER manually:
-  // SEQUENCE {
-  //   INTEGER 1
-  //   SEQUENCE { OID 1.2.840.10045.2.1 (ecPublicKey), OID 1.2.840.10045.3.1.7 (secp256r1) }
-  //   OCTET STRING { SEQUENCE { INTEGER 1, OCTET STRING <32 bytes> } }
-  // }
-
-  const oidEcPublicKey = new Uint8Array([0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01]);
-  const oidSecp256r1 = new Uint8Array([0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]);
-
-  // Inner: OCTET STRING containing the raw private key scalar
-  const innerOctetString = new Uint8Array([0x04, 0x20, ...rawKey]);
-  // Inner SEQUENCE { INTEGER 1, OCTET STRING }
-  const innerSeq = new Uint8Array([0x30, 0x26, 0x02, 0x01, 0x01, ...innerOctetString]);
-  // Outer OCTET STRING wrapping inner
-  const outerOctetString = new Uint8Array([0x04, 0x28, ...innerSeq]);
-  // Algorithm identifier SEQUENCE
-  const algoSeq = new Uint8Array([0x30, 0x13, ...oidEcPublicKey, ...oidSecp256r1]);
-  // Top-level SEQUENCE { INTEGER 1, algoSeq, outerOctetString }
-  const pkcs8 = new Uint8Array([0x30, 0x74, 0x02, 0x01, 0x01, ...algoSeq, ...outerOctetString]);
-
-  const key = await crypto.subtle.importKey(
-    "pkcs8",
-    pkcs8,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"]
-  );
-
-  const header = { typ: "JWT", alg: "ES256" };
-  const now = Math.floor(Date.now() / 1000);
-  const aud = new URL(endpoint).origin;
-  const jwtPayload = {
-    aud,
-    exp: now + 12 * 60 * 60,
-    sub: subject,
-  };
-
-  const enc = new TextEncoder();
-  const headerB64 = base64UrlEncode(enc.encode(JSON.stringify(header)));
-  const payloadB64 = base64UrlEncode(enc.encode(JSON.stringify(jwtPayload)));
-  const signingInput = `${headerB64}.${payloadB64}`;
-
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    key,
-    enc.encode(signingInput)
-  );
-
-  const signatureB64 = base64UrlEncode(new Uint8Array(signature));
-  return `${signingInput}.${signatureB64}`;
+function mapProviderStatus(status: number): string {
+  if (status === 404 || status === 410) return "SUBSCRIPTION_EXPIRED";
+  if (status === 401 || status === 403) return "PUSH_PROVIDER_UNAUTHORIZED";
+  if (status === 400) return "PUSH_PROVIDER_BAD_REQUEST";
+  if (status === 429) return "PUSH_PROVIDER_RATE_LIMITED";
+  if (status >= 500) return "PUSH_PROVIDER_ERROR";
+  if (status === 0) return "NETWORK_TIMEOUT";
+  return "UNKNOWN_SERVER_ERROR";
 }
 
 function mapErrorCategoryToMessage(category: string): string {
   switch (category) {
-    case "missing_vapid":
-      return "Push service is not configured correctly. VAPID keys are missing.";
-    case "invalid_vapid":
+    case "VAPID_SECRET_MISSING":
+      return "Push service is not configured. VAPID keys are missing.";
+    case "VAPID_KEY_INVALID":
       return "Push authentication configuration is invalid. Please contact support.";
-    case "expired_subscription":
+    case "VAPID_SIGNING_FAILED":
+      return "Push authentication signing failed. Please contact support.";
+    case "PAYLOAD_ENCRYPTION_FAILED":
+      return "Push payload encryption failed. Please contact support.";
+    case "SUBSCRIPTION_EXPIRED":
       return "This device subscription has expired. Please repair your push subscription.";
-    case "malformed_subscription":
-      return "This device subscription is malformed. Please repair your push subscription.";
-    case "permission_denied":
-      return "Browser notifications are blocked. Please allow notifications in your browser settings.";
-    case "no_service_worker":
-      return "Push service worker is not active on this device. Please reload the page.";
-    case "vapid_key_mismatch":
-      return "Your push subscription was created with an older key. Please repair your push subscription.";
-    case "rate_limited":
+    case "PUSH_PROVIDER_BAD_REQUEST":
+      return "The push provider rejected the request. Please repair your push subscription.";
+    case "PUSH_PROVIDER_UNAUTHORIZED":
+      return "Push provider rejected authentication. Please contact support.";
+    case "PUSH_PROVIDER_RATE_LIMITED":
       return "Push provider rate limited this request. Please retry in a moment.";
-    case "provider_error":
+    case "PUSH_PROVIDER_ERROR":
       return "Push provider returned an error. Please retry shortly.";
-    case "timeout":
+    case "NETWORK_TIMEOUT":
       return "Push request timed out. Please check your connection and retry.";
-    case "network_error":
-      return "Network error while contacting push provider. Please check your connection.";
-    case "no_subscription":
-      return "No active subscription was found. Enable notifications in Account Settings first.";
-    case "server_error":
-      return "Server error while processing push request. Please contact support.";
-    case "temporary_failure":
+    case "NO_ACTIVE_SUBSCRIPTION":
+      return "No active subscription found. Enable notifications in Account Settings first.";
+    case "AUTHENTICATION_FAILED":
+      return "Authentication failed. Please sign in again.";
+    case "UNKNOWN_SERVER_ERROR":
     default:
-      return "Push delivery is temporarily unavailable. Please retry.";
+      return "Push delivery failed. Please contact support if this persists.";
   }
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function base64UrlDecode(str: string): Uint8Array {
@@ -432,15 +301,8 @@ function base64UrlDecode(str: string): Uint8Array {
   return bytes;
 }
 
-function jsonResponse(data: unknown, status = 200): Response {
+function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
-
-function errorResponse(message: string, status: number): Response {
-  return new Response(JSON.stringify({ error: message }), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });

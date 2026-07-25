@@ -269,50 +269,57 @@ describe('Push delivery flow', () => {
     }
   })
 
-  it('25. send-test-push uses PKCS#8 format for VAPID private key import', () => {
+  it('25. send-test-push uses web-push library for VAPID + payload encryption', () => {
     const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
-    assert(code.includes('pkcs8'), 'send-test-push should use pkcs8 format for key import')
-    assert(!code.includes('"raw"'), 'send-test-push should NOT use raw format for private key import')
+    assert(code.includes('web-push'), 'send-test-push should import web-push library')
+    assert(code.includes('setVapidDetails'), 'send-test-push should configure VAPID via web-push library')
+    assert(code.includes('sendNotification'), 'send-test-push should use sendNotification for encrypted push')
   })
 
-  it('26. send-push-notification uses PKCS#8 format for VAPID private key import', () => {
+  it('26. send-push-notification uses web-push library for VAPID + payload encryption', () => {
     const code = readFileSync(join(process.cwd(), 'supabase/functions/send-push-notification/index.ts'), 'utf-8')
-    assert(code.includes('pkcs8'), 'send-push-notification should use pkcs8 format for key import')
+    assert(code.includes('web-push'), 'send-push-notification should import web-push library')
+    assert(code.includes('setVapidDetails'), 'send-push-notification should configure VAPID via web-push library')
+    assert(code.includes('sendNotification'), 'send-push-notification should use sendNotification for encrypted push')
   })
 
   it('27. send-test-push returns structured result with subscriptionsFound, sent, failed', () => {
     const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
     assert(code.includes('subscriptionsFound'), 'Should return subscriptionsFound')
+    assert(code.includes('attempted'), 'Should return attempted count')
     assert(code.includes('sent'), 'Should return sent count')
     assert(code.includes('failed'), 'Should return failed count')
     assert(code.includes('invalidRemoved'), 'Should return invalidRemoved count')
-    assert(code.includes('results'), 'Should return results array')
+    assert(code.includes('errorCategory'), 'Should return errorCategory')
+    assert(code.includes('providerStatus'), 'Should return providerStatus')
+    assert(code.includes('correlationId'), 'Should return correlationId')
+    assert(code.includes('functionVersion'), 'Should return functionVersion')
   })
 
   it('28. send-test-push handles 404/410 by deactivating subscription', () => {
     const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
     assert(code.includes('404'), 'Should handle 404 status')
     assert(code.includes('410'), 'Should handle 410 status')
-    assert(code.includes('expired_subscription'), 'Should categorize 404/410 as expired_subscription')
+    assert(code.includes('SUBSCRIPTION_EXPIRED'), 'Should categorize 404/410 as SUBSCRIPTION_EXPIRED')
   })
 
-  it('29. send-test-push handles 401/403 as VAPID error', () => {
+  it('29. send-test-push handles 401/403 as provider unauthorized', () => {
     const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
     assert(code.includes('401'), 'Should handle 401 status')
     assert(code.includes('403'), 'Should handle 403 status')
-    assert(code.includes('invalid_vapid'), 'Should categorize 401/403 as invalid_vapid')
+    assert(code.includes('PUSH_PROVIDER_UNAUTHORIZED'), 'Should categorize 401/403 as PUSH_PROVIDER_UNAUTHORIZED')
   })
 
   it('30. send-test-push handles 429 as rate limited', () => {
     const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
     assert(code.includes('429'), 'Should handle 429 status')
-    assert(code.includes('rate_limited'), 'Should categorize 429 as rate_limited')
+    assert(code.includes('PUSH_PROVIDER_RATE_LIMITED'), 'Should categorize 429 as PUSH_PROVIDER_RATE_LIMITED')
   })
 
   it('31. send-test-push detects VAPID key mismatch', () => {
     const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
     assert(code.includes('vapid_key_fp'), 'Should check VAPID key fingerprint')
-    assert(code.includes('vapid_key_mismatch'), 'Should return vapid_key_mismatch error category')
+    assert(code.includes('VAPID_KEY_INVALID'), 'Should return VAPID_KEY_INVALID error category')
   })
 
   it('32. subscribe-device deactivates duplicates on replace', () => {

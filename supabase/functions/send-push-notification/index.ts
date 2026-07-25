@@ -1,5 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import webpush from "https://esm.sh/web-push@3.6.7";
+
+const PUSH_FUNCTION_VERSION = "v4-webpush-lib";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,20 +10,23 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+interface VapidConfig {
+  publicKey: string;
+  privateKey: string;
+  subject: string;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
-  try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+  const correlationId = crypto.randomUUID();
 
+  try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return errorResponse("Missing authorization header", 401);
+      return json({ error: "Missing authorization header", correlationId }, 401);
     }
 
     const userClient = createClient(
@@ -31,62 +37,71 @@ Deno.serve(async (req: Request) => {
 
     const { data: userData, error: userErr } = await userClient.auth.getUser();
     if (userErr || !userData.user) {
-      return errorResponse("Not authenticated", 401);
+      return json({ error: "Not authenticated", correlationId }, 401);
     }
 
     const userId = userData.user.id;
     const body = await req.json().catch(() => ({}));
 
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
     if (body.test) {
-      return await sendTestPush(supabase, userId);
+      return await sendTestPush(supabase, userId, correlationId);
     }
 
     if (body.notificationId) {
-      return await sendPushForNotification(supabase, body.notificationId);
+      return await sendPushForNotification(supabase, body.notificationId, correlationId);
     }
 
-    return errorResponse("Invalid request: provide test=true or notificationId", 400);
+    return json({ error: "Invalid request: provide test=true or notificationId", correlationId }, 400);
   } catch (err) {
-    return errorResponse(`Server error: ${(err as Error).message}`, 500);
+    return json({ error: `Server error: ${(err as Error).message}`, correlationId }, 500);
   }
 });
 
-async function sendTestPush(supabase: any, userId: string): Promise<Response> {
+async function sendTestPush(supabase: ReturnType<typeof createClient>, userId: string, correlationId: string): Promise<Response> {
   const { data: subs, error } = await supabase
     .from("push_subscriptions")
     .select("id, endpoint, p256dh_key, auth_key, vapid_key_fp")
     .eq("user_id", userId)
     .eq("is_active", true);
 
-  if (error) return errorResponse("Failed to fetch subscriptions", 500);
+  if (error) return json({ error: "Failed to fetch subscriptions", correlationId }, 500);
   if (!subs || subs.length === 0) {
-    return jsonResponse({
-      success: false,
-      message: "No active push subscriptions. Enable notifications first.",
+    return json({
+      functionVersion: PUSH_FUNCTION_VERSION,
+      correlationId,
       subscriptionsFound: 0,
       attempted: 0,
       sent: 0,
       failed: 0,
       invalidRemoved: 0,
-      results: [{ statusCode: 0, errorCategory: "no_subscription" }],
-      errorCategory: "no_subscription",
+      errorCategory: "NO_ACTIVE_SUBSCRIPTION",
+      providerStatus: 0,
+      message: "No active push subscriptions. Enable notifications first.",
     });
   }
 
   const vapidConfig = validateVapidConfig();
   if ("errorCategory" in vapidConfig) {
-    return jsonResponse({
-      success: false,
-      message: vapidConfig.message,
+    return json({
+      functionVersion: PUSH_FUNCTION_VERSION,
+      correlationId,
       subscriptionsFound: subs.length,
       attempted: 0,
       sent: 0,
       failed: 0,
       invalidRemoved: 0,
-      results: [{ statusCode: 0, errorCategory: vapidConfig.errorCategory }],
       errorCategory: vapidConfig.errorCategory,
+      providerStatus: 0,
+      message: vapidConfig.message,
     });
   }
+
+  webpush.setVapidDetails(vapidConfig.subject, vapidConfig.publicKey, vapidConfig.privateKey);
 
   const vapidKeyFp = vapidConfig.publicKey.slice(0, 16);
   const staleSubs = subs.filter((s: { vapid_key_fp?: string | null }) => s.vapid_key_fp && s.vapid_key_fp !== vapidKeyFp);
@@ -102,26 +117,33 @@ async function sendTestPush(supabase: any, userId: string): Promise<Response> {
   }
 
   if (validSubs.length === 0) {
-    return jsonResponse({
-      success: false,
-      message: "Your push subscription was created with an older key and has been deactivated. Please repair your push subscription.",
+    return json({
+      functionVersion: PUSH_FUNCTION_VERSION,
+      correlationId,
       subscriptionsFound: subs.length,
       attempted: 0,
       sent: 0,
       failed: 0,
       invalidRemoved,
-      results: [{ statusCode: 0, errorCategory: "vapid_key_mismatch" }],
-      errorCategory: "vapid_key_mismatch",
+      errorCategory: "VAPID_KEY_INVALID",
+      providerStatus: 0,
+      message: "All subscriptions have stale VAPID key.",
     });
   }
 
   let sent = 0;
   let failed = 0;
   let deactivated = 0;
-  const results: { statusCode: number; errorCategory: string }[] = [];
+  let lastErrorCategory = "";
+  let lastProviderStatus = 0;
 
   for (const sub of validSubs) {
-    const result = await sendWebPush(sub, {
+    const pushSubscription = {
+      endpoint: sub.endpoint,
+      keys: { p256dh: sub.p256dh_key, auth: sub.auth_key },
+    };
+
+    const payload = JSON.stringify({
       title: "Navjyoti HRMS Test",
       body: "Push notifications are working on this device.",
       category: "system",
@@ -129,42 +151,54 @@ async function sendTestPush(supabase: any, userId: string): Promise<Response> {
       actionUrl: "/settings",
       icon: "/icon-192.png",
       badge: "/badge-72.png",
-    }, vapidConfig);
+    });
 
-    results.push({ statusCode: result.statusCode, errorCategory: result.errorCategory });
+    try {
+      const response = await webpush.sendNotification(pushSubscription, payload, {
+        TTL: 2419200,
+        urgency: "normal",
+      });
 
-    if (result.ok) {
-      sent++;
-    } else {
+      if (response.statusCode === 201 || response.statusCode === 202 || response.statusCode === 200) {
+        sent++;
+      } else {
+        failed++;
+        lastProviderStatus = response.statusCode;
+        lastErrorCategory = mapProviderStatus(response.statusCode);
+        if (shouldDeactivate(lastErrorCategory)) {
+          deactivated++;
+          await supabase.from("push_subscriptions").update({ is_active: false, revoked_at: new Date().toISOString() }).eq("id", sub.id);
+        }
+      }
+    } catch (err: unknown) {
       failed++;
-      if (result.deactivate) {
+      const we = err as { statusCode?: number; message?: string };
+      lastProviderStatus = we.statusCode || 0;
+      lastErrorCategory = mapProviderStatus(we.statusCode || 0);
+      if (shouldDeactivate(lastErrorCategory)) {
         deactivated++;
-        await supabase
-          .from("push_subscriptions")
-          .update({ is_active: false, revoked_at: new Date().toISOString() })
-          .eq("id", sub.id);
+        await supabase.from("push_subscriptions").update({ is_active: false, revoked_at: new Date().toISOString() }).eq("id", sub.id);
       }
     }
   }
 
-  const message = sent > 0
-    ? `Test push sent to ${sent} device(s).`
-    : mapErrorCategoryToMessage(results[0]?.errorCategory || "temporary_failure");
-
-  return jsonResponse({
-    success: sent > 0,
-    message,
+  const success = sent > 0;
+  return json({
+    functionVersion: PUSH_FUNCTION_VERSION,
+    correlationId,
     subscriptionsFound: subs.length,
     attempted: validSubs.length,
     sent,
     failed,
     invalidRemoved: invalidRemoved + deactivated,
-    results,
-    errorCategory: sent > 0 ? undefined : results[0]?.errorCategory,
+    errorCategory: success ? "" : lastErrorCategory,
+    providerStatus: lastProviderStatus,
+    success,
+    message: success ? `Test push sent to ${sent} device(s).` : mapErrorCategoryToMessage(lastErrorCategory || "UNKNOWN_SERVER_ERROR"),
   });
 }
 
-async function sendPushForNotification(supabase: any, notificationId: string): Promise<Response> {
+async function sendPushForNotification(supabase: ReturnType<typeof createClient>, notificationId: string, correlationId: string): Promise<Response> {
   const { data: notif, error: notifErr } = await supabase
     .from("notifications")
     .select("id, recipient_id, title, message, priority, category, action_url")
@@ -172,7 +206,7 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
     .maybeSingle();
 
   if (notifErr || !notif) {
-    return errorResponse("Notification not found", 404);
+    return json({ error: "Notification not found", correlationId }, 404);
   }
 
   const { data: prefs } = await supabase
@@ -183,38 +217,26 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
 
   if (prefs) {
     if (!prefs.push_enabled) {
-      return jsonResponse({ success: false, message: "Push disabled in preferences" });
+      return json({ success: false, message: "Push disabled in preferences", correlationId });
     }
     const categoryPushMap: Record<string, string> = {
-      attendance: "attendance_push",
-      task: "task_push",
-      leave: "leave_push",
-      ticket: "ticket_push",
-      daily_report: "daily_report_push",
-      follow_up: "daily_report_push",
-      calendar: "calendar_push",
-      announcement: "announcement_push",
-      employee: "security_push",
-      system: "security_push",
+      attendance: "attendance_push", task: "task_push", leave: "leave_push",
+      ticket: "ticket_push", daily_report: "daily_report_push", follow_up: "daily_report_push",
+      calendar: "calendar_push", announcement: "announcement_push",
+      employee: "security_push", system: "security_push",
     };
     const pushField = categoryPushMap[notif.category];
     if (pushField && !prefs[pushField]) {
-      return jsonResponse({ success: false, message: `Push disabled for ${notif.category} category` });
+      return json({ success: false, message: `Push disabled for ${notif.category}`, correlationId });
     }
 
     if (prefs.quiet_hours_start && prefs.quiet_hours_end && notif.priority !== "urgent" && notif.priority !== "high") {
       const now = new Date();
       const tz = prefs.timezone || "Asia/Kolkata";
-      const formatter = new Intl.DateTimeFormat("en-US", {
-        timeZone: tz,
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      });
+      const formatter = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false });
       const currentTime = formatter.format(now);
-      const inQuietHours = isInQuietHours(currentTime, prefs.quiet_hours_start, prefs.quiet_hours_end);
-      if (inQuietHours) {
-        return jsonResponse({ success: false, message: "Quiet hours active — push delayed" });
+      if (isInQuietHours(currentTime, prefs.quiet_hours_start, prefs.quiet_hours_end)) {
+        return json({ success: false, message: "Quiet hours active", correlationId });
       }
     }
   }
@@ -226,22 +248,23 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
     .eq("is_active", true);
 
   if (subErr || !subs || subs.length === 0) {
-    return jsonResponse({ success: false, message: "No active subscriptions" });
+    return json({ success: false, message: "No active subscriptions", correlationId });
   }
 
   const vapidConfig = validateVapidConfig();
   if ("errorCategory" in vapidConfig) {
-    return jsonResponse({ success: false, message: vapidConfig.message, errorCategory: vapidConfig.errorCategory });
+    return json({ success: false, message: vapidConfig.message, errorCategory: vapidConfig.errorCategory, correlationId });
   }
+
+  webpush.setVapidDetails(vapidConfig.subject, vapidConfig.publicKey, vapidConfig.privateKey);
 
   const vapidKeyFp = vapidConfig.publicKey.slice(0, 16);
   const validSubs = subs.filter((s: { vapid_key_fp?: string | null }) => !s.vapid_key_fp || s.vapid_key_fp === vapidKeyFp);
 
   if (validSubs.length === 0) {
-    return jsonResponse({ success: false, message: "All subscriptions have stale VAPID key" });
+    return json({ success: false, message: "All subscriptions have stale VAPID key", correlationId });
   }
 
-  const idempotencyKey = `push-${notificationId}`;
   const { data: existingDelivery } = await supabase
     .from("notification_deliveries")
     .select("id, status")
@@ -250,7 +273,7 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
     .maybeSingle();
 
   if (existingDelivery && (existingDelivery.status === "sent" || existingDelivery.status === "delivered")) {
-    return jsonResponse({ success: true, message: "Push already sent for this notification" });
+    return json({ success: true, message: "Push already sent", correlationId });
   }
 
   if (!existingDelivery) {
@@ -259,7 +282,7 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
       channel: "web_push",
       recipient: notif.recipient_id,
       status: "processing",
-      idempotency_key: idempotencyKey,
+      idempotency_key: `push-${notificationId}`,
     });
   }
 
@@ -268,7 +291,12 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
   let deactivated = 0;
 
   for (const sub of validSubs) {
-    const result = await sendWebPush(sub, {
+    const pushSubscription = {
+      endpoint: sub.endpoint,
+      keys: { p256dh: sub.p256dh_key, auth: sub.auth_key },
+    };
+
+    const payload = JSON.stringify({
       title: notif.title,
       body: notif.message,
       category: notif.category,
@@ -277,18 +305,29 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
       notificationId: notif.id,
       icon: "/icon-192.png",
       badge: "/badge-72.png",
-    }, vapidConfig);
+    });
 
-    if (result.ok) {
-      sent++;
-    } else {
+    try {
+      const response = await webpush.sendNotification(pushSubscription, payload, {
+        TTL: 2419200,
+        urgency: notif.priority === "urgent" ? "high" : "normal",
+      });
+
+      if (response.statusCode === 201 || response.statusCode === 202 || response.statusCode === 200) {
+        sent++;
+      } else {
+        failed++;
+        if (shouldDeactivate(mapProviderStatus(response.statusCode))) {
+          deactivated++;
+          await supabase.from("push_subscriptions").update({ is_active: false, revoked_at: new Date().toISOString() }).eq("id", sub.id);
+        }
+      }
+    } catch (err: unknown) {
       failed++;
-      if (result.deactivate) {
+      const we = err as { statusCode?: number };
+      if (shouldDeactivate(mapProviderStatus(we.statusCode || 0))) {
         deactivated++;
-        await supabase
-          .from("push_subscriptions")
-          .update({ is_active: false, revoked_at: new Date().toISOString() })
-          .eq("id", sub.id);
+        await supabase.from("push_subscriptions").update({ is_active: false, revoked_at: new Date().toISOString() }).eq("id", sub.id);
       }
     }
   }
@@ -303,245 +342,85 @@ async function sendPushForNotification(supabase: any, notificationId: string): P
     .eq("notification_id", notificationId)
     .eq("channel", "web_push");
 
-  return jsonResponse({
-    success: sent > 0,
-    message: `Push sent to ${sent} device(s)`,
-    sent,
-    failed,
-    deactivated,
-  });
+  return json({ success: sent > 0, message: `Push sent to ${sent} device(s)`, sent, failed, deactivated, correlationId });
 }
 
-interface VapidConfig {
-  publicKey: string;
-  privateKey: string;
-  subject: string;
-}
-
-type VapidConfigResult = VapidConfig | { errorCategory: string; message: string };
-
-function validateVapidConfig(): VapidConfigResult {
+function validateVapidConfig(): VapidConfig | { errorCategory: string; message: string } {
   const privateKey = Deno.env.get("VAPID_PRIVATE_KEY");
   const publicKey = Deno.env.get("VAPID_PUBLIC_KEY");
   const subject = Deno.env.get("VAPID_SUBJECT") || "";
 
   if (!privateKey || !publicKey) {
-    return { errorCategory: "missing_vapid", message: "Push service is not configured correctly. VAPID keys are missing." };
+    return { errorCategory: "VAPID_SECRET_MISSING", message: "VAPID keys are missing." };
   }
-
   if (!subject) {
-    return { errorCategory: "missing_vapid", message: "Push service is not configured correctly. VAPID subject is missing." };
+    return { errorCategory: "VAPID_SECRET_MISSING", message: "VAPID subject is missing." };
   }
-
   if (!subject.startsWith("mailto:") && !subject.startsWith("https://")) {
-    return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
+    return { errorCategory: "VAPID_KEY_INVALID", message: "VAPID subject format is invalid." };
   }
 
   try {
     const privBytes = base64UrlDecode(privateKey);
-    if (privBytes.length !== 32) {
-      return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
-    }
+    if (privBytes.length !== 32) return { errorCategory: "VAPID_KEY_INVALID", message: "VAPID private key is not 32 bytes." };
     const pubBytes = base64UrlDecode(publicKey);
-    if (pubBytes.length !== 65) {
-      return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
-    }
+    if (pubBytes.length !== 65) return { errorCategory: "VAPID_KEY_INVALID", message: "VAPID public key is not 65 bytes." };
   } catch {
-    return { errorCategory: "invalid_vapid", message: "Push authentication configuration is invalid." };
+    return { errorCategory: "VAPID_KEY_INVALID", message: "VAPID keys are not valid base64url." };
   }
 
   return { publicKey, privateKey, subject };
 }
 
-interface PushPayload {
-  title: string;
-  body: string;
-  category: string;
-  priority: string;
-  actionUrl: string;
-  notificationId?: string;
-  icon?: string;
-  badge?: string;
+function shouldDeactivate(category: string): boolean {
+  return category === "SUBSCRIPTION_EXPIRED" || category === "PUSH_PROVIDER_BAD_REQUEST" || category === "PUSH_PROVIDER_UNAUTHORIZED";
 }
 
-interface SendResult {
-  ok: boolean;
-  deactivate: boolean;
-  statusCode: number;
-  errorCategory: string;
-}
-
-async function sendWebPush(
-  sub: { endpoint: string; p256dh_key: string; auth_key: string },
-  payload: PushPayload,
-  vapid: VapidConfig
-): Promise<SendResult> {
-  try {
-    const jwt = await generateVapidJWT(sub.endpoint, vapid.subject, vapid.privateKey);
-    const body = JSON.stringify(payload);
-
-    const response = await fetch(sub.endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "TTL": "2419200",
-        "Authorization": `vapid t=${jwt},k=${vapid.publicKey}`,
-        "Urgency": payload.priority === "urgent" ? "high" : "normal",
-      },
-      body,
-    });
-
-    if (response.ok || response.status === 201 || response.status === 202) {
-      return { ok: true, deactivate: false, statusCode: response.status, errorCategory: "" };
-    }
-
-    if (response.status === 404 || response.status === 410) {
-      return { ok: false, deactivate: true, statusCode: response.status, errorCategory: "expired_subscription" };
-    }
-
-    if (response.status === 401 || response.status === 403) {
-      return { ok: false, deactivate: true, statusCode: response.status, errorCategory: "invalid_vapid" };
-    }
-
-    if (response.status === 400) {
-      return { ok: false, deactivate: true, statusCode: response.status, errorCategory: "malformed_subscription" };
-    }
-
-    if (response.status === 429) {
-      return { ok: false, deactivate: false, statusCode: response.status, errorCategory: "rate_limited" };
-    }
-
-    if (response.status >= 500) {
-      return { ok: false, deactivate: false, statusCode: response.status, errorCategory: "provider_error" };
-    }
-
-    return { ok: false, deactivate: false, statusCode: response.status, errorCategory: "temporary_failure" };
-  } catch (err) {
-    const msg = (err as Error).message || "";
-    if (msg.includes("timed out") || msg.includes("timeout")) {
-      return { ok: false, deactivate: false, statusCode: 0, errorCategory: "timeout" };
-    }
-    if (msg.includes("network") || msg.includes("connect") || msg.includes("fetch")) {
-      return { ok: false, deactivate: false, statusCode: 0, errorCategory: "network_error" };
-    }
-    return { ok: false, deactivate: false, statusCode: 0, errorCategory: "temporary_failure" };
-  }
-}
-
-async function generateVapidJWT(
-  endpoint: string,
-  subject: string,
-  privateKeyB64: string
-): Promise<string> {
-  const rawKey = base64UrlDecode(privateKeyB64);
-
-  // Build PKCS#8 DER for ECDSA P-256 private key from raw 32-byte scalar.
-  const oidEcPublicKey = new Uint8Array([0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01]);
-  const oidSecp256r1 = new Uint8Array([0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]);
-  const innerOctetString = new Uint8Array([0x04, 0x20, ...rawKey]);
-  const innerSeq = new Uint8Array([0x30, 0x26, 0x02, 0x01, 0x01, ...innerOctetString]);
-  const outerOctetString = new Uint8Array([0x04, 0x28, ...innerSeq]);
-  const algoSeq = new Uint8Array([0x30, 0x13, ...oidEcPublicKey, ...oidSecp256r1]);
-  const pkcs8 = new Uint8Array([0x30, 0x74, 0x02, 0x01, 0x01, ...algoSeq, ...outerOctetString]);
-
-  const key = await crypto.subtle.importKey(
-    "pkcs8",
-    pkcs8,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"]
-  );
-
-  const header = { typ: "JWT", alg: "ES256" };
-  const now = Math.floor(Date.now() / 1000);
-  const aud = new URL(endpoint).origin;
-  const jwtPayload = { aud, exp: now + 12 * 60 * 60, sub: subject };
-
-  const enc = new TextEncoder();
-  const headerB64 = base64UrlEncode(enc.encode(JSON.stringify(header)));
-  const payloadB64 = base64UrlEncode(enc.encode(JSON.stringify(jwtPayload)));
-  const signingInput = `${headerB64}.${payloadB64}`;
-
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    key,
-    enc.encode(signingInput)
-  );
-
-  const signatureB64 = base64UrlEncode(new Uint8Array(signature));
-  return `${signingInput}.${signatureB64}`;
+function mapProviderStatus(status: number): string {
+  if (status === 404 || status === 410) return "SUBSCRIPTION_EXPIRED";
+  if (status === 401 || status === 403) return "PUSH_PROVIDER_UNAUTHORIZED";
+  if (status === 400) return "PUSH_PROVIDER_BAD_REQUEST";
+  if (status === 429) return "PUSH_PROVIDER_RATE_LIMITED";
+  if (status >= 500) return "PUSH_PROVIDER_ERROR";
+  if (status === 0) return "NETWORK_TIMEOUT";
+  return "UNKNOWN_SERVER_ERROR";
 }
 
 function mapErrorCategoryToMessage(category: string): string {
   switch (category) {
-    case "missing_vapid":
-      return "Push service is not configured correctly. VAPID keys are missing.";
-    case "invalid_vapid":
-      return "Push authentication configuration is invalid. Please contact support.";
-    case "expired_subscription":
-      return "This device subscription has expired. Please repair your push subscription.";
-    case "malformed_subscription":
-      return "This device subscription is malformed. Please repair your push subscription.";
-    case "vapid_key_mismatch":
-      return "Your push subscription was created with an older key. Please repair your push subscription.";
-    case "rate_limited":
-      return "Push provider rate limited this request. Please retry in a moment.";
-    case "provider_error":
-      return "Push provider returned an error. Please retry shortly.";
-    case "timeout":
-      return "Push request timed out. Please check your connection and retry.";
-    case "network_error":
-      return "Network error while contacting push provider. Please check your connection.";
-    case "no_subscription":
-      return "No active subscription was found. Enable notifications in Account Settings first.";
-    case "temporary_failure":
-    default:
-      return "Push delivery is temporarily unavailable. Please retry.";
+    case "VAPID_SECRET_MISSING": return "Push service is not configured. VAPID keys are missing.";
+    case "VAPID_KEY_INVALID": return "Push authentication configuration is invalid. Please contact support.";
+    case "SUBSCRIPTION_EXPIRED": return "This device subscription has expired. Please repair your push subscription.";
+    case "PUSH_PROVIDER_BAD_REQUEST": return "The push provider rejected the request. Please repair your push subscription.";
+    case "PUSH_PROVIDER_UNAUTHORIZED": return "Push provider rejected authentication. Please contact support.";
+    case "PUSH_PROVIDER_RATE_LIMITED": return "Push provider rate limited this request. Please retry in a moment.";
+    case "PUSH_PROVIDER_ERROR": return "Push provider returned an error. Please retry shortly.";
+    case "NETWORK_TIMEOUT": return "Push request timed out. Please check your connection and retry.";
+    case "NO_ACTIVE_SUBSCRIPTION": return "No active subscription found. Enable notifications in Account Settings first.";
+    case "UNKNOWN_SERVER_ERROR":
+    default: return "Push delivery failed. Please contact support if this persists.";
   }
 }
 
 function isInQuietHours(current: string, start: string, end: string): boolean {
-  const toMinutes = (t: string) => {
-    const [h, m] = t.split(":").map(Number);
-    return h * 60 + m;
-  };
+  const toMinutes = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
   const curr = toMinutes(current);
   const s = toMinutes(start);
   const e = toMinutes(end);
-  if (s <= e) {
-    return curr >= s && curr < e;
-  } else {
-    return curr >= s || curr < e;
-  }
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  if (s <= e) return curr >= s && curr < e;
+  return curr >= s || curr < e;
 }
 
 function base64UrlDecode(str: string): Uint8Array {
   const padded = str + "=".repeat((4 - (str.length % 4)) % 4);
   const binary = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
   const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
 
-function jsonResponse(data: unknown, status = 200): Response {
+function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
-
-function errorResponse(message: string, status: number): Response {
-  return new Response(JSON.stringify({ error: message }), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });

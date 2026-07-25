@@ -232,18 +232,49 @@ export async function sendTestPushNotification(): Promise<{ success: boolean; me
       }
     }
     const result = await response.json()
+    const errorCategory = result.errorCategory as string | undefined
+    const providerStatus = result.providerStatus as number | undefined
+    const message = result.message || (result.success !== false ? 'Test push sent' : 'Push delivery failed.')
+
+    const displayMessage = result.success !== false
+      ? message
+      : formatStructuredError(message, errorCategory, providerStatus)
+
     return {
       success: result.success !== false,
-      message: result.message || 'Test push sent',
-      errorCategory: result.errorCategory,
+      message: displayMessage,
+      errorCategory,
     }
-  } catch {
-    return {
-      success: false,
-      message: 'Push delivery is temporarily unavailable. Please retry.',
-      errorCategory: 'temporary_failure',
+  } catch (err) {
+    const msg = (err as Error)?.message || ''
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+      return { success: false, message: 'Could not reach the push service. Please check your connection and retry.', errorCategory: 'NETWORK_TIMEOUT' }
     }
+    return { success: false, message: 'Push delivery failed unexpectedly. Please retry or contact support.', errorCategory: 'UNKNOWN_SERVER_ERROR' }
   }
+}
+
+function formatStructuredError(baseMessage: string, errorCategory?: string, providerStatus?: number): string {
+  if (!errorCategory || errorCategory === 'UNKNOWN_SERVER_ERROR') {
+    return providerStatus ? `${baseMessage} (provider status: ${providerStatus})` : baseMessage
+  }
+  const categoryLabels: Record<string, string> = {
+    AUTHENTICATION_FAILED: 'Authentication failed. Please sign in again.',
+    NO_ACTIVE_SUBSCRIPTION: 'No active subscription found. Enable notifications in Account Settings first.',
+    INVALID_SUBSCRIPTION_DATA: 'Subscription data is invalid. Please repair your push subscription.',
+    VAPID_SECRET_MISSING: 'Push service is not configured. VAPID keys are missing.',
+    VAPID_KEY_INVALID: 'Push authentication key is invalid. Please contact support.',
+    VAPID_SIGNING_FAILED: 'Push authentication signing failed. Please contact support.',
+    PAYLOAD_ENCRYPTION_FAILED: 'Push payload encryption failed. Please contact support.',
+    PUSH_PROVIDER_UNAUTHORIZED: 'Push provider rejected authentication. Please contact support.',
+    PUSH_PROVIDER_BAD_REQUEST: 'The push provider rejected the request. Please repair your push subscription.',
+    SUBSCRIPTION_EXPIRED: 'This device subscription has expired. Please repair your push subscription.',
+    PUSH_PROVIDER_RATE_LIMITED: 'Push provider rate limited this request. Please retry in a moment.',
+    PUSH_PROVIDER_ERROR: 'Push provider returned an error. Please retry shortly.',
+    NETWORK_TIMEOUT: 'Push request timed out. Please check your connection and retry.',
+    FUNCTION_NOT_DEPLOYED: 'Push function is not deployed. Please contact support.',
+  }
+  return categoryLabels[errorCategory] || baseMessage
 }
 
 export async function repairPushSubscription(): Promise<{ success: boolean; message: string }> {
