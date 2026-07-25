@@ -189,11 +189,41 @@ async function handleInvite(
 
   const { data: dupProfile } = await admin
     .from("user_profiles")
-    .select("id")
+    .select("id, status")
     .eq("email", body.work_email)
     .maybeSingle();
 
-  if (dupProfile) return jsonError(409, "A user with this email already exists");
+  if (dupProfile) {
+    // Check if this is a stale invite: profile exists but no employee row
+    // and the user never signed in (pending_activation or never activated).
+    const { data: authUser } = await admin.auth.admin.getUserById(dupProfile.id);
+    const neverSignedIn = !authUser?.user?.last_sign_in_at;
+    const { data: existingEmp } = await admin
+      .from("employees")
+      .select("id")
+      .eq("user_id", dupProfile.id)
+      .maybeSingle();
+
+    if (neverSignedIn && !existingEmp) {
+      // Clean up the orphaned auth user and profile so we can re-invite cleanly
+      await admin.from("user_organization_memberships").delete().eq("user_id", dupProfile.id);
+      await admin.from("user_profiles").delete().eq("id", dupProfile.id);
+      await admin.auth.admin.deleteUser(dupProfile.id);
+    } else {
+      return jsonError(409, "A user with this email already exists");
+    }
+  } else {
+    // No profile row, but there may still be an orphaned auth user (e.g. employee
+    // row was deleted but auth user was left behind). Check and clean up.
+    const { data: existingAuthUsers } = await admin.auth.admin.listUsers();
+    const orphanedAuth = existingAuthUsers?.users?.find(
+      (u: { email?: string; last_sign_in_at?: string | null }) =>
+        u.email === body.work_email && !u.last_sign_in_at
+    );
+    if (orphanedAuth) {
+      await admin.auth.admin.deleteUser(orphanedAuth.id);
+    }
+  }
 
   // Use generateLink to create the auth user AND get a direct setup link.
   // This avoids relying on Supabase's rate-limited built-in email service.
