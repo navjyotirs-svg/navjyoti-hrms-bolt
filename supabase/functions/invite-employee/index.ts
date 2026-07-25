@@ -234,10 +234,10 @@ async function handleInvite(
 
   // Use generateLink to create the auth user AND get a direct setup link.
   // This avoids relying on Supabase's rate-limited built-in email service.
-  const { data: linkData, error: inviteError } = await admin.auth.admin.generateLink(
-    "invite",
-    body.work_email,
-    {
+  const { data: linkData, error: inviteError } = await admin.auth.admin.generateLink({
+    type: "invite",
+    email: body.work_email,
+    options: {
       redirectTo: `${appUrl}/set-password`,
       data: {
         full_name: body.full_name,
@@ -245,8 +245,8 @@ async function handleInvite(
         organization_id: orgId,
         invited_by: callerId,
       },
-    }
-  );
+    },
+  });
 
   if (inviteError) {
     return jsonError(500, `Failed to send invitation: ${inviteError.message}`);
@@ -394,10 +394,10 @@ async function handleResendInvitation(
   }
 
   // Resend invitation using generateLink (avoids rate-limited built-in email service)
-  const { data: resendLinkData, error: resendError } = await admin.auth.admin.generateLink(
-    "invite",
-    employee.work_email,
-    {
+  const { data: resendLinkData, error: resendError } = await admin.auth.admin.generateLink({
+    type: "invite",
+    email: employee.work_email,
+    options: {
       redirectTo: `${appUrl}/set-password`,
       data: {
         full_name: employee.full_name,
@@ -405,8 +405,8 @@ async function handleResendInvitation(
         organization_id: callerProfile.organization_id,
         invited_by: callerId,
       },
-    }
-  );
+    },
+  });
 
   if (resendError) {
     return jsonError(500, `Failed to resend invitation: ${resendError.message}`);
