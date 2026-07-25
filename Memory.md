@@ -2378,3 +2378,70 @@ NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com
 1. Browser smoke test not performed
 2. Drill-down drawers use client-side queries (RLS-enforced) — pagination may be needed for very large orgs
 3. Realtime updates rely on existing RealtimeProvider invalidating queries
+
+
+---
+
+## Dashboard Drill-Downs Replaced with Full-Page Routes — 2026-07-25
+
+### Problem
+
+Dashboard metric cards opened large data tables in a right-side drawer. The drawer clipped columns (especially checkout), wasn't shareable, and violated the UI rule that drawers are only for confirmations, small forms, and quick actions.
+
+### Solution
+
+Every dashboard metric card now navigates to a filtered full-page route. No drawer is used for any dashboard data table.
+
+### Route Mapping
+
+- Checked In -> /attendance-management?date=YYYY-MM-DD&status=checked_in
+- Pending Checkout -> /attendance-management?date=YYYY-MM-DD&status=PENDING_CHECKOUT
+- Full Day -> /attendance-management?date=YYYY-MM-DD&status=FULL_DAY
+- Half Day -> /attendance-management?date=YYYY-MM-DD&status=HALF_DAY
+- Pending Corrections -> /attendance-corrections?status=pending
+- Active Employees -> /employees?access_status=Active
+- Pending Activation -> /employees?access_status=Activation Pending
+- Onboarding Pending -> /employees?access_status=Activation Pending
+- Documents Pending Verification -> /employees?access_status=Active
+- Branches -> /branches
+- Departments -> /departments
+- Unread Notifications -> /notification-inbox?read=false
+- Pending Reviews -> /report-review?status=submitted
+- Open Follow-ups -> /follow-up-queue?status=open
+- Today's Reports -> /team-reports?date=today
+
+### Changes
+
+1. Dashboard.tsx — completely rewritten. All drawer state, loaders, renderers, and the DrillDownDrawer import removed. Every MetricCard now uses navigate() to a filtered route. No drawer state remains.
+
+2. DrillDownDrawer.tsx — DELETED. No longer exists in the codebase.
+
+3. dashboard.css — removed all .drilldown-* styles. Added .page-summary, .filter-chip, and responsive .data-table mobile card styles.
+
+4. AttendanceManagementPage.tsx — added useNavigate, Back to Dashboard button, summary count, active filter chips, Clear Filters, pagination (25 per page), and a new "checked_in" virtual status filter (matches PENDING_CHECKOUT + FULL_DAY + HALF_DAY). Added data-label attributes to all table cells for mobile responsive cards. Fixed broken route from /corrections to /attendance-corrections.
+
+5. AttendanceCorrectionsPage.tsx — added useNavigate, Back to Dashboard button, summary count.
+
+6. EmployeeDirectoryPage.tsx — added useNavigate, Back to Dashboard button, summary count.
+
+7. NotificationInboxPage.tsx — added useNavigate, Back to Dashboard button, summary count. Fixed broken route from /notifications to /notification-inbox.
+
+### Responsive Behavior
+
+Desktop: full-width table inside main content area with horizontal scroll only when necessary. Sticky table header.
+
+Mobile: table rows convert to cards using data-label attributes. Key information shown first. No page-level horizontal overflow.
+
+### Back Navigation
+
+Every destination page has a "Back to Dashboard" button that navigates to /. Browser Back also returns to the Dashboard naturally via React Router history.
+
+### Tests
+
+- 126/126 tests PASS
+- TypeScript: PASS
+- Production build: PASS
+
+### Manual Verification
+
+NOT YET PERFORMED — requires browser testing. The user should verify all 15 checklist items from the request.

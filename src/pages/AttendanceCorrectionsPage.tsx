@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { reviewCorrection, formatDate } from '@/lib/attendance'
@@ -30,6 +30,7 @@ export function AttendanceCorrectionsPage() {
   const [success, setSuccess] = useState<string | null>(null)
   const [reviewing, setReviewing] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'all')
 
   useEffect(() => {
@@ -141,7 +142,11 @@ export function AttendanceCorrectionsPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h2 className="page-title">Attendance Corrections</h2>
+        <div>
+          <button className="btn btn-sm btn-secondary" onClick={() => navigate('/')} style={{ marginBottom: 'var(--space-2)' }}>← Back to Dashboard</button>
+          <h2 className="page-title">Attendance Corrections</h2>
+          {!loading && <div className="page-summary">{corrections.length} correction{corrections.length !== 1 ? 's' : ''}</div>}
+        </div>
         <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
             <option value="all">All Statuses</option>

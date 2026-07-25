@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { ATTENDANCE_STATUS_LABELS, type AttendanceStatus } from '@/types/roles'
@@ -35,6 +35,7 @@ interface EvidenceDetail {
 export function AttendanceManagementPage() {
   const { profile, permissions } = useAuth()
   const [records, setRecords] = useState<AttendanceRow[]>([])
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -51,6 +52,8 @@ export function AttendanceManagementPage() {
     imageUrl: string | null
     loading: boolean
   } | null>(null)
+  const [page, setPage] = useState(0)
+  const PAGE_SIZE = 25
 
   // Sync filter changes back to URL
   useEffect(() => {
@@ -99,13 +102,18 @@ export function AttendanceManagementPage() {
       })
   }, [profile?.organization_id, canReadAll, dateFilter])
 
+  const CHECKED_IN_STATUSES = ['PENDING_CHECKOUT', 'FULL_DAY', 'HALF_DAY']
   const filtered = records.filter((r) => {
     const q = search.trim().toLowerCase()
     const emp = r.employees
     const matchesSearch = !q || (emp?.full_name.toLowerCase().includes(q) || emp?.employee_code.toLowerCase().includes(q))
-    const matchesStatus = statusFilter === 'all' || r.final_status === statusFilter
+    let matchesStatus = statusFilter === 'all' || r.final_status === statusFilter
+    if (statusFilter === 'checked_in') matchesStatus = CHECKED_IN_STATUSES.includes(r.final_status)
     return matchesSearch && matchesStatus
   })
+  const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const hasFilters = statusFilter !== 'all' || search.trim() !== ''
 
   async function viewEvidence(recordId: string, employeeName: string, date: string) {
     setEvidenceLoading(true)
@@ -151,24 +159,46 @@ export function AttendanceManagementPage() {
     return <div className="page"><div className="empty-state"><div className="empty-state-text">You do not have permission to view attendance management.</div></div></div>
   }
 
+  function clearFilters() {
+    setStatusFilter('all')
+    setSearch('')
+    setPage(0)
+  }
+
+  const statusLabel = statusFilter === 'checked_in' ? 'Checked In' : (statusFilter === 'all' ? null : ATTENDANCE_STATUS_LABELS[statusFilter as AttendanceStatus] ?? statusFilter)
+
   return (
     <div className="page">
       <div className="page-header">
-        <h2 className="page-title">Attendance Management</h2>
+        <div>
+          <button className="btn btn-sm btn-secondary" onClick={() => navigate('/')} style={{ marginBottom: 'var(--space-2)' }}>← Back to Dashboard</button>
+          <h2 className="page-title">Attendance Management</h2>
+          {!loading && <div className="page-summary">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</div>}
+        </div>
       </div>
 
       {error && <div className="form-error" style={{ marginBottom: '12px' }}>{error}</div>}
 
       <div className="card">
+        {(hasFilters || dateFilter) && (
+          <div className="filter-chips" style={{ marginBottom: 'var(--space-3)', display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+            {statusLabel && <span className="filter-chip">Status: {statusLabel} <button onClick={() => setStatusFilter('all')} aria-label="Clear status filter">×</button></span>}
+            {dateFilter && <span className="filter-chip">Date: {dateFilter} <button onClick={() => setDateFilter(new Date().toISOString().slice(0, 10))} aria-label="Reset date">×</button></span>}
+            {search.trim() && <span className="filter-chip">Search: "{search}" <button onClick={() => setSearch('')} aria-label="Clear search">×</button></span>}
+            {hasFilters && <button className="btn btn-sm btn-secondary" onClick={clearFilters}>Clear Filters</button>}
+          </div>
+        )}
+
         <div className="form-grid" style={{ marginBottom: 'var(--space-4)' }}>
           <div className="form-field">
             <label htmlFor="att-search">Search</label>
-            <input id="att-search" type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or employee code" />
+            <input id="att-search" type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0) }} placeholder="Name or employee code" />
           </div>
           <div className="form-field">
             <label htmlFor="att-status">Status</label>
-            <select id="att-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <select id="att-status" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(0) }}>
               <option value="all">All Statuses</option>
+              <option value="checked_in">Checked In</option>
               {Object.entries(ATTENDANCE_STATUS_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
               ))}
@@ -176,7 +206,7 @@ export function AttendanceManagementPage() {
           </div>
           <div className="form-field">
             <label htmlFor="att-date">Date</label>
-            <input id="att-date" type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
+            <input id="att-date" type="date" value={dateFilter} onChange={(e) => { setDateFilter(e.target.value); setPage(0) }} />
           </div>
         </div>
 
@@ -185,6 +215,7 @@ export function AttendanceManagementPage() {
         ) : filtered.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No attendance records for this date.</div></div>
         ) : (
+          <>
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -195,19 +226,19 @@ export function AttendanceManagementPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => (
+                {paged.map((r) => (
                   <tr key={r.id}>
-                    <td>{r.employees?.full_name ?? '—'}</td>
-                    <td className="mono">{r.employees?.employee_code ?? '—'}</td>
-                    <td>{r.branches?.name ?? '—'}</td>
-                    <td className="mono">{formatDate(r.attendance_date)}</td>
-                    <td className="mono">{formatTimestamp(r.check_in_at)}</td>
-                    <td className="mono">{formatTimestamp(r.required_checkout_at)}</td>
-                    <td className="mono">{r.check_out_at ? formatTimestamp(r.check_out_at) : '—'}</td>
-                    <td className="mono">{r.actual_elapsed_minutes ? `${r.actual_elapsed_minutes}m` : '—'}</td>
-                    <td><span className={`attendance-badge ${r.final_status.toLowerCase()}`}>{ATTENDANCE_STATUS_LABELS[r.final_status as AttendanceStatus] ?? r.final_status}</span></td>
-                    <td>{r.correction_version > 0 ? <span className="tag tag-amber">v{r.correction_version}</span> : '—'}</td>
-                    <td>
+                    <td data-label="Employee">{r.employees?.full_name ?? '—'}</td>
+                    <td data-label="Code" className="mono">{r.employees?.employee_code ?? '—'}</td>
+                    <td data-label="Branch">{r.branches?.name ?? '—'}</td>
+                    <td data-label="Date" className="mono">{formatDate(r.attendance_date)}</td>
+                    <td data-label="Check-In" className="mono">{formatTimestamp(r.check_in_at)}</td>
+                    <td data-label="Required Checkout" className="mono">{formatTimestamp(r.required_checkout_at)}</td>
+                    <td data-label="Actual Checkout" className="mono">{r.check_out_at ? formatTimestamp(r.check_out_at) : '—'}</td>
+                    <td data-label="Elapsed" className="mono">{r.actual_elapsed_minutes ? `${r.actual_elapsed_minutes}m` : '—'}</td>
+                    <td data-label="Status"><span className={`attendance-badge ${r.final_status.toLowerCase()}`}>{ATTENDANCE_STATUS_LABELS[r.final_status as AttendanceStatus] ?? r.final_status}</span></td>
+                    <td data-label="Correction">{r.correction_version > 0 ? <span className="tag tag-amber">v{r.correction_version}</span> : '—'}</td>
+                    <td data-label="Evidence">
                       {canReadEvidence && (
                         <button className="btn btn-sm btn-secondary" onClick={() => viewEvidence(r.id, r.employees?.full_name ?? '—', r.attendance_date)} disabled={evidenceLoading}>
                           View
@@ -220,6 +251,14 @@ export function AttendanceManagementPage() {
               </tbody>
             </table>
           </div>
+          {totalPages > 1 && (
+            <div className="pagination" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 'var(--space-3)', marginTop: 'var(--space-4)' }}>
+              <button className="btn btn-sm btn-secondary" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>Previous</button>
+              <span className="mono">Page {page + 1} of {totalPages}</span>
+              <button className="btn btn-sm btn-secondary" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>Next</button>
+            </div>
+          )}
+          </>
         )}
       </div>
 

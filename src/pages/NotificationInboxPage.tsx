@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, archiveNotification, type NotificationRow } from '@/lib/notifications'
 import { NotificationSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
@@ -9,6 +9,7 @@ export function NotificationInboxPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [filter, setFilter] = useState<'all' | 'unread'>(searchParams.get('read') === 'false' ? 'unread' : 'all')
   const [categoryFilter, setCategoryFilter] = useState('all')
 
@@ -60,7 +61,11 @@ export function NotificationInboxPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h2 className="page-title">Notification Inbox</h2>
+        <div>
+          <button className="btn btn-sm btn-secondary" onClick={() => navigate('/')} style={{ marginBottom: 'var(--space-2)' }}>← Back to Dashboard</button>
+          <h2 className="page-title">Notification Inbox</h2>
+          {!loading && <div className="page-summary">{notifications.length} notification{notifications.length !== 1 ? 's' : ''}</div>}
+        </div>
         <button className="btn btn-secondary" onClick={handleMarkAllRead}>Mark All Read</button>
       </div>
 

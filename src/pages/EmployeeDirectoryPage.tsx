@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { ROLE_LABELS } from '@/types/roles'
@@ -60,6 +60,7 @@ export function EmployeeDirectoryPage() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState(searchParams.get('access_status') || 'all')
   const [resending, setResending] = useState<string | null>(null)
 
@@ -325,7 +326,11 @@ export function EmployeeDirectoryPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h2 className="page-title">Employees</h2>
+        <div>
+          <button className="btn btn-sm btn-secondary" onClick={() => navigate('/')} style={{ marginBottom: 'var(--space-2)' }}>← Back to Dashboard</button>
+          <h2 className="page-title">Employees</h2>
+          {!loading && <div className="page-summary">{filtered.length} employee{filtered.length !== 1 ? 's' : ''}</div>}
+        </div>
         {canCreate && <Link to="/employees/add" className="btn btn-sm">+ Invite Employee</Link>}
       </div>
 
