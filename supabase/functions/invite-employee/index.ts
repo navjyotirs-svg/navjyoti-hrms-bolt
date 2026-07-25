@@ -12,7 +12,7 @@ const VALID_ROLES = [
   "hr_admin",
   "manager",
   "team_leader",
- "employee",
+  "employee",
   "intern",
   "system_admin",
 ];
@@ -120,16 +120,43 @@ Deno.serve(async (req: Request) => {
 
     // activate_account is called by the employee themselves after setting their
     // password — it must NOT require employee.create permission.
+    // Uses the atomic SECURITY DEFINER RPC for transactional safety.
     if (body.action === "activate_account") {
-      return handleActivateAccount(admin, callerId, callerProfile);
+      const { data: rpcResult, error: rpcError } = await callerClient.rpc("activate_employee_account");
+
+      if (rpcError) {
+        return jsonError(500, `Activation failed: ${rpcError.message}`);
+      }
+
+      const result = rpcResult as { success: boolean; error?: string; message?: string; employment_status?: string };
+      if (!result.success) {
+        return jsonError(400, result.message || result.error || "Activation failed");
+      }
+
+      return jsonResponse(200, { message: result.message || "Account activated successfully", employment_status: result.employment_status });
     }
 
-    // repair_activation is an admin action — require employee.create permission.
+    // repair_activation is an admin action — require employee.create or employee.status.manage permission.
+    // Uses the atomic SECURITY DEFINER RPC for transactional safety.
     if (body.action === "repair_activation") {
-      if (!callerPerms.includes("employee.create")) {
+      if (!callerPerms.includes("employee.create") && !callerPerms.includes("employee.status.manage")) {
         return jsonError(403, "You do not have permission to repair account activation");
       }
-      return handleRepairActivation(admin, callerId, callerProfile, body as RepairActivationRequest);
+      const repairBody = body as RepairActivationRequest;
+      const { data: rpcResult, error: rpcError } = await callerClient.rpc("repair_employee_account", {
+        p_employee_id: repairBody.employee_id,
+      });
+
+      if (rpcError) {
+        return jsonError(500, `Repair failed: ${rpcError.message}`);
+      }
+
+      const result = rpcResult as { success: boolean; error?: string; message?: string; repaired?: string[] };
+      if (!result.success) {
+        return jsonError(400, result.message || result.error || "Repair failed");
+      }
+
+      return jsonResponse(200, { message: result.message || "Account repaired successfully", repaired: result.repaired, employee_id: repairBody.employee_id });
     }
 
     // resend_invitation and default invite require employee.create permission.
@@ -201,8 +228,6 @@ async function handleInvite(
     .maybeSingle();
 
   if (dupProfile) {
-    // Check if this is a stale invite: profile exists but no employee row
-    // and the user never signed in (pending_activation or never activated).
     const { data: authUser } = await admin.auth.admin.getUserById(dupProfile.id);
     const neverSignedIn = !authUser?.user?.last_sign_in_at;
     const { data: existingEmp } = await admin
@@ -212,7 +237,6 @@ async function handleInvite(
       .maybeSingle();
 
     if (neverSignedIn && !existingEmp) {
-      // Clean up the orphaned auth user and profile so we can re-invite cleanly
       await admin.from("user_organization_memberships").delete().eq("user_id", dupProfile.id);
       await admin.from("user_profiles").delete().eq("id", dupProfile.id);
       await admin.auth.admin.deleteUser(dupProfile.id);
@@ -220,8 +244,6 @@ async function handleInvite(
       return jsonError(409, "A user with this email already exists");
     }
   } else {
-    // No profile row, but there may still be an orphaned auth user (e.g. employee
-    // row was deleted but auth user was left behind). Check and clean up.
     const { data: existingAuthUsers } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
     const orphanedAuth = existingAuthUsers?.users?.find(
       (u: { email?: string; last_sign_in_at?: string | null }) =>
@@ -232,8 +254,6 @@ async function handleInvite(
     }
   }
 
-  // Use generateLink to create the auth user AND get a direct setup link.
-  // This avoids relying on Supabase's rate-limited built-in email service.
   const { data: linkData, error: inviteError } = await admin.auth.admin.generateLink({
     type: "invite",
     email: body.work_email,
@@ -255,7 +275,6 @@ async function handleInvite(
   const userId = linkData.user.id;
   const setupLink = linkData.properties?.action_link ?? `${appUrl}/set-password`;
 
-  // Create user_profile — pending activation until password is set
   const { error: profileInsertError } = await admin.from("user_profiles").insert({
     id: userId,
     email: body.work_email,
@@ -270,7 +289,6 @@ async function handleInvite(
     return jsonError(500, `Failed to create user profile: ${profileInsertError.message}`);
   }
 
-  // Create employee record
   const { data: employee, error: empError } = await admin
     .from("employees")
     .insert({
@@ -294,7 +312,6 @@ async function handleInvite(
     return jsonError(500, `Failed to create employee record: ${empError.message}`);
   }
 
-  // Create org membership — inactive until password is set
   const { error: membershipError } = await admin
     .from("user_organization_memberships")
     .insert({ user_id: userId, organization_id: orgId, is_active: false });
@@ -303,7 +320,6 @@ async function handleInvite(
     console.error("Membership creation failed:", membershipError.message);
   }
 
-  // Create reporting line if manager specified
   if (body.reporting_manager_id && employee) {
     const { error: reportingError } = await admin
       .from("employee_reporting_lines")
@@ -314,7 +330,6 @@ async function handleInvite(
     }
   }
 
-  // Audit log
   await admin.from("audit_logs").insert({
     actor_id: callerId,
     action: "employee.invite",
@@ -374,7 +389,6 @@ async function handleResendInvitation(
     return jsonError(400, "Invitation can only be resent for pending activation accounts");
   }
 
-  // Rate limit: check last audit log for this action
   const { data: lastInvite } = await admin
     .from("audit_logs")
     .select("created_at")
@@ -393,7 +407,6 @@ async function handleResendInvitation(
     }
   }
 
-  // Resend invitation using generateLink (avoids rate-limited built-in email service)
   const { data: resendLinkData, error: resendError } = await admin.auth.admin.generateLink({
     type: "invite",
     email: employee.work_email,
@@ -414,7 +427,6 @@ async function handleResendInvitation(
 
   const setupLink = resendLinkData.properties?.action_link ?? `${appUrl}/set-password`;
 
-  // Audit log
   await admin.from("audit_logs").insert({
     actor_id: callerId,
     action: "employee.invite_resend",
@@ -430,218 +442,6 @@ async function handleResendInvitation(
     message: "Invitation link generated successfully. Share it with the employee.",
     employee_id: employee.id,
     setup_link: setupLink,
-  });
-}
-
-async function handleActivateAccount(
-  admin: ReturnType<typeof createClient>,
-  callerId: string,
-  callerProfile: { id: string; role: string; organization_id: string }
-): Promise<Response> {
-  // Activate the user's own profile after they set their password.
-  // Synchronizes user_profiles, employees, and org membership in one pass.
-  const { data: profile, error: profileError } = await admin
-    .from("user_profiles")
-    .select("id, status, organization_id")
-    .eq("id", callerId)
-    .maybeSingle();
-
-  if (profileError || !profile) {
-    return jsonError(404, "User profile not found");
-  }
-
-  if (profile.organization_id !== callerProfile.organization_id) {
-    return jsonError(403, "Organization mismatch");
-  }
-
-  if (profile.status === "active") {
-    return jsonResponse(200, { message: "Account already active" });
-  }
-
-  const nowIso = new Date().toISOString();
-
-  // 1. Activate user_profiles
-  const { error: activateError } = await admin
-    .from("user_profiles")
-    .update({
-      status: "active",
-      is_active: true,
-      updated_at: nowIso,
-    })
-    .eq("id", callerId);
-
-  if (activateError) {
-    return jsonError(500, `Failed to activate profile: ${activateError.message}`);
-  }
-
-  // 2. Activate employee record
-  const { data: employee } = await admin
-    .from("employees")
-    .select("id, employment_status")
-    .eq("user_id", callerId)
-    .maybeSingle();
-
-  if (employee) {
-    const prevStatus = employee.employment_status;
-    await admin
-      .from("employees")
-      .update({
-        employment_status: "active",
-        is_active: true,
-        updated_at: nowIso,
-      })
-      .eq("id", employee.id);
-
-    // 3. Write employee status history
-    await admin.from("employee_status_history").insert({
-      employee_id: employee.id,
-      old_status: prevStatus,
-      new_status: "active",
-      actor_id: callerId,
-      effective_date: new Date().toISOString().slice(0, 10),
-      reason: "Account activated after password setup",
-    });
-  }
-
-  // 4. Activate organization membership (re-link if missing)
-  const { data: membership } = await admin
-    .from("user_organization_memberships")
-    .select("id")
-    .eq("user_id", callerId)
-    .eq("organization_id", callerProfile.organization_id)
-    .maybeSingle();
-
-  if (membership) {
-    await admin
-      .from("user_organization_memberships")
-      .update({ is_active: true })
-      .eq("id", membership.id);
-  } else {
-    await admin
-      .from("user_organization_memberships")
-      .insert({ user_id: callerId, organization_id: callerProfile.organization_id, is_active: true });
-  }
-
-  // 5. Audit log
-  await admin.from("audit_logs").insert({
-    actor_id: callerId,
-    action: "employee.activate_self",
-    entity_type: "user_profile",
-    entity_id: callerId,
-    old_values: { status: profile.status },
-    new_values: { status: "active", is_active: true },
-  });
-
-  return jsonResponse(200, { message: "Account activated successfully" });
-}
-
-async function handleRepairActivation(
-  admin: ReturnType<typeof createClient>,
-  callerId: string,
-  callerProfile: { id: string; role: string; organization_id: string },
-  body: RepairActivationRequest
-): Promise<Response> {
-  // Idempotent repair: inspect, re-link, activate, synchronize.
-  const { data: employee, error: empError } = await admin
-    .from("employees")
-    .select("id, user_id, organization_id, employment_status, is_active, work_email, full_name")
-    .eq("id", body.employee_id)
-    .maybeSingle();
-
-  if (empError || !employee) {
-    return jsonError(404, "Employee not found");
-  }
-
-  if (employee.organization_id !== callerProfile.organization_id) {
-    return jsonError(403, "Cross-organization access denied");
-  }
-
-  const userId = employee.user_id as string;
-  const nowIso = new Date().toISOString();
-
-  // 1. Ensure auth user exists
-  const { data: authUser, error: authError } = await admin.auth.admin.getUserById(userId);
-  if (authError || !authUser.user) {
-    // Auth user missing — cannot repair without re-inviting. Return instructions.
-    return jsonError(409, "Auth account missing for this employee. Please re-invite the employee with their work email to recreate the account.");
-  }
-
-  // 2. Synchronize user_profiles
-  const { data: profile } = await admin
-    .from("user_profiles")
-    .select("id, status, role")
-    .eq("id", userId)
-    .maybeSingle();
-
-  const prevProfileStatus = profile?.status ?? "missing";
-  const profileRole = profile?.role ?? "employee";
-  await admin
-    .from("user_profiles")
-    .upsert({
-      id: userId,
-      email: employee.work_email,
-      full_name: employee.full_name,
-      organization_id: callerProfile.organization_id,
-      role: profileRole,
-      status: "active",
-      is_active: true,
-      updated_at: nowIso,
-    });
-
-  // 3. Synchronize employee record
-  const prevEmpStatus = employee.employment_status;
-  await admin
-    .from("employees")
-    .update({
-      employment_status: "active",
-      is_active: true,
-      updated_at: nowIso,
-    })
-    .eq("id", employee.id);
-
-  // 4. Write employee status history
-  await admin.from("employee_status_history").insert({
-    employee_id: employee.id,
-    old_status: prevEmpStatus,
-    new_status: "active",
-    actor_id: callerId,
-    effective_date: new Date().toISOString().slice(0, 10),
-    reason: "Account activation repaired by administrator",
-  });
-
-  // 5. Re-link / activate org membership (no duplicates)
-  const { data: existingMembership } = await admin
-    .from("user_organization_memberships")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("organization_id", callerProfile.organization_id)
-    .maybeSingle();
-
-  if (existingMembership) {
-    await admin
-      .from("user_organization_memberships")
-      .update({ is_active: true })
-      .eq("id", existingMembership.id);
-  } else {
-    await admin
-      .from("user_organization_memberships")
-      .insert({ user_id: userId, organization_id: callerProfile.organization_id, is_active: true });
-  }
-
-  // 6. Audit log
-  await admin.from("audit_logs").insert({
-    actor_id: callerId,
-    action: "employee.repair_activation",
-    entity_type: "employee",
-    entity_id: employee.id,
-    old_values: { profile_status: prevProfileStatus, employment_status: prevEmpStatus },
-    new_values: { profile_status: "active", employment_status: "active", is_active: true },
-  });
-
-  return jsonResponse(200, {
-    message: "Account activation repaired successfully",
-    employee_id: employee.id,
-    user_id: userId,
   });
 }
 

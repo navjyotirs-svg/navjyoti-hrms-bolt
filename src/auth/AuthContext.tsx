@@ -75,13 +75,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(profileData as UserProfile)
 
     if (!profileData.organization_id) {
-      setProfileError('No organization membership found. Please contact your administrator.')
+      setProfileError('No organization is linked to your account. Please contact your administrator.')
+      setPermissions([])
+      return
+    }
+
+    if (profileData.status === 'suspended') {
+      setProfileError('Your account has been suspended. Please contact your administrator.')
+      setPermissions([])
+      return
+    }
+
+    if (profileData.status === 'terminated' || profileData.status === 'offboarded') {
+      setProfileError('Your account has been deactivated. Please contact your administrator.')
       setPermissions([])
       return
     }
 
     if (!profileData.is_active) {
-      setProfileError('Your account is not active. Please contact your administrator.')
+      setProfileError('Your account is not active. Please contact your administrator to activate your account.')
       setPermissions([])
       return
     }
@@ -96,13 +108,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     devLog('Membership query:', { data: membership, error: membershipErr?.message })
 
     if (membershipErr || !membership) {
-      setProfileError('No active organization membership found. Please contact your administrator.')
+      setProfileError('No organization membership found for your account. Please contact your administrator.')
       setPermissions([])
       return
     }
 
     if (!membership.is_active) {
-      setProfileError('Your organization membership is not active. Please contact your administrator.')
+      setProfileError('Your organization membership is not active. Please contact your administrator to activate your membership.')
       setPermissions([])
       return
     }

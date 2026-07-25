@@ -80,12 +80,13 @@ export function SetPasswordPage() {
       return
     }
 
-    // Activate the account server-side: synchronizes user_profiles, employees, and org membership
+    // Activate the account server-side via atomic RPC
+    let activationError: string | null = null
     try {
       const { data: sessionData } = await supabase.auth.getSession()
       const accessToken = sessionData.session?.access_token
       if (accessToken) {
-        await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-employee`, {
+        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-employee`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -94,9 +95,23 @@ export function SetPasswordPage() {
           },
           body: JSON.stringify({ action: 'activate_account' }),
         })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          activationError = errorData.error || `Activation failed (${response.status})`
+        }
+      } else {
+        activationError = 'No session found for activation'
       }
-    } catch {
-      // Activation is best-effort here; the user can still sign in and the admin can repair
+    } catch (err) {
+      activationError = err instanceof Error ? err.message : 'Network error during activation'
+    }
+
+    if (activationError) {
+      setError(`Password created, but account activation failed: ${activationError}. Please contact your administrator.`)
+      setSubmitting(false)
+      await supabase.auth.signOut()
+      return
     }
 
     setSuccess(true)

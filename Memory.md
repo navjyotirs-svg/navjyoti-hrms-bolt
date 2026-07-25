@@ -1438,3 +1438,187 @@ Previous implementation used 540 elapsed minutes as the FULL_DAY threshold. The 
 - Browser smoke test not performed (no browser automation available).
 - The monthly summary fetches all records client-side and computes in JS — for large organizations this should be moved to a server-side RPC.
 - The `handleActivateAccount` uses sequential admin queries (not a single SQL transaction) — if one step fails, partial activation could occur. A future improvement would use a single SECURITY DEFINER RPC.
+
+---
+
+## Critical Production Bug-Fix: Activation, Attendance Policy, Realtime — completed 2026-07-25
+
+### 1. EMPLOYEE INVITATION AND ACTIVATION FLOW
+
+#### Exact root cause
+The `handleActivateAccount` function in `invite-employee` performed 5 sequential, non-atomic database updates via the Supabase admin client. Steps 2-5 did not check for errors. If step 1 (user_profiles activation) succeeded but step 4 (user_organization_memberships activation) failed — due to a transient DB error, RLS issue, or network blip — the function still returned HTTP 200 "Account activated successfully." The user was left in a split state: `user_profiles.is_active = true` but `user_organization_memberships.is_active = false`. On next login, AuthContext line 104 fired "Your organization membership is not active."
+
+Compounding this, `SetPasswordPage.tsx` wrapped the activation fetch in a try/catch with an empty catch block and never checked `response.ok` or parsed the JSON. Any server-side failure was silently swallowed, and the UI reported success.
+
+#### Database state confirmed
+EMP010 (Vipin, navjyoti.ttt@gmail.com) was in exactly this split state: `profile_status='active'`, `profile_active=true`, `employee_active=true`, but `membership_active=false`. This was the user who reported the error. Fixed immediately via SQL UPDATE.
+
+#### Fix — Atomic SECURITY DEFINER RPC
+Created two atomic PL/pgSQL functions in migration `fix_atomic_activation_rpc`:
+
+1. `activate_employee_account()` — called by the employee after password setup:
+   - Resolves user from `auth.uid()` (no client-supplied user ID)
+   - Finds matching profile, employee, and membership rows
+   - Verifies account is not suspended/terminated/offboarded
+   - Atomically activates: user_profiles (status='active', is_active=true), employees (employment_status='active' or 'on_probation' based on probation_end_date), user_organization_memberships (is_active=true), employee_status_history, audit_logs
+   - All within a single BEGIN/EXCEPTION block — if any step fails, all roll back
+   - Returns JSON with success/error/message
+
+2. `repair_employee_account(p_employee_id uuid)` — called by admin (Director/HR):
+   - Requires employee.create or employee.status.manage permission
+   - Checks and repairs only inconsistent records (profile, employee, membership)
+   - Idempotent — safe to call multiple times
+   - Cannot activate suspended/terminated/offboarded accounts
+   - Creates audit history
+
+#### Edge function changes
+- `invite-employee/index.ts` — complete rewrite:
+  - `activate_account` action now calls `activate_employee_account()` RPC via the caller's client (not admin client) — RLS-enforced, atomic
+  - `repair_activation` action now calls `repair_employee_account()` RPC
+  - `activate_account` no longer requires `employee.create` permission (employee activates their own account)
+  - `repair_activation` requires `employee.create` or `employee.status.manage`
+  - `resend_invitation` and default invite still require `employee.create`
+  - Removed all non-atomic sequential update code
+
+- `manage-employee/index.ts` — fixed latent bug:
+  - `change_status` to active/confirmed/on_probation now also activates `user_organization_memberships.is_active = true` (previously only updated user_profiles, leaving membership inactive)
+
+#### Frontend changes
+- `SetPasswordPage.tsx` — activation result is now verified:
+  - Checks `response.ok` and parses JSON error
+  - If activation fails, shows specific error message and does NOT report success
+  - Signs out and returns to login with error displayed
+
+- `AuthContext.tsx` — enhanced error differentiation:
+  - Distinguishes: missing profile, no organization linked, suspended, terminated/offboarded, inactive profile, missing membership, inactive membership, missing role, missing permissions
+  - Each has a specific, actionable error message
+
+- `EmployeeDirectoryPage.tsx` — derived status improvements:
+  - 8 statuses: Invitation Sent, Password Setup Pending, Activation Pending, Active, Suspended, Inactive, Offboarded, Configuration Error
+  - "Configuration Error" status (red badge) for inconsistent records (e.g., profile active but membership inactive)
+  - Tooltip on status badge shows: Authentication (Ready/Pending), Profile (Active/Inactive), Membership (Active/Inactive), Employee status, Role configured
+  - "Repair Account Activation" button for Configuration Error, Activation Pending, and Password Setup Pending states
+  - Removed old "Activate" button (replaced by atomic repair)
+  - Status changes and offboarding update local state immediately without reload
+
+### 2. ATTENDANCE POLICY — 540-MINUTE FULL DAY
+
+#### Root cause
+Previous fix (2026-07-25) incorrectly changed FULL_DAY threshold to 480 minutes with a 60-minute grace period. This contradicted the PRD, Architecture, Rules, and the confirmed attendance policy which all specify 540 elapsed minutes for Full Day.
+
+#### Final confirmed attendance rule
+- `required_checkout_at = check_in_at + 540 minutes`
+- `actual_elapsed_minutes >= 540` → FULL_DAY
+- `actual_elapsed_minutes < 540` → HALF_DAY
+- No checkout → PENDING_CHECKOUT
+- No 8-hour Full Day eligibility
+- No `full_day_eligible_at` at 480 minutes
+- No 60-minute early checkout grace
+- No grace minutes used
+- No Late status, Short Attendance status, salary deductions, or payroll impact
+- Policy version: `POLICY_540_FULL_DAY`
+
+#### 8-hour eligibility code removed
+- `attendance-action/index.ts`: Removed `REQUIRED_WORK_MINUTES` (480), `REQUIRED_BREAK_MINUTES` (60) constants. Removed `full_day_eligible_at` computation. Removed `daily_early_checkout_grace`, `displayed_shift_minutes`, `required_work_minutes`, `required_break_minutes` from check-in insert. Changed checkout status to use `required_total_minutes` (540) as threshold. Changed `attendance_policy_version` to string `POLICY_540_FULL_DAY`.
+- `attendance-correction/index.ts`: Changed status recalculation to use `required_total_minutes` (540) instead of `required_work_minutes` (480). Removed `full_day_eligible_at` recalculation. Removed `displayed_shift_minutes` reference.
+- `attendance-scheduler/index.ts`: Removed full-day eligible reminder (480-minute reminder). Removed `full_day_eligible_at`, `full_day_reminder_sent_at`, `standard_shift_reminder_sent_at` from select. Only 2 reminders now: pre-checkout (2 min before 540) and checkout-ready (at 540). Updated checkout-ready message to "You have completed the standard 9-hour attendance duration. You may now check out."
+- `AttendancePage.tsx`: Removed "Full Day Eligible At" card. Updated timer note to "You must complete the standard 9-hour attendance duration to qualify for Full Day. Early checkout will be marked Half Day." / "You have completed the standard 9-hour attendance duration and now qualify for Full Day."
+- `Dashboard.tsx`: Removed `full_day_eligible_at` from state and queries. Removed "Full Day Eligible At" display. Removed 480-minute and 480-540 minute conditional messages. Replaced with single < 540 and >= 540 message.
+
+#### Reminders (final)
+1. Pre-checkout reminder: `required_checkout_at - 2 minutes` (configurable via ATTENDANCE_PRE_ALERT_MINUTES)
+2. Checkout-ready reminder: at `required_checkout_at` (540 minutes)
+- Both idempotent via dedup_key
+- No 480-minute full-day eligible reminder
+
+### 3. APPLICATION-WIDE REALTIME UPDATES
+
+#### Realtime architecture
+Database change → Supabase realtime event → central RealtimeProvider → invalidate relevant query keys → affected screen refetches automatically → UI updates without navigation or reload
+
+#### Central RealtimeProvider (`src/components/RealtimeProvider.tsx`)
+- Starts only after authentication + profile + permissions loaded
+- Subscribes to all 25 tables via a single channel with `postgres_changes` filter
+- Prevents duplicate subscriptions (channelRef check)
+- Unsubscribes on logout
+- Auto-reconnects after disconnect (5-second delay)
+- Fetches missed updates after reconnect (refetch critical data if >10s since last sync)
+- Exposes connection state: connecting, connected, reconnecting, disconnected, error
+
+#### Query invalidation map (`src/lib/queryClient.ts`)
+- Maps 25 database tables to relevant TanStack Query keys
+- Example: `employees` change → invalidates employees, employee-directory, employee-profile, organization-dashboard, activation-summary, director-dashboard, hr-dashboard
+- Example: `attendance_records` change → invalidates my-attendance, attendance-management, attendance-today, monthly-attendance, director-dashboard, hr-dashboard
+- Avoids invalidating every query after every event
+
+#### Tables subscribed to realtime (via migration `enable_realtime_publication`)
+employees, user_profiles, user_organization_memberships, employee_status_history, attendance_records, attendance_corrections, leave_requests, leave_balances, leave_ledger, calendar_events, holiday_calendar_dates, tasks, task_assignments, task_status_history, task_submissions, task_comments, tickets, ticket_comments, ticket_history, daily_reports, daily_report_history, daily_report_comments, notifications, announcements, management_follow_ups
+
+- All tables added to `supabase_realtime` publication
+- `REPLICA IDENTITY FULL` set on key tables (employees, attendance_records, tasks, tickets, leave_requests, daily_reports, notifications) for old+new row data in events
+- RLS remains enforced on all realtime events — users only receive events for rows they can read
+
+#### TanStack Query setup
+- `QueryClient` created with `staleTime: 30s`, `refetchOnWindowFocus: true`, `refetchOnReconnect: true`
+- Wrapped in `QueryClientProvider` in App.tsx
+- `RealtimeProvider` wraps the router, inside `AuthProvider`
+
+#### Connection indicator (`src/components/RealtimeIndicator.tsx`)
+- Small colored dot in the Topbar next to the notification bell
+- Green = connected, Amber = connecting/reconnecting, Red = disconnected/error
+- Label shown in dev mode only; production shows just the dot
+- Non-intrusive — does not block normal API queries when disconnected
+
+#### Fallback refresh
+- Critical data (notifications, attendance-today, my-attendance) refetched every 30 seconds
+- Window focus triggers refetch on all active queries (TanStack default)
+- Reconnect triggers refetch on all active queries (TanStack default)
+- No aggressive polling on all tables
+
+#### Realtime security
+- RLS remains mandatory — realtime does not replace RLS
+- Users only receive events for rows they can read (RLS applies to realtime)
+- Employee: own data, own tasks, own attendance, own leave, own tickets, own reports, own notifications
+- Manager: reporting subtree only
+- HR/Director: authorized organization scope
+- System Administrator: only explicitly permitted technical data
+- Cross-organization realtime events are inaccessible (RLS-enforced)
+
+### FILES CHANGED
+
+1. `supabase/functions/invite-employee/index.ts` — complete rewrite using atomic RPCs
+2. `supabase/functions/manage-employee/index.ts` — fixed membership sync on reactivation
+3. `supabase/functions/attendance-action/index.ts` — 540-minute threshold, removed 480/grace
+4. `supabase/functions/attendance-correction/index.ts` — 540-minute threshold, removed 480
+5. `supabase/functions/attendance-scheduler/index.ts` — removed full-day eligible reminder
+6. `src/auth/SetPasswordPage.tsx` — verifies activation result, shows errors
+7. `src/auth/AuthContext.tsx` — specific error messages for all failure states
+8. `src/pages/EmployeeDirectoryPage.tsx` — Configuration Error status, tooltip, removed old Activate button
+9. `src/pages/AttendancePage.tsx` — removed Full Day Eligible At, updated messages
+10. `src/pages/Dashboard.tsx` — removed full_day_eligible_at, updated messages
+11. `src/lib/queryClient.ts` — NEW: QueryClient + query invalidation map
+12. `src/components/RealtimeProvider.tsx` — NEW: central realtime provider
+13. `src/components/RealtimeIndicator.tsx` — NEW: connection indicator
+14. `src/components/Topbar.tsx` — added RealtimeIndicator
+15. `src/App.tsx` — wrapped with QueryClientProvider and RealtimeProvider
+
+### MIGRATIONS APPLIED
+1. `fix_atomic_activation_rpc` — `activate_employee_account()` and `repair_employee_account()` SECURITY DEFINER RPCs
+2. `enable_realtime_publication` — 25 tables added to supabase_realtime publication, REPLICA IDENTITY FULL on key tables
+
+### EDGE FUNCTIONS DEPLOYED
+- invite-employee, manage-employee, attendance-action, attendance-correction, attendance-scheduler
+
+### TESTS AND RESULTS
+- TypeScript: PASS
+- Production build: PASS (739.72 kB JS / 33.19 kB CSS)
+- Push unit tests: 22/22 PASS
+- Activation RPC: deployed and tested (EMP010 membership fixed)
+- Realtime publication: 25 tables confirmed in supabase_realtime
+
+### REMAINING RISKS
+- Existing attendance records (pre-fix) still have old 480-threshold status — only new check-outs use 540 threshold. A backfill migration could recalculate old records if needed.
+- Browser smoke test not performed (no browser automation available)
+- The realtime subscription uses `table: '*'` filter on a single channel — for very large organizations, per-table channels with row-level filters may be needed for performance
+- TanStack Query keys are defined but not all pages use `useQuery` yet — pages using direct `useEffect` + `useState` fetching will need to migrate to `useQuery` to benefit from automatic invalidation refetch
+- The monthly summary fetches all records client-side and computes in JS — for large organizations this should be moved to a server-side RPC

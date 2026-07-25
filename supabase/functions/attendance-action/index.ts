@@ -8,9 +8,7 @@ const corsHeaders = {
 };
 
 const REQUIRED_TOTAL_MINUTES = 540;
-const REQUIRED_WORK_MINUTES = 480;
-const REQUIRED_BREAK_MINUTES = 60;
-const ATTENDANCE_POLICY_VERSION = 1;
+const ATTENDANCE_POLICY_VERSION = "POLICY_540_FULL_DAY";
 
 interface CheckInRequest {
   action: "check_in";
@@ -147,7 +145,6 @@ async function handleCheckIn(
   const now = new Date();
   const attendanceDate = now.toISOString().slice(0, 10);
   const requiredCheckoutAt = new Date(now.getTime() + totalMinutes * 60 * 1000);
-  const fullDayEligibleAt = new Date(now.getTime() + REQUIRED_WORK_MINUTES * 60 * 1000);
 
   // Check for duplicate active record
   const { data: existing } = await admin
@@ -172,17 +169,12 @@ async function handleCheckIn(
       attendance_date: attendanceDate,
       check_in_at: now.toISOString(),
       required_checkout_at: requiredCheckoutAt.toISOString(),
-      full_day_eligible_at: fullDayEligibleAt.toISOString(),
-      required_work_minutes: REQUIRED_WORK_MINUTES,
-      required_break_minutes: REQUIRED_BREAK_MINUTES,
       required_total_minutes: totalMinutes,
-      displayed_shift_minutes: totalMinutes,
-      daily_early_checkout_grace: 60,
       attendance_policy_version: ATTENDANCE_POLICY_VERSION,
       final_status: "PENDING_CHECKOUT",
       created_by: callerId,
     })
-    .select("id, check_in_at, required_checkout_at, full_day_eligible_at, required_total_minutes, displayed_shift_minutes, final_status")
+    .select("id, check_in_at, required_checkout_at, required_total_minutes, final_status")
     .maybeSingle();
 
   if (insertError || !record) {
@@ -220,9 +212,7 @@ async function handleCheckIn(
     record_id: record.id,
     check_in_at: record.check_in_at,
     required_checkout_at: record.required_checkout_at,
-    full_day_eligible_at: record.full_day_eligible_at,
     required_total_minutes: record.required_total_minutes,
-    displayed_shift_minutes: record.displayed_shift_minutes,
     final_status: record.final_status,
   });
 }
@@ -270,7 +260,7 @@ async function handleCheckOut(
   // Find active attendance record
   const { data: record, error: recordError } = await admin
     .from("attendance_records")
-    .select("id, check_in_at, required_checkout_at, full_day_eligible_at, required_work_minutes, required_total_minutes, displayed_shift_minutes, final_status")
+    .select("id, check_in_at, required_checkout_at, required_total_minutes, final_status")
     .eq("employee_id", employee.id as string)
     .eq("attendance_date", today)
     .eq("final_status", "PENDING_CHECKOUT")
@@ -285,12 +275,12 @@ async function handleCheckOut(
   const elapsedMs = now.getTime() - checkInTime.getTime();
   const elapsedMinutes = Math.floor(elapsedMs / (1000 * 60));
 
-  // Determine final status — FULL_DAY at >= required_work_minutes (480), HALF_DAY below
-  const requiredWork = record.required_work_minutes ?? REQUIRED_WORK_MINUTES;
-  const finalStatus = elapsedMinutes >= requiredWork ? "FULL_DAY" : "HALF_DAY";
+  // Determine final status — FULL_DAY at >= required_total_minutes (540), HALF_DAY below
+  const requiredTotal = record.required_total_minutes ?? REQUIRED_TOTAL_MINUTES;
+  const finalStatus = elapsedMinutes >= requiredTotal ? "FULL_DAY" : "HALF_DAY";
   const statusReason = finalStatus === "FULL_DAY"
-    ? `Checked out at ${elapsedMinutes} minutes (full-day threshold: ${requiredWork})`
-    : `Checked out early at ${elapsedMinutes} minutes (full-day threshold: ${requiredWork})`;
+    ? `Checked out at ${elapsedMinutes} minutes (full-day threshold: ${requiredTotal})`
+    : `Checked out early at ${elapsedMinutes} minutes (full-day threshold: ${requiredTotal})`;
 
   // Update attendance record
   const { error: updateError } = await admin
@@ -354,8 +344,7 @@ async function handleCheckOut(
       event_data: {
         final_status: finalStatus,
         elapsed_minutes: elapsedMinutes,
-        required_work_minutes: requiredWork,
-        displayed_shift_minutes: record.displayed_shift_minutes,
+        required_total_minutes: requiredTotal,
       },
       performed_by: callerId,
     },
@@ -380,8 +369,7 @@ async function handleCheckOut(
     record_id: record.id,
     check_out_at: now.toISOString(),
     elapsed_minutes: elapsedMinutes,
-    required_work_minutes: requiredWork,
-    displayed_shift_minutes: record.displayed_shift_minutes,
+    required_total_minutes: requiredTotal,
     final_status: finalStatus,
   });
 }

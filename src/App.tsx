@@ -1,6 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { AuthProvider, useAuth } from '@/auth/AuthContext'
+import { RealtimeProvider } from '@/components/RealtimeProvider'
+import { queryClient } from '@/lib/queryClient'
 import { LoginPage } from '@/auth/LoginPage'
 import { ForgotPasswordPage } from '@/auth/ForgotPasswordPage'
 import { ResetPasswordPage } from '@/auth/ResetPasswordPage'
@@ -259,10 +262,14 @@ function AppRoutes() {
 
 export function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <RealtimeProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </RealtimeProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   )
 }

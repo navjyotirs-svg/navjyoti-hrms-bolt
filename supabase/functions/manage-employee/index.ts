@@ -172,12 +172,19 @@ async function handleChangeStatus(
       .eq("id", employee.user_id as string);
   }
 
-  // If reactivated (active, confirmed, on_probation), enable account
+  // If reactivated (active, confirmed, on_probation), enable account and membership
   if (["active", "confirmed", "on_probation"].includes(body.new_status)) {
     await admin
       .from("user_profiles")
       .update({ status: "active", is_active: true, updated_at: new Date().toISOString() })
       .eq("id", employee.user_id as string);
+
+    // Also activate organization membership
+    await admin
+      .from("user_organization_memberships")
+      .update({ is_active: true })
+      .eq("user_id", employee.user_id as string)
+      .eq("organization_id", employee.organization_id as string);
   }
 
   // Write status history

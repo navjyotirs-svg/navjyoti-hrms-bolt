@@ -26,18 +26,30 @@ type DirectoryStatus =
   | 'Suspended'
   | 'Inactive'
   | 'Offboarded'
+  | 'Configuration Error'
 
 function deriveDirectoryStatus(e: EmployeeWithRole): DirectoryStatus {
   if (e.employment_status === 'offboarded') return 'Offboarded'
-  if (e.employment_status === 'invited' || e.profile_status === 'pending_activation') {
-    if (e.profile_status === 'pending_activation' && e.employment_status !== 'invited') return 'Activation Pending'
-    return 'Invitation Sent'
-  }
-  if (e.profile_status === 'pending_activation') return 'Password Setup Pending'
-  if (e.profile_status === 'disabled') return 'Suspended'
+  if (e.employment_status === 'suspended' || e.profile_status === 'disabled') return 'Suspended'
+  if (e.employment_status === 'invited' && e.profile_status === 'pending_activation') return 'Invitation Sent'
+  if (e.employment_status === 'invited' && !e.profile_status) return 'Invitation Sent'
+  if (e.profile_status === 'pending_activation' && e.employment_status !== 'invited') return 'Password Setup Pending'
+  // All records exist — check for full consistency
+  if (e.profile_status === 'active' && e.profile_is_active && e.is_active && e.membership_active) return 'Active'
+  // Partial activation — records are inconsistent
+  if (e.profile_status === 'active' || e.employment_status === 'active') return 'Configuration Error'
   if (!e.profile_is_active || !e.is_active) return 'Inactive'
-  if (e.profile_status === 'active' && e.is_active && e.membership_active) return 'Active'
   return 'Activation Pending'
+}
+
+function getConfigDetails(e: EmployeeWithRole): { label: string; value: string }[] {
+  return [
+    { label: 'Authentication', value: e.user_id ? 'Ready' : 'Pending' },
+    { label: 'Profile', value: e.profile_status === 'active' ? 'Active' : e.profile_status ?? 'Missing' },
+    { label: 'Membership', value: e.membership_active ? 'Active' : e.membership_active === false ? 'Inactive' : 'Missing' },
+    { label: 'Employee', value: e.employment_status },
+    { label: 'Role', value: e.role ?? 'Not configured' },
+  ]
 }
 
 export function EmployeeDirectoryPage() {
@@ -50,7 +62,6 @@ export function EmployeeDirectoryPage() {
   const [resending, setResending] = useState<string | null>(null)
   const [resendMessage, setResendMessage] = useState<string | null>(null)
   const [resendLink, setResendLink] = useState<string | null>(null)
-  const [activating, setActivating] = useState<string | null>(null)
   const [repairing, setRepairing] = useState<string | null>(null)
   const [statusChanging, setStatusChanging] = useState<string | null>(null)
   const canCreate = permissions.includes('employee.create')
@@ -151,48 +162,6 @@ export function EmployeeDirectoryPage() {
       setResendMessage(err instanceof Error ? err.message : 'Failed to resend invitation')
     }
     setResending(null)
-  }
-
-  async function handleActivate(employeeId: string) {
-    setActivating(employeeId)
-    setResendMessage(null)
-    try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const accessToken = sessionData.session?.access_token
-      if (!accessToken) throw new Error('No session')
-
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-employee`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({
-          action: 'change_status',
-          employee_id: employeeId,
-          new_status: 'active',
-          reason: 'Manually activated by administrator',
-        }),
-      })
-
-      const data = await response.json()
-      if (!response.ok) {
-        setResendMessage(data.error || 'Failed to activate employee')
-      } else {
-        setResendMessage('Employee activated successfully.')
-        setEmployees((prev) =>
-          prev.map((e) =>
-            e.id === employeeId
-              ? { ...e, employment_status: 'active', is_active: true }
-              : e
-          )
-        )
-      }
-    } catch (err) {
-      setResendMessage(err instanceof Error ? err.message : 'Failed to activate employee')
-    }
-    setActivating(null)
   }
 
   async function handleRepairActivation(employeeId: string) {
@@ -393,7 +362,14 @@ export function EmployeeDirectoryPage() {
                     <td>{e.designation ?? '—'}</td>
                     <td>{e.employment_type ?? '—'}</td>
                     <td>{e.work_mode ?? '—'}</td>
-                    <td><span className={`tag ${deriveDirectoryStatus(e) === 'Active' ? 'tag-teal' : 'tag-gray'}`}>{deriveDirectoryStatus(e)}</span></td>
+                    <td>
+                      <span
+                        className={`tag ${deriveDirectoryStatus(e) === 'Active' ? 'tag-teal' : deriveDirectoryStatus(e) === 'Configuration Error' ? 'tag-rose' : 'tag-gray'}`}
+                        title={getConfigDetails(e).map((d) => `${d.label}: ${d.value}`).join(' | ')}
+                      >
+                        {deriveDirectoryStatus(e)}
+                      </span>
+                    </td>
                     <td>
                       {canCreate && deriveDirectoryStatus(e) === 'Invitation Sent' && (
                         <button
@@ -405,27 +381,16 @@ export function EmployeeDirectoryPage() {
                           {resending === e.id ? 'Sending…' : 'Resend Invitation'}
                         </button>
                       )}
-                      {canManageStatus && deriveDirectoryStatus(e) !== 'Active' && deriveDirectoryStatus(e) !== 'Offboarded' && (
-                        <>
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            disabled={activating === e.id}
-                            onClick={() => handleActivate(e.id)}
-                            style={{ marginLeft: canCreate && deriveDirectoryStatus(e) === 'Invitation Sent' ? 'var(--space-2)' : 0 }}
-                          >
-                            {activating === e.id ? 'Activating…' : 'Activate'}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            disabled={repairing === e.id}
-                            onClick={() => handleRepairActivation(e.id)}
-                            style={{ marginLeft: 'var(--space-2)' }}
-                          >
-                            {repairing === e.id ? 'Repairing…' : 'Repair Account Activation'}
-                          </button>
-                        </>
+                      {canManageStatus && (deriveDirectoryStatus(e) === 'Activation Pending' || deriveDirectoryStatus(e) === 'Configuration Error' || deriveDirectoryStatus(e) === 'Password Setup Pending') && (
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          disabled={repairing === e.id}
+                          onClick={() => handleRepairActivation(e.id)}
+                          style={{ marginLeft: canCreate && deriveDirectoryStatus(e) === 'Invitation Sent' ? 'var(--space-2)' : 0 }}
+                        >
+                          {repairing === e.id ? 'Repairing…' : 'Repair Account Activation'}
+                        </button>
                       )}
                       {canManageStatus && deriveDirectoryStatus(e) === 'Active' && (
                         <select

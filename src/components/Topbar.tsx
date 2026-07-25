@@ -4,6 +4,7 @@ import { ROLE_LABELS } from '@/types/roles'
 import { NotificationBell } from '@/components/NotificationBell'
 import { CheckoutModal } from '@/components/CheckoutModal'
 import { NavjyotiLogo } from '@/components/NavjyotiLogo'
+import { RealtimeIndicator } from '@/components/RealtimeIndicator'
 import { supabase } from '@/lib/supabase'
 import { checkIn, fetchTodayAttendance, formatTimeRemaining } from '@/lib/attendance'
 import '@/styles/shell.css'
@@ -108,6 +109,7 @@ export function Topbar({ title, soundEnabled }: TopbarProps) {
           </div>
         )}
         {profile?.id && <NotificationBell userId={profile.id} soundEnabled={soundEnabled} />}
+        <RealtimeIndicator />
         <div className="topbar-user">
           <span className="topbar-user-name">{profile?.full_name ?? profile?.email}</span>
           <span className="topbar-user-role">

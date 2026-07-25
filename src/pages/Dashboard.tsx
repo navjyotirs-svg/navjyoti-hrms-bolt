@@ -29,7 +29,6 @@ export function Dashboard() {
   const [todayAttendance, setTodayAttendance] = useState<{
     check_in_at: string
     required_checkout_at: string
-    full_day_eligible_at: string | null
     final_status: string
     actual_elapsed_minutes: number | null
   } | null>(null)
@@ -218,11 +217,11 @@ export function Dashboard() {
           const today = new Date().toISOString().slice(0, 10)
           const { data: att } = await supabase
             .from('attendance_records')
-            .select('check_in_at, required_checkout_at, full_day_eligible_at, final_status, actual_elapsed_minutes')
+            .select('check_in_at, required_checkout_at, final_status, actual_elapsed_minutes')
             .eq('employee_id', empData.id)
             .eq('attendance_date', today)
             .maybeSingle()
-          if (!cancelled) setTodayAttendance(att as { check_in_at: string; required_checkout_at: string; full_day_eligible_at: string | null; final_status: string; actual_elapsed_minutes: number | null } | null)
+          if (!cancelled) setTodayAttendance(att as { check_in_at: string; required_checkout_at: string; final_status: string; actual_elapsed_minutes: number | null } | null)
         }
 
         if (!cancelled) {
@@ -262,7 +261,6 @@ export function Dashboard() {
           setTodayAttendance(rec ? {
             check_in_at: rec.check_in_at,
             required_checkout_at: rec.required_checkout_at,
-            full_day_eligible_at: (rec as { full_day_eligible_at?: string }).full_day_eligible_at ?? null,
             final_status: rec.final_status,
             actual_elapsed_minutes: (rec as { actual_elapsed_minutes?: number }).actual_elapsed_minutes ?? null,
           } : null)
@@ -291,7 +289,6 @@ export function Dashboard() {
           setTodayAttendance(rec ? {
             check_in_at: rec.check_in_at,
             required_checkout_at: rec.required_checkout_at,
-            full_day_eligible_at: (rec as { full_day_eligible_at?: string }).full_day_eligible_at ?? null,
             final_status: rec.final_status,
             actual_elapsed_minutes: (rec as { actual_elapsed_minutes?: number }).actual_elapsed_minutes ?? null,
           } : null)
@@ -333,12 +330,10 @@ export function Dashboard() {
                   <span className="dashboard-status-label">Standard Checkout Time</span>
                   <span className="dashboard-status-value mono">{formatTimestamp(todayAttendance.required_checkout_at)}</span>
                 </div>
-                {todayAttendance.full_day_eligible_at && (
-                  <div className="dashboard-status-row">
-                    <span className="dashboard-status-label">Full Day Eligible At</span>
-                    <span className="dashboard-status-value mono">{formatTimestamp(todayAttendance.full_day_eligible_at)}</span>
-                  </div>
-                )}
+                <div className="dashboard-status-row">
+                  <span className="dashboard-status-label">Standard Shift</span>
+                  <span className="dashboard-status-value">9 Hours</span>
+                </div>
                 <div className="dashboard-status-row">
                   <span className="dashboard-status-label">Status</span>
                   <span className="dashboard-status-value">
@@ -355,19 +350,14 @@ export function Dashboard() {
                     </span>
                   </div>
                 )}
-                {todayAttendance.final_status === 'PENDING_CHECKOUT' && todayAttendance.actual_elapsed_minutes !== null && todayAttendance.actual_elapsed_minutes < 480 && (
+                {todayAttendance.final_status === 'PENDING_CHECKOUT' && todayAttendance.actual_elapsed_minutes !== null && todayAttendance.actual_elapsed_minutes < 540 && (
                   <div className="form-success" style={{ marginTop: '8px' }}>
-                    Complete 8 working hours to qualify for Full Day.
-                  </div>
-                )}
-                {todayAttendance.final_status === 'PENDING_CHECKOUT' && todayAttendance.actual_elapsed_minutes !== null && todayAttendance.actual_elapsed_minutes >= 480 && todayAttendance.actual_elapsed_minutes < 540 && (
-                  <div className="form-success" style={{ marginTop: '8px' }}>
-                    You now qualify for Full Day. Your standard checkout remains {formatTimestamp(todayAttendance.required_checkout_at)}.
+                    You must complete the standard 9-hour attendance duration to qualify for Full Day. Early checkout will be marked Half Day.
                   </div>
                 )}
                 {todayAttendance.final_status === 'PENDING_CHECKOUT' && todayAttendance.actual_elapsed_minutes !== null && todayAttendance.actual_elapsed_minutes >= 540 && (
                   <div className="form-success" style={{ marginTop: '8px' }}>
-                    You have completed the standard 9-hour shift.
+                    You have completed the standard 9-hour attendance duration and now qualify for Full Day.
                   </div>
                 )}
                 {todayAttendance.final_status === 'PENDING_CHECKOUT' && (
