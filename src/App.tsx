@@ -24,6 +24,7 @@ import { AccountSettingsPage } from '@/pages/AccountSettingsPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { AttendanceManagementPage } from '@/pages/AttendanceManagementPage'
 import { AttendanceCorrectionsPage } from '@/pages/AttendanceCorrectionsPage'
+import { MonthlyAttendancePage } from '@/pages/MonthlyAttendancePage'
 import { MyLeavePage } from '@/pages/MyLeavePage'
 import { TeamLeavePage } from '@/pages/TeamLeavePage'
 import { LeaveManagementPage } from '@/pages/LeaveManagementPage'
@@ -181,6 +182,9 @@ function AppRoutes() {
         } />
         <Route path="/attendance-corrections" element={
           <PermissionRoute permissions={['attendance.correct_request_self', 'attendance.correct_manage']}><AttendanceCorrectionsPage /></PermissionRoute>
+        } />
+        <Route path="/monthly-attendance" element={
+          <PermissionRoute permissions={['attendance.read_all', 'attendance.report_read']}><MonthlyAttendancePage /></PermissionRoute>
         } />
         <Route path="/my-leave" element={
           <PermissionRoute permissions={['leave.read_self', 'leave.request_self']}><MyLeavePage /></PermissionRoute>

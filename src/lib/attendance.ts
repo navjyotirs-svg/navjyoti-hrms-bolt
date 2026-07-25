@@ -202,6 +202,161 @@ export async function fetchAllCorrections(orgId: string): Promise<AttendanceCorr
   return (data ?? []) as AttendanceCorrection[]
 }
 
+export interface MonthlyAttendanceSummaryRow {
+  employee_id: string
+  employee_code: string
+  full_name: string
+  department: string | null
+  branch: string | null
+  present: number
+  half_day: number
+  absent: number
+  approved_leave: number
+  holiday: number
+  weekly_off: number
+  pending_checkout: number
+  working_days: number
+  attendance_percent: number
+}
+
+export async function fetchMonthlyAttendanceSummary(
+  orgId: string,
+  year: number,
+  month: number
+): Promise<MonthlyAttendanceSummaryRow[]> {
+  const startDate = `${year}-${String(month).padStart(2, '0')}-01`
+  const endDay = new Date(year, month, 0).getDate()
+  const endDate = `${year}-${String(month).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`
+
+  const { data: records, error } = await supabase
+    .from('attendance_records')
+    .select(`
+      final_status,
+      attendance_date,
+      employees!inner (
+        id,
+        employee_code,
+        full_name,
+        organization_id,
+        department_id,
+        branch_id,
+        departments ( name ),
+        branches ( name )
+      )
+    `)
+    .eq('employees.organization_id', orgId)
+    .gte('attendance_date', startDate)
+    .lte('attendance_date', endDate)
+
+  if (error) throw new Error(error.message)
+
+  const { data: approvedLeaves, error: leaveError } = await supabase
+    .from('leave_requests')
+    .select(`
+      from_date,
+      to_date,
+      status,
+      employees!inner ( id, organization_id )
+    `)
+    .eq('employees.organization_id', orgId)
+    .eq('status', 'APPROVED')
+    .or(`and(from_date.lte.${endDate},to_date.gte.${startDate})`)
+
+  if (leaveError) throw new Error(leaveError.message)
+
+  const { data: holidays, error: holidayError } = await supabase
+    .from('holiday_calendar_dates')
+    .select(`date, holiday_calendars!inner ( organization_id )`)
+    .eq('holiday_calendars.organization_id', orgId)
+    .gte('date', startDate)
+    .lte('date', endDate)
+
+  if (holidayError) throw new Error(holidayError.message)
+
+  const holidayDates = new Set((holidays ?? []).map((h: { date: string }) => h.date))
+  const sundayDates = new Set<string>()
+  for (let d = 1; d <= endDay; d++) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    const dow = new Date(year, month - 1, d).getDay()
+    if (dow === 0) sundayDates.add(dateStr)
+  }
+
+  const approvedLeaveDates = new Set<string>()
+  for (const lr of approvedLeaves ?? []) {
+    const from = lr.from_date as string
+    const to = lr.to_date as string
+    const fromTime = new Date(from).getTime()
+    const toTime = new Date(to).getTime()
+    const empId = (lr.employees as unknown as { id: string }).id
+    for (let t = fromTime; t <= toTime; t += 86400000) {
+      const ds = new Date(t).toISOString().slice(0, 10)
+      if (ds >= startDate && ds <= endDate) approvedLeaveDates.add(`${empId}:${ds}`)
+    }
+  }
+
+  const employeeMap = new Map<string, MonthlyAttendanceSummaryRow>()
+
+  for (const r of records ?? []) {
+    const emp = (r.employees as unknown as {
+      id: string
+      employee_code: string
+      full_name: string
+      department_id: string | null
+      branch_id: string | null
+      departments: { name: string } | null
+      branches: { name: string } | null
+    })
+    if (!employeeMap.has(emp.id)) {
+      employeeMap.set(emp.id, {
+        employee_id: emp.id,
+        employee_code: emp.employee_code,
+        full_name: emp.full_name,
+        department: emp.departments?.name ?? null,
+        branch: emp.branches?.name ?? null,
+        present: 0,
+        half_day: 0,
+        absent: 0,
+        approved_leave: 0,
+        holiday: 0,
+        weekly_off: 0,
+        pending_checkout: 0,
+        working_days: 0,
+        attendance_percent: 0,
+      })
+    }
+    const row = employeeMap.get(emp.id)!
+    const dateStr = r.attendance_date as string
+    const isSunday = sundayDates.has(dateStr)
+    const isHoliday = holidayDates.has(dateStr)
+    const hasApprovedLeave = approvedLeaveDates.has(`${emp.id}:${dateStr}`)
+
+    if (isHoliday) {
+      row.holiday++
+    } else if (isSunday) {
+      row.weekly_off++
+    } else if (hasApprovedLeave) {
+      row.approved_leave++
+    } else if (r.final_status === 'FULL_DAY') {
+      row.present++
+    } else if (r.final_status === 'HALF_DAY') {
+      row.half_day++
+    } else if (r.final_status === 'PENDING_CHECKOUT') {
+      row.pending_checkout++
+    }
+
+    if (!isSunday && !isHoliday && !hasApprovedLeave) {
+      row.working_days++
+    }
+  }
+
+  for (const row of employeeMap.values()) {
+    const units = row.present + row.half_day * 0.5
+    row.attendance_percent = row.working_days > 0 ? Math.round((units / row.working_days) * 1000) / 10 : 0
+  }
+
+  return Array.from(employeeMap.values()).sort((a, b) => a.full_name.localeCompare(b.full_name))
+}
+
 export async function fetchUnreadNotifications(): Promise<Notification[]> {
   const { data, error } = await supabase
     .from('notifications')

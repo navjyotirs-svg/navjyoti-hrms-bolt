@@ -235,7 +235,7 @@ async function handleReviewCorrection(
   // Fetch the attendance record
   const { data: record } = await admin
     .from("attendance_records")
-    .select("id, check_in_at, check_out_at, required_checkout_at, required_total_minutes, final_status, correction_version")
+    .select("id, check_in_at, check_out_at, required_checkout_at, required_work_minutes, required_total_minutes, displayed_shift_minutes, final_status, correction_version")
     .eq("id", correction.attendance_record_id)
     .maybeSingle();
 
@@ -265,17 +265,22 @@ async function handleReviewCorrection(
     if (newCheckOut) {
       const elapsedMs = new Date(newCheckOut).getTime() - new Date(newCheckIn).getTime();
       newElapsed = Math.floor(elapsedMs / (1000 * 60));
-      const totalMinutes = record.required_total_minutes ?? REQUIRED_TOTAL_MINUTES;
-      newStatus = newElapsed >= totalMinutes ? "FULL_DAY" : "HALF_DAY";
-      statusReason = `Corrected: ${newElapsed} minutes elapsed (required: ${totalMinutes})`;
+      const requiredWork = record.required_work_minutes ?? 480;
+      newStatus = newElapsed >= requiredWork ? "FULL_DAY" : "HALF_DAY";
+      statusReason = `Corrected: ${newElapsed} minutes elapsed (full-day threshold: ${requiredWork})`;
     }
 
-    // Recalculate required_checkout_at if check_in changed
+    // Recalculate required_checkout_at and full_day_eligible_at if check_in changed
     let newRequiredCheckout = record.required_checkout_at;
+    let newFullDayEligible = null as string | null;
     if (correction.requested_check_in_at) {
-      const totalMinutes = record.required_total_minutes ?? REQUIRED_TOTAL_MINUTES;
+      const shiftMinutes = record.displayed_shift_minutes ?? 540;
+      const workMinutes = record.required_work_minutes ?? 480;
       newRequiredCheckout = new Date(
-        new Date(newCheckIn).getTime() + totalMinutes * 60 * 1000
+        new Date(newCheckIn).getTime() + shiftMinutes * 60 * 1000
+      ).toISOString();
+      newFullDayEligible = new Date(
+        new Date(newCheckIn).getTime() + workMinutes * 60 * 1000
       ).toISOString();
     }
 
@@ -285,6 +290,7 @@ async function handleReviewCorrection(
         check_in_at: newCheckIn,
         check_out_at: newCheckOut,
         required_checkout_at: newRequiredCheckout,
+        full_day_eligible_at: newFullDayEligible,
         actual_elapsed_minutes: newElapsed,
         final_status: newStatus,
         status_reason: statusReason,

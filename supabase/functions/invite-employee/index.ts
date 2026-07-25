@@ -47,7 +47,12 @@ interface ActivateAccountRequest {
   action: "activate_account";
 }
 
-type FunctionRequest = InviteEmployeeRequest | ResendInvitationRequest | ActivateAccountRequest;
+interface RepairActivationRequest {
+  action: "repair_activation";
+  employee_id: string;
+}
+
+type FunctionRequest = InviteEmployeeRequest | ResendInvitationRequest | ActivateAccountRequest | RepairActivationRequest;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -123,6 +128,10 @@ Deno.serve(async (req: Request) => {
 
     if (body.action === "activate_account") {
       return handleActivateAccount(admin, callerId, callerProfile);
+    }
+
+    if (body.action === "repair_activation") {
+      return handleRepairActivation(admin, callerId, callerProfile, body as RepairActivationRequest);
     }
 
     return handleInvite(admin, callerId, callerProfile, body as InviteEmployeeRequest, orgId, appUrl);
@@ -206,15 +215,15 @@ async function handleInvite(
 
   const userId = inviteData.user.id;
 
-  // Create user_profile — active immediately at invite time
+  // Create user_profile — pending activation until password is set
   const { error: profileInsertError } = await admin.from("user_profiles").insert({
     id: userId,
     email: body.work_email,
     full_name: body.full_name,
     role: body.role,
     organization_id: orgId,
-    status: "active",
-    is_active: true,
+    status: "pending_activation",
+    is_active: false,
   });
 
   if (profileInsertError) {
@@ -234,9 +243,9 @@ async function handleInvite(
       designation: body.designation || null,
       work_email: body.work_email,
       work_mode: body.work_mode || "Office",
-      employment_status: "active",
+      employment_status: "invited",
       joining_date: body.joining_date,
-      is_active: true,
+      is_active: false,
     })
     .select("id")
     .maybeSingle();
@@ -245,10 +254,10 @@ async function handleInvite(
     return jsonError(500, `Failed to create employee record: ${empError.message}`);
   }
 
-  // Create org membership
+  // Create org membership — inactive until password is set
   const { error: membershipError } = await admin
     .from("user_organization_memberships")
-    .insert({ user_id: userId, organization_id: orgId, is_active: true });
+    .insert({ user_id: userId, organization_id: orgId, is_active: false });
 
   if (membershipError) {
     console.error("Membership creation failed:", membershipError.message);
@@ -384,7 +393,8 @@ async function handleActivateAccount(
   callerId: string,
   callerProfile: { id: string; role: string; organization_id: string }
 ): Promise<Response> {
-  // Activate the user's own profile after they set their password
+  // Activate the user's own profile after they set their password.
+  // Synchronizes user_profiles, employees, and org membership in one pass.
   const { data: profile, error: profileError } = await admin
     .from("user_profiles")
     .select("id, status, organization_id")
@@ -403,13 +413,15 @@ async function handleActivateAccount(
     return jsonResponse(200, { message: "Account already active" });
   }
 
-  // Activate profile
+  const nowIso = new Date().toISOString();
+
+  // 1. Activate user_profiles
   const { error: activateError } = await admin
     .from("user_profiles")
     .update({
       status: "active",
       is_active: true,
-      updated_at: new Date().toISOString(),
+      updated_at: nowIso,
     })
     .eq("id", callerId);
 
@@ -417,24 +429,54 @@ async function handleActivateAccount(
     return jsonError(500, `Failed to activate profile: ${activateError.message}`);
   }
 
-  // Update employee record from "invited" to "active"
+  // 2. Activate employee record
   const { data: employee } = await admin
     .from("employees")
     .select("id, employment_status")
     .eq("user_id", callerId)
     .maybeSingle();
 
-  if (employee && employee.employment_status === "invited") {
+  if (employee) {
+    const prevStatus = employee.employment_status;
     await admin
       .from("employees")
       .update({
         employment_status: "active",
-        updated_at: new Date().toISOString(),
+        is_active: true,
+        updated_at: nowIso,
       })
       .eq("id", employee.id);
+
+    // 3. Write employee status history
+    await admin.from("employee_status_history").insert({
+      employee_id: employee.id,
+      previous_status: prevStatus,
+      new_status: "active",
+      changed_by: callerId,
+      reason: "Account activated after password setup",
+    });
   }
 
-  // Audit log
+  // 4. Activate organization membership (re-link if missing)
+  const { data: membership } = await admin
+    .from("user_organization_memberships")
+    .select("id")
+    .eq("user_id", callerId)
+    .eq("organization_id", callerProfile.organization_id)
+    .maybeSingle();
+
+  if (membership) {
+    await admin
+      .from("user_organization_memberships")
+      .update({ is_active: true })
+      .eq("id", membership.id);
+  } else {
+    await admin
+      .from("user_organization_memberships")
+      .insert({ user_id: callerId, organization_id: callerProfile.organization_id, is_active: true });
+  }
+
+  // 5. Audit log
   await admin.from("audit_logs").insert({
     actor_id: callerId,
     action: "employee.activate_self",
@@ -445,6 +487,120 @@ async function handleActivateAccount(
   });
 
   return jsonResponse(200, { message: "Account activated successfully" });
+}
+
+async function handleRepairActivation(
+  admin: ReturnType<typeof createClient>,
+  callerId: string,
+  callerProfile: { id: string; role: string; organization_id: string },
+  body: RepairActivationRequest
+): Promise<Response> {
+  // Idempotent repair: inspect, re-link, activate, synchronize.
+  const { data: employee, error: empError } = await admin
+    .from("employees")
+    .select("id, user_id, organization_id, employment_status, is_active, work_email, full_name")
+    .eq("id", body.employee_id)
+    .maybeSingle();
+
+  if (empError || !employee) {
+    return jsonError(404, "Employee not found");
+  }
+
+  if (employee.organization_id !== callerProfile.organization_id) {
+    return jsonError(403, "Cross-organization access denied");
+  }
+
+  const userId = employee.user_id as string;
+  const nowIso = new Date().toISOString();
+
+  // 1. Ensure auth user exists
+  const { data: authUser, error: authError } = await admin.auth.admin.getUserById(userId);
+  if (authError || !authUser.user) {
+    // Re-invite to recreate the auth user link
+    const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(
+      employee.work_email as string,
+      { redirectTo: `${Deno.env.get("APP_URL") ?? ""}/set-password` }
+    );
+    if (inviteError) {
+      return jsonError(500, `Auth user missing and re-invite failed: ${inviteError.message}`);
+    }
+  }
+
+  // 2. Synchronize user_profiles
+  const { data: profile } = await admin
+    .from("user_profiles")
+    .select("id, status")
+    .eq("id", userId)
+    .maybeSingle();
+
+  const prevProfileStatus = profile?.status ?? "missing";
+  await admin
+    .from("user_profiles")
+    .upsert({
+      id: userId,
+      email: employee.work_email,
+      full_name: employee.full_name,
+      organization_id: callerProfile.organization_id,
+      status: "active",
+      is_active: true,
+      updated_at: nowIso,
+    })
+    .eq("id", userId);
+
+  // 3. Synchronize employee record
+  const prevEmpStatus = employee.employment_status;
+  await admin
+    .from("employees")
+    .update({
+      employment_status: "active",
+      is_active: true,
+      updated_at: nowIso,
+    })
+    .eq("id", employee.id);
+
+  // 4. Write employee status history
+  await admin.from("employee_status_history").insert({
+    employee_id: employee.id,
+    previous_status: prevEmpStatus,
+    new_status: "active",
+    changed_by: callerId,
+    reason: "Account activation repaired by administrator",
+  });
+
+  // 5. Re-link / activate org membership (no duplicates)
+  const { data: existingMembership } = await admin
+    .from("user_organization_memberships")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("organization_id", callerProfile.organization_id)
+    .maybeSingle();
+
+  if (existingMembership) {
+    await admin
+      .from("user_organization_memberships")
+      .update({ is_active: true })
+      .eq("id", existingMembership.id);
+  } else {
+    await admin
+      .from("user_organization_memberships")
+      .insert({ user_id: userId, organization_id: callerProfile.organization_id, is_active: true });
+  }
+
+  // 6. Audit log
+  await admin.from("audit_logs").insert({
+    actor_id: callerId,
+    action: "employee.repair_activation",
+    entity_type: "employee",
+    entity_id: employee.id,
+    old_values: { profile_status: prevProfileStatus, employment_status: prevEmpStatus },
+    new_values: { profile_status: "active", employment_status: "active", is_active: true },
+  });
+
+  return jsonResponse(200, {
+    message: "Account activation repaired successfully",
+    employee_id: employee.id,
+    user_id: userId,
+  });
 }
 
 function jsonResponse(status: number, data: unknown): Response {

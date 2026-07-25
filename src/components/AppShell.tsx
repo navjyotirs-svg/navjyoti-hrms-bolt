@@ -21,6 +21,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/attendance': 'My Attendance',
   '/attendance-management': 'Attendance Management',
   '/attendance-corrections': 'Corrections',
+  '/monthly-attendance': 'Monthly Attendance Summary',
   '/my-reports': 'My Daily Report',
   '/report-history': 'Report History',
   '/team-reports': 'Team Reports',

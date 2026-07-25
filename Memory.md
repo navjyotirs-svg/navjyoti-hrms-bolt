@@ -1348,3 +1348,93 @@ None — `public/sw.js` was already correct: has `push` handler calling `self.re
 9. Close the HRMS tab, trigger another authorized test — notification appears while tab is closed.
 10. Click the notification — published HRMS opens.
 11. Delivery log shows success.
+
+---
+
+## Production Bug-Fix & Business-Rule Update — completed 2026-07-25
+
+### FIX 1 — Employee Activation Flow
+
+#### Root cause
+The `invite-employee` edge function set `user_profiles.status = 'active'` and `employees.employment_status = 'active'` at invite time — before the employee set a password. The Directory showed "Active" immediately, but the auth user had no password and could not log in. The `handleActivateAccount` function short-circuited when `profile.status === 'active'`, so password setup never re-synchronized anything.
+
+#### Fix
+- `invite-employee` now creates records as `pending_activation` / `invited` / `is_active = false` / membership inactive.
+- `handleActivateAccount` (called from SetPasswordPage after password creation) now synchronizes in one pass: activates user_profiles, employees, org membership, writes employee_status_history and audit_logs.
+- New `handleRepairActivation` action (idempotent) for Director/HR: inspects, re-links, activates, writes history/audit — no duplicates.
+- Employee Directory now derives status from complete activation state (profile status, employee status, membership, is_active) with 7 statuses: Invitation Sent, Password Setup Pending, Activation Pending, Active, Suspended, Inactive, Offboarded.
+- "Repair Account Activation" button added for Director/HR on non-active, non-offboarded employees.
+- SetPasswordPage now calls the `activate_account` edge function after password creation.
+
+### FIX 2 — Attendance Policy
+
+#### Root cause
+Previous implementation used 540 elapsed minutes as the FULL_DAY threshold. The correct business rule is: FULL_DAY at >= 480 minutes, HALF_DAY at < 480. The 540-minute value is the displayed standard shift checkout time only. The 60-minute grace is a daily non-accumulating permission to leave early, not a penalty or deduction.
+
+#### Fix
+- Migration `fix_attendance_policy_columns`: added `displayed_shift_minutes` (540), `daily_early_checkout_grace` (60), `full_day_eligible_at`, `attendance_policy_version` (1) to `attendance_records`. Backfilled `full_day_eligible_at` for existing records.
+- Migration `add_attendance_reminder_columns`: added `full_day_reminder_sent_at`, `standard_shift_reminder_sent_at` columns.
+- `attendance-action` edge function: check-in now sets `full_day_eligible_at = check_in + 480 min`, `displayed_shift_minutes = 540`, `daily_early_checkout_grace = 60`, `attendance_policy_version = 1`. Checkout uses `required_work_minutes` (480) as FULL_DAY threshold.
+- `attendance-correction` edge function: recalculates using `required_work_minutes` (480) threshold, updates `full_day_eligible_at` when check-in is corrected.
+- `attendance-scheduler` edge function: sends 3 reminders — pre-checkout (5 min before 540), full-day eligible (at 480), standard shift completed (at 540). All idempotent via dedup_key.
+- Dashboard: shows Standard Checkout Time, Full Day Eligible At, Working Hours Completed, and contextual messages (< 480, >= 480, >= 540).
+- AttendancePage: shows Standard Checkout Time, Full Day Eligible At, updated timer note explaining 480/540 policy.
+
+### FIX 3 — Monthly Attendance Summary
+
+#### New page
+- `src/pages/MonthlyAttendancePage.tsx`: Monthly attendance summary with month/year selectors. Columns: Employee Code, Name, Department, Branch, Working Days, Present, Half Day, Absent, Approved Leave, Holiday, Weekly Off, Pending Checkout, Attendance %.
+- `fetchMonthlyAttendanceSummary` in `src/lib/attendance.ts`: fetches attendance_records + approved leave_requests + holiday_calendar_dates, computes per-employee monthly totals. Attendance % = (Present + HalfDay × 0.5) / Working Days × 100.
+- Route `/monthly-attendance` with PermissionRoute for `attendance.read_all` / `attendance.report_read`.
+- Nav item "Monthly Summary" added to sidebar for Director/HR.
+- Page title added to AppShell.
+
+### Files changed
+1. `supabase/functions/invite-employee/index.ts` — pending_activation at invite, full sync in activate_account, new repair_activation action
+2. `supabase/functions/attendance-action/index.ts` — 480 full-day threshold, new policy columns
+3. `supabase/functions/attendance-correction/index.ts` — 480 threshold, full_day_eligible_at recalculation
+4. `supabase/functions/attendance-scheduler/index.ts` — 3 reminder types (pre-checkout, full-day, standard-shift)
+5. `src/auth/SetPasswordPage.tsx` — calls activate_account edge function after password set
+6. `src/pages/EmployeeDirectoryPage.tsx` — derived status, Repair Account Activation button, removed unused imports
+7. `src/pages/Dashboard.tsx` — attendance display with 480/540 policy info
+8. `src/pages/AttendancePage.tsx` — Standard Checkout, Full Day Eligible At, updated timer note
+9. `src/lib/attendance.ts` — fetchMonthlyAttendanceSummary function
+10. `src/pages/MonthlyAttendancePage.tsx` — new monthly summary page
+11. `src/types/roles.ts` — Monthly Summary nav item
+12. `src/App.tsx` — /monthly-attendance route
+13. `src/components/AppShell.tsx` — page title
+
+### Database migrations
+1. `fix_attendance_policy_columns` — added displayed_shift_minutes, daily_early_checkout_grace, full_day_eligible_at, attendance_policy_version
+2. `add_attendance_reminder_columns` — added full_day_reminder_sent_at, standard_shift_reminder_sent_at
+
+### Edge functions deployed
+- invite-employee, attendance-action, attendance-correction, attendance-scheduler
+
+### Tests executed
+- TypeScript: PASS
+- Production build: PASS (700.78 kB JS / 33.19 kB CSS)
+- Push unit tests: 22/22 PASS
+
+### Manual verification checklist
+- [ ] New employee invitation creates pending_activation/invited records
+- [ ] Password setup activates account (profile, employee, membership all synchronized)
+- [ ] Login succeeds after password setup
+- [ ] Employee Directory shows correct derived status
+- [ ] Repair Account Activation works for stuck accounts
+- [ ] Checkout at 479 min = Half Day
+- [ ] Checkout at 480 min = Full Day
+- [ ] Checkout at 500 min = Full Day
+- [ ] Checkout at 539 min = Full Day
+- [ ] Checkout at 540 min = Full Day
+- [ ] Dashboard always shows 9-hour standard shift
+- [ ] Monthly attendance summary loads with correct calculations
+- [ ] No payroll logic added
+- [ ] Build passes
+- [ ] TypeScript passes
+
+### Remaining risks
+- Existing attendance records (pre-fix) still have the old 540-threshold status — only new check-outs use the 480 threshold. A backfill migration could recalculate old records if needed.
+- Browser smoke test not performed (no browser automation available).
+- The monthly summary fetches all records client-side and computes in JS — for large organizations this should be moved to a server-side RPC.
+- The `handleActivateAccount` uses sequential admin queries (not a single SQL transaction) — if one step fails, partial activation could occur. A future improvement would use a single SECURITY DEFINER RPC.

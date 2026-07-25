@@ -188,9 +188,15 @@ export function AttendancePage() {
                   <div className="attendance-status-value mono">{formatTimestamp(todayRecord.check_in_at)}</div>
                 </div>
                 <div className="attendance-status-card">
-                  <div className="attendance-status-label">Required Checkout</div>
+                  <div className="attendance-status-label">Standard Checkout Time</div>
                   <div className="attendance-status-value mono">{formatTimestamp(todayRecord.required_checkout_at)}</div>
                 </div>
+                {(todayRecord as { full_day_eligible_at?: string }).full_day_eligible_at && (
+                  <div className="attendance-status-card">
+                    <div className="attendance-status-label">Full Day Eligible At</div>
+                    <div className="attendance-status-value mono">{formatTimestamp((todayRecord as { full_day_eligible_at?: string }).full_day_eligible_at!)}</div>
+                  </div>
+                )}
                 <div className="attendance-status-card">
                   <div className="attendance-status-label">Current Status</div>
                   <div className="attendance-status-value">
@@ -211,12 +217,12 @@ export function AttendancePage() {
 
               {todayRecord.final_status === 'PENDING_CHECKOUT' && (
                 <div className="attendance-timer-section">
-                  <div className="attendance-timer-label">Time Remaining</div>
+                  <div className="attendance-timer-label">Time Remaining (Standard Shift)</div>
                   <div className="attendance-timer mono">{remaining}</div>
                   <p className="attendance-timer-note">
                     {remaining === '00:00:00'
-                      ? 'You have completed the required attendance duration.'
-                      : 'Checkout before the required time will mark attendance as Half Day.'}
+                      ? 'You have completed the standard 9-hour shift.'
+                      : 'Standard shift is 9 hours (540 minutes). Full Day requires 8 working hours (480 minutes).'}
                   </p>
                   {canCheckOut && (
                     <button className="btn btn-checkout" onClick={() => setShowCheckout(true)}>

@@ -80,7 +80,25 @@ export function SetPasswordPage() {
       return
     }
 
-    // Account is already active from invite time — just set the password
+    // Activate the account server-side: synchronizes user_profiles, employees, and org membership
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (accessToken) {
+        await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-employee`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ action: 'activate_account' }),
+        })
+      }
+    } catch {
+      // Activation is best-effort here; the user can still sign in and the admin can repair
+    }
+
     setSuccess(true)
     setSubmitting(false)
 

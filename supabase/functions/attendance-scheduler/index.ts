@@ -32,8 +32,11 @@ Deno.serve(async (req: Request) => {
         employee_id,
         check_in_at,
         required_checkout_at,
+        full_day_eligible_at,
         pre_checkout_reminder_sent_at,
         checkout_ready_reminder_sent_at,
+        full_day_reminder_sent_at,
+        standard_shift_reminder_sent_at,
         employees!inner (
           user_id,
           organization_id
@@ -48,10 +51,13 @@ Deno.serve(async (req: Request) => {
 
     let preCheckoutSent = 0;
     let checkoutReadySent = 0;
+    let fullDaySent = 0;
+    let standardShiftSent = 0;
 
     for (const record of records ?? []) {
       const requiredCheckout = new Date(record.required_checkout_at);
       const preCheckoutTime = new Date(requiredCheckout.getTime() - preAlertMinutes * 60 * 1000);
+      const fullDayEligibleAt = record.full_day_eligible_at ? new Date(record.full_day_eligible_at) : null;
       const emp = record.employees as { user_id: string; organization_id: string };
 
       // Pre-checkout reminder
@@ -81,7 +87,34 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // Checkout-ready reminder
+      // Full-day eligible reminder (at 480 minutes / 8 hours)
+      if (fullDayEligibleAt && !record.full_day_reminder_sent_at && now >= fullDayEligibleAt) {
+        const dedupKey = `${record.id}:ATTENDANCE_FULL_DAY_ELIGIBLE`;
+        const { error: notifError } = await admin
+          .from("notifications")
+          .insert({
+            recipient_id: emp.user_id,
+            notification_type: "ATTENDANCE_FULL_DAY_ELIGIBLE",
+            title: "Full Day Qualified",
+            message: "You have completed 8 hours and now qualify for Full Day.",
+            priority: "normal",
+            dedup_key: dedupKey,
+            metadata: {
+              attendance_record_id: record.id,
+              full_day_eligible_at: record.full_day_eligible_at,
+            },
+          });
+
+        if (!notifError) {
+          await admin
+            .from("attendance_records")
+            .update({ full_day_reminder_sent_at: now.toISOString() })
+            .eq("id", record.id);
+          fullDaySent++;
+        }
+      }
+
+      // Checkout-ready reminder (at 540 minutes / standard 9-hour shift)
       if (!record.checkout_ready_reminder_sent_at && now >= requiredCheckout) {
         const dedupKey = `${record.id}:ATTENDANCE_CHECKOUT_READY`;
         const { error: notifError } = await admin
@@ -89,8 +122,8 @@ Deno.serve(async (req: Request) => {
           .insert({
             recipient_id: emp.user_id,
             notification_type: "ATTENDANCE_CHECKOUT_READY",
-            title: "Checkout Ready",
-            message: "Your required attendance duration is complete. You may now check out.",
+            title: "Standard Shift Completed",
+            message: "You have completed today's standard 9-hour shift.",
             priority: "high",
             dedup_key: dedupKey,
             metadata: {
@@ -113,6 +146,7 @@ Deno.serve(async (req: Request) => {
       message: "Scheduler run complete",
       records_checked: records?.length ?? 0,
       pre_checkout_sent: preCheckoutSent,
+      full_day_sent: fullDaySent,
       checkout_ready_sent: checkoutReadySent,
     });
   } catch (err) {
