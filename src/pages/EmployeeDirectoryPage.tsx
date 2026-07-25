@@ -138,8 +138,18 @@ export function EmployeeDirectoryPage() {
     setResendMessage(null)
     try {
       const { data: sessionData } = await supabase.auth.getSession()
-      const accessToken = sessionData.session?.access_token
-      if (!accessToken) throw new Error('No session')
+      let accessToken = sessionData.session?.access_token
+
+      // Refresh the session if the token is missing or will expire soon (within 60s)
+      if (!accessToken) {
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+        if (refreshError || !refreshData.session) {
+          setResendMessage('Your session has expired. Please sign in again.')
+          setResending(null)
+          return
+        }
+        accessToken = refreshData.session.access_token
+      }
 
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-employee`, {
         method: 'POST',
@@ -156,7 +166,7 @@ export function EmployeeDirectoryPage() {
         setResendMessage(data.error || 'Failed to resend invitation')
         setResendLink(null)
       } else {
-        setResendMessage(data.message || 'Invitation link generated.')
+        setResendMessage(data.message || 'A fresh invitation email has been sent. Previous invitation links are no longer valid.')
         setResendLink(data.setup_link ?? null)
       }
     } catch (err) {
@@ -170,8 +180,17 @@ export function EmployeeDirectoryPage() {
     setResendMessage(null)
     try {
       const { data: sessionData } = await supabase.auth.getSession()
-      const accessToken = sessionData.session?.access_token
-      if (!accessToken) throw new Error('No session')
+      let accessToken = sessionData.session?.access_token
+
+      if (!accessToken) {
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+        if (refreshError || !refreshData.session) {
+          setResendMessage('Your session has expired. Please sign in again.')
+          setRepairing(null)
+          return
+        }
+        accessToken = refreshData.session.access_token
+      }
 
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-employee`, {
         method: 'POST',

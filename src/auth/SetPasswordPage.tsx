@@ -4,47 +4,63 @@ import { supabase } from '@/lib/supabase'
 import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import '@/styles/auth.css'
 
+type PageState = 'checking' | 'expired' | 'ready' | 'success'
+
 export function SetPasswordPage() {
   const navigate = useNavigate()
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [success, setSuccess] = useState(false)
-  const [sessionReady, setSessionReady] = useState(false)
-  const [checkingSession, setCheckingSession] = useState(true)
+  const [pageState, setPageState] = useState<PageState>('checking')
 
   useEffect(() => {
     let mounted = true
 
+    // Detect expired/invalid invitation links from Supabase Auth redirect
+    const url = new URL(window.location.href)
+    const errorCode = url.searchParams.get('error_code')
+    const hash = url.hash
+
+    // Supabase may put error info in the hash fragment
+    const hashParams = new URLSearchParams(hash.replace(/^#/, ''))
+    const hashErrorCode = hashParams.get('error_code')
+
+    if (errorCode === 'otp_expired' || hashErrorCode === 'otp_expired') {
+      if (mounted) setPageState('expired')
+      // Clean the URL so the error doesn't persist on refresh
+      window.history.replaceState({}, document.title, '/set-password')
+      return
+    }
+
+    if (errorCode === 'access_denied' || hashErrorCode === 'access_denied') {
+      if (mounted) setPageState('expired')
+      window.history.replaceState({}, document.title, '/set-password')
+      return
+    }
+
     // The Supabase client has detectSessionInUrl: true, so it will automatically
     // exchange the code from the email link for a session.
-    // We need to wait for the session to be established.
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return
       if (data.session) {
-        setSessionReady(true)
-        setCheckingSession(false)
+        setPageState('ready')
       } else {
-        // If no session yet, listen for the auth state change
+        // Listen for the auth state change from the email link exchange
         const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
           if (!mounted) return
           if (newSession) {
-            setSessionReady(true)
-            setCheckingSession(false)
-          } else if (event === 'SIGNED_OUT') {
-            setSessionReady(false)
-            setCheckingSession(false)
+            setPageState('ready')
+          } else if (event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
+            // Wait briefly — the session may still be establishing
           }
         })
 
-        // Give it a short timeout — if no session arrives, the invitation link is invalid/expired
+        // Timeout — if no session arrives, the invitation link is invalid/expired
         setTimeout(() => {
           if (!mounted) return
-          if (!sessionReady) {
-            setCheckingSession(false)
-          }
           listener.subscription.unsubscribe()
+          setPageState((prev) => (prev === 'checking' ? 'expired' : prev))
         }, 5000)
       }
     })
@@ -80,28 +96,36 @@ export function SetPasswordPage() {
       return
     }
 
-    // Activate the account server-side via atomic RPC
+    // Refresh the session to ensure we have a valid, fresh access token for activation
+    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+    if (refreshError || !refreshData.session) {
+      // If refresh fails, try getSession as fallback
+      const { data: sessionData } = await supabase.auth.getSession()
+      if (!sessionData.session) {
+        setError('Password created, but session expired before activation. Please contact your administrator.')
+        setSubmitting(false)
+        await supabase.auth.signOut()
+        return
+      }
+    }
+
+    // Activate the account via the atomic SECURITY DEFINER RPC
     let activationError: string | null = null
     try {
       const { data: sessionData } = await supabase.auth.getSession()
       const accessToken = sessionData.session?.access_token
-      if (accessToken) {
-        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-employee`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-          },
-          body: JSON.stringify({ action: 'activate_account' }),
-        })
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
-          activationError = errorData.error || `Activation failed (${response.status})`
-        }
-      } else {
+      if (!accessToken) {
         activationError = 'No session found for activation'
+      } else {
+        // Use the atomic RPC directly via the Supabase client — it uses auth.uid()
+        // internally so no client-supplied user ID is needed.
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('activate_employee_account')
+
+        if (rpcError) {
+          activationError = rpcError.message
+        } else if (rpcResult && !rpcResult.success) {
+          activationError = rpcResult.message || rpcResult.error || 'Activation failed'
+        }
       }
     } catch (err) {
       activationError = err instanceof Error ? err.message : 'Network error during activation'
@@ -114,7 +138,7 @@ export function SetPasswordPage() {
       return
     }
 
-    setSuccess(true)
+    setPageState('success')
     setSubmitting(false)
 
     // Sign out the recovery/invite session
@@ -123,7 +147,7 @@ export function SetPasswordPage() {
     setTimeout(() => navigate('/login'), 3000)
   }
 
-  if (checkingSession) {
+  if (pageState === 'checking') {
     return (
       <div className="auth-page">
         <div className="auth-card">
@@ -142,7 +166,7 @@ export function SetPasswordPage() {
     )
   }
 
-  if (!sessionReady && !success) {
+  if (pageState === 'expired') {
     return (
       <div className="auth-page">
         <div className="auth-card">
@@ -150,16 +174,16 @@ export function SetPasswordPage() {
             <NavjyotiLogo width={240} maxHeight={70} clickable />
           </div>
           <div className="auth-brand">
-            <h1 className="auth-title">Invalid or Expired Link</h1>
+            <h1 className="auth-title">Invitation Link Expired</h1>
             <p className="auth-subtitle">This invitation link is no longer valid</p>
           </div>
           <div className="auth-form">
             <p style={{ fontSize: '13.5px', color: 'var(--ink-text)', lineHeight: 1.6, textAlign: 'center' }}>
-              This invitation link may have expired or has already been used.
-              Please contact your administrator to request a new invitation.
+              This invitation link has expired or has already been used.
+              Please ask HR to send a new invitation.
             </p>
             <Link to="/login" className="auth-link" style={{ display: 'block', textAlign: 'center', marginTop: 'var(--space-4)' }}>
-              Back to sign in
+              Return to Login
             </Link>
           </div>
         </div>
@@ -167,7 +191,7 @@ export function SetPasswordPage() {
     )
   }
 
-  if (success) {
+  if (pageState === 'success') {
     return (
       <div className="auth-page">
         <div className="auth-card">
@@ -179,7 +203,8 @@ export function SetPasswordPage() {
           </div>
           <div className="auth-form">
             <div className="form-success">
-              Your password has been created successfully. You can now sign in.
+              Your password has been created successfully. Your account is now active.
+              You can sign in with your email and new password.
             </div>
             <p style={{ fontSize: '12.5px', color: 'var(--slate)', textAlign: 'center', marginTop: 'var(--space-3)' }}>
               Redirecting to sign in…

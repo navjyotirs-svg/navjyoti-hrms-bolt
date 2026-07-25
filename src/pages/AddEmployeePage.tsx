@@ -11,7 +11,7 @@ interface Department { id: string; name: string }
 interface Manager { id: string; full_name: string; employee_code: string }
 
 export function AddEmployeePage() {
-  const { profile, session } = useAuth()
+  const { profile } = useAuth()
   const navigate = useNavigate()
   const [branches, setBranches] = useState<Branch[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
@@ -61,13 +61,25 @@ export function AddEmployeePage() {
     }
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      let accessToken = sessionData.session?.access_token
+      if (!accessToken) {
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+        if (refreshError || !refreshData.session) {
+          setError('Your session has expired. Please sign in again.')
+          setSubmitting(false)
+          return
+        }
+        accessToken = refreshData.session.access_token
+      }
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-employee`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${session?.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
             apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({

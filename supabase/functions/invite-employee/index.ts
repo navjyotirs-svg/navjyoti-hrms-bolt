@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.45.0";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,7 +17,7 @@ const VALID_ROLES = [
   "system_admin",
 ];
 
-const PROD_APP_URL = "https://navjyotirs-svg-navjy-hpxl.bolt.host";
+const PROD_APP_URL = "https://hrms.ngspl.com";
 
 function getAppUrl(): string {
   const envUrl = Deno.env.get("APP_URL");
@@ -59,6 +59,8 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
+  const correlationId = crypto.randomUUID();
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -69,17 +71,23 @@ Deno.serve(async (req: Request) => {
     });
 
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return jsonError(401, "Missing authorization header");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return jsonError(401, "Missing or malformed authorization header", correlationId);
+    }
+
+    // Extract the Supabase session access token (NOT a VAPID JWT)
+    const supabaseAccessToken = authHeader.replace("Bearer ", "");
 
     const callerClient = createClient(supabaseUrl, anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: `Bearer ${supabaseAccessToken}` } },
     });
 
     const { data: callerData, error: callerError } =
-      await callerClient.auth.getUser(authHeader.replace("Bearer ", ""));
+      await callerClient.auth.getUser();
 
     if (callerError || !callerData.user) {
-      return jsonError(401, "Invalid session");
+      return jsonError(401, "Invalid or expired session. Please sign in again.", correlationId);
     }
 
     const callerId = callerData.user.id;
@@ -91,11 +99,11 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (profileError || !callerProfile) {
-      return jsonError(403, "Profile not found");
+      return jsonError(403, "Profile not found", correlationId);
     }
 
     if (callerProfile.status === "disabled") {
-      return jsonError(403, "Account disabled");
+      return jsonError(403, "Account disabled", correlationId);
     }
 
     const { data: roleRow } = await admin
@@ -104,7 +112,7 @@ Deno.serve(async (req: Request) => {
       .eq("code", callerProfile.role)
       .maybeSingle();
 
-    if (!roleRow) return jsonError(403, "Invalid caller role");
+    if (!roleRow) return jsonError(403, "Invalid caller role", correlationId);
 
     const { data: permRows } = await admin
       .from("role_permissions")
@@ -125,22 +133,25 @@ Deno.serve(async (req: Request) => {
       const { data: rpcResult, error: rpcError } = await callerClient.rpc("activate_employee_account");
 
       if (rpcError) {
-        return jsonError(500, `Activation failed: ${rpcError.message}`);
+        return jsonError(500, `Activation failed: ${rpcError.message}`, correlationId);
       }
 
       const result = rpcResult as { success: boolean; error?: string; message?: string; employment_status?: string };
       if (!result.success) {
-        return jsonError(400, result.message || result.error || "Activation failed");
+        return jsonError(400, result.message || result.error || "Activation failed", correlationId);
       }
 
-      return jsonResponse(200, { message: result.message || "Account activated successfully", employment_status: result.employment_status });
+      return jsonResponse(200, {
+        message: result.message || "Account activated successfully",
+        employment_status: result.employment_status,
+        correlationId,
+      });
     }
 
     // repair_activation is an admin action — require employee.create or employee.status.manage permission.
-    // Uses the atomic SECURITY DEFINER RPC for transactional safety.
     if (body.action === "repair_activation") {
       if (!callerPerms.includes("employee.create") && !callerPerms.includes("employee.status.manage")) {
-        return jsonError(403, "You do not have permission to repair account activation");
+        return jsonError(403, "You do not have permission to repair account activation", correlationId);
       }
       const repairBody = body as RepairActivationRequest;
       const { data: rpcResult, error: rpcError } = await callerClient.rpc("repair_employee_account", {
@@ -148,30 +159,35 @@ Deno.serve(async (req: Request) => {
       });
 
       if (rpcError) {
-        return jsonError(500, `Repair failed: ${rpcError.message}`);
+        return jsonError(500, `Repair failed: ${rpcError.message}`, correlationId);
       }
 
       const result = rpcResult as { success: boolean; error?: string; message?: string; repaired?: string[] };
       if (!result.success) {
-        return jsonError(400, result.message || result.error || "Repair failed");
+        return jsonError(400, result.message || result.error || "Repair failed", correlationId);
       }
 
-      return jsonResponse(200, { message: result.message || "Account repaired successfully", repaired: result.repaired, employee_id: repairBody.employee_id });
+      return jsonResponse(200, {
+        message: result.message || "Account repaired successfully",
+        repaired: result.repaired,
+        employee_id: repairBody.employee_id,
+        correlationId,
+      });
     }
 
     // resend_invitation and default invite require employee.create permission.
     if (!callerPerms.includes("employee.create")) {
-      return jsonError(403, "You do not have permission to create employees");
+      return jsonError(403, "You do not have permission to create employees", correlationId);
     }
 
     if (body.action === "resend_invitation") {
-      return handleResendInvitation(admin, callerId, callerProfile, body as ResendInvitationRequest, appUrl);
+      return handleResendInvitation(admin, callerId, callerProfile, body as ResendInvitationRequest, appUrl, correlationId);
     }
 
-    return handleInvite(admin, callerId, callerProfile, body as InviteEmployeeRequest, orgId, appUrl);
+    return handleInvite(admin, callerId, callerProfile, body as InviteEmployeeRequest, orgId, appUrl, correlationId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return jsonError(500, message);
+    return jsonError(500, message, correlationId);
   }
 });
 
@@ -181,18 +197,19 @@ async function handleInvite(
   callerProfile: { id: string; role: string; organization_id: string },
   body: InviteEmployeeRequest,
   orgId: string,
-  appUrl: string
+  appUrl: string,
+  correlationId: string
 ): Promise<Response> {
   if (!body.full_name || !body.work_email || !body.role || !body.joining_date || !body.employee_code) {
-    return jsonError(400, "Missing required fields");
+    return jsonError(400, "Missing required fields", correlationId);
   }
 
   if (!VALID_ROLES.includes(body.role)) {
-    return jsonError(400, "Invalid role code");
+    return jsonError(400, "Invalid role code", correlationId);
   }
 
   if (body.role === "director" && callerProfile.role !== "director") {
-    return jsonError(403, "Only a Director can assign Director-level access");
+    return jsonError(403, "Only a Director can assign Director-level access", correlationId);
   }
 
   if (
@@ -200,7 +217,7 @@ async function handleInvite(
     callerProfile.role !== "director" &&
     callerProfile.role !== "system_admin"
   ) {
-    return jsonError(403, "Only a Director or System Administrator can assign System Administrator role");
+    return jsonError(403, "Only a Director or System Administrator can assign System Administrator role", correlationId);
   }
 
   const { data: dupCode } = await admin
@@ -210,7 +227,7 @@ async function handleInvite(
     .eq("employee_code", body.employee_code)
     .maybeSingle();
 
-  if (dupCode) return jsonError(409, "Employee code already exists");
+  if (dupCode) return jsonError(409, "Employee code already exists", correlationId);
 
   const { data: dupEmail } = await admin
     .from("employees")
@@ -219,7 +236,7 @@ async function handleInvite(
     .eq("work_email", body.work_email)
     .maybeSingle();
 
-  if (dupEmail) return jsonError(409, "Work email already exists");
+  if (dupEmail) return jsonError(409, "Work email already exists", correlationId);
 
   const { data: dupProfile } = await admin
     .from("user_profiles")
@@ -241,7 +258,7 @@ async function handleInvite(
       await admin.from("user_profiles").delete().eq("id", dupProfile.id);
       await admin.auth.admin.deleteUser(dupProfile.id);
     } else {
-      return jsonError(409, "A user with this email already exists");
+      return jsonError(409, "A user with this email already exists", correlationId);
     }
   } else {
     const { data: existingAuthUsers } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
@@ -269,7 +286,7 @@ async function handleInvite(
   });
 
   if (inviteError) {
-    return jsonError(500, `Failed to send invitation: ${inviteError.message}`);
+    return jsonError(500, `Failed to send invitation: ${inviteError.message}`, correlationId);
   }
 
   const userId = linkData.user.id;
@@ -286,7 +303,7 @@ async function handleInvite(
   });
 
   if (profileInsertError) {
-    return jsonError(500, `Failed to create user profile: ${profileInsertError.message}`);
+    return jsonError(500, `Failed to create user profile: ${profileInsertError.message}`, correlationId);
   }
 
   const { data: employee, error: empError } = await admin
@@ -309,7 +326,7 @@ async function handleInvite(
     .maybeSingle();
 
   if (empError) {
-    return jsonError(500, `Failed to create employee record: ${empError.message}`);
+    return jsonError(500, `Failed to create employee record: ${empError.message}`, correlationId);
   }
 
   const { error: membershipError } = await admin
@@ -351,6 +368,7 @@ async function handleInvite(
     user_id: userId,
     employee_id: employee?.id,
     setup_link: setupLink,
+    correlationId,
   });
 }
 
@@ -359,7 +377,8 @@ async function handleResendInvitation(
   callerId: string,
   callerProfile: { id: string; role: string; organization_id: string },
   body: ResendInvitationRequest,
-  appUrl: string
+  appUrl: string,
+  correlationId: string
 ): Promise<Response> {
   const { data: employee, error: empError } = await admin
     .from("employees")
@@ -368,11 +387,11 @@ async function handleResendInvitation(
     .maybeSingle();
 
   if (empError || !employee) {
-    return jsonError(404, "Employee not found");
+    return jsonError(404, "Employee not found", correlationId);
   }
 
   if (employee.organization_id !== callerProfile.organization_id) {
-    return jsonError(403, "Cross-organization access denied");
+    return jsonError(403, "Cross-organization access denied", correlationId);
   }
 
   const { data: userProfile } = await admin
@@ -382,11 +401,11 @@ async function handleResendInvitation(
     .maybeSingle();
 
   if (!userProfile) {
-    return jsonError(404, "User profile not found");
+    return jsonError(404, "User profile not found", correlationId);
   }
 
   if (userProfile.status !== "pending_activation") {
-    return jsonError(400, "Invitation can only be resent for pending activation accounts");
+    return jsonError(400, "Invitation can only be resent for pending activation accounts", correlationId);
   }
 
   const { data: lastInvite } = await admin
@@ -403,10 +422,11 @@ async function handleResendInvitation(
     const lastTime = new Date(lastInvite.created_at).getTime();
     const elapsed = Date.now() - lastTime;
     if (elapsed < 60 * 1000) {
-      return jsonError(429, "Please wait at least 1 minute before resending an invitation");
+      return jsonError(429, "Please wait at least 1 minute before resending an invitation", correlationId);
     }
   }
 
+  // Generate a completely fresh invitation link — old links are invalidated by Supabase Auth
   const { data: resendLinkData, error: resendError } = await admin.auth.admin.generateLink({
     type: "invite",
     email: employee.work_email,
@@ -422,7 +442,7 @@ async function handleResendInvitation(
   });
 
   if (resendError) {
-    return jsonError(500, `Failed to resend invitation: ${resendError.message}`);
+    return jsonError(500, `Failed to resend invitation: ${resendError.message}`, correlationId);
   }
 
   const setupLink = resendLinkData.properties?.action_link ?? `${appUrl}/set-password`;
@@ -439,9 +459,10 @@ async function handleResendInvitation(
   });
 
   return jsonResponse(200, {
-    message: "Invitation link generated successfully. Share it with the employee.",
+    message: "A fresh invitation email has been sent. Previous invitation links are no longer valid.",
     employee_id: employee.id,
     setup_link: setupLink,
+    correlationId,
   });
 }
 
@@ -452,8 +473,8 @@ function jsonResponse(status: number, data: unknown): Response {
   });
 }
 
-function jsonError(status: number, message: string): Response {
-  return new Response(JSON.stringify({ error: message }), {
+function jsonError(status: number, message: string, correlationId: string): Response {
+  return new Response(JSON.stringify({ error: message, correlationId }), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });

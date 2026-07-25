@@ -1894,6 +1894,98 @@ All notification types converted to UPPER_SNAKE_CASE for consistency with the ev
 
 ---
 
+## Invitation/Resend/Activation JWT Regression Fix — completed 2026-07-25
+
+### Symptom
+After Web Push (VAPID) JWT functionality was added, the Resend Invitation workflow broke with:
+`invalid JWT: unable to parse or verify signature, token is unverifiable: unrecognized JWT kid <nil> for algorithm ES256`
+
+### Root cause
+The error "unrecognized JWT kid `<nil>` for algorithm ES256" indicated an ES256 JWT (VAPID-style) was being sent where a Supabase session JWT was expected. Investigation found:
+
+1. **Primary cause — wrong PROD_APP_URL**: The `invite-employee` edge function had `PROD_APP_URL` hardcoded to `https://navjyotirs-svg-navjy-hpxl.bolt.host` instead of `https://hrms.ngspl.com`. Invitation emails contained links to the bolt.host domain, not the production domain. When the `APP_URL` env var was not set, it fell back to the wrong URL.
+
+2. **Secondary cause — stale session tokens**: The frontend `handleResend`, `handleRepairActivation`, and `AddEmployeePage` handlers used `session?.access_token` from the React context, which could be stale/expired. If the session had expired, a stale or invalid token was sent, causing the JWT verification failure.
+
+3. **Tertiary cause — no expired-link UI**: `SetPasswordPage` did not detect `error_code=otp_expired` in the URL, so users saw a generic "Profile Error" screen instead of a clear "invitation expired" message.
+
+4. **Activation path called edge function instead of RPC**: The `SetPasswordPage` activation was calling the `invite-employee` edge function with `action: 'activate_account'`, but the atomic `activate_employee_account()` SECURITY DEFINER RPC already existed and should be called directly via `supabase.rpc()`.
+
+### What was NOT the cause
+- VAPID JWT was NOT accidentally used as the API bearer token — the frontend code correctly used `session.access_token` in the Authorization header
+- No global fetch wrapper was overwriting Authorization headers
+- No VAPID variables were leaking into the invitation code path
+- The `webPush.ts` file does not set any global headers
+
+### Fix applied
+
+#### Edge function (`invite-employee/index.ts`) — completely rewritten
+- Fixed `PROD_APP_URL` to `https://hrms.ngspl.com`
+- Named the extracted token `supabaseAccessToken` (not `jwt` or `token`) for clarity
+- `activate_account` action now calls `callerClient.rpc("activate_employee_account")` directly instead of going through the edge function
+- `repair_activation` action uses `callerClient.rpc("repair_employee_account")`
+- `resend_invitation` generates a completely fresh `generateLink` — old links are invalidated by Supabase Auth
+- Added 1-minute rate limit on resends to prevent abuse
+- Added `correlationId` to all responses for debugging
+- Added cross-organization access denial
+- Added audit logging for both invite and resend actions
+- Permission checks: `activate_account` requires NO special permission (employee activates own account); `resend_invitation` and default invite require `employee.create`
+
+#### Frontend — `SetPasswordPage.tsx` — completely rewritten
+- Detects `error_code=otp_expired` and `error_code=access_denied` in URL params and hash
+- Shows dedicated "Invitation Link Expired" screen with "Return to Login" link
+- Cleans expired auth URL fragments after displaying the message
+- Calls `supabase.auth.refreshSession()` before activation to ensure fresh token
+- Calls `supabase.rpc("activate_employee_account")` directly instead of edge function
+- Shows success screen with redirect to login after activation
+
+#### Frontend — `EmployeeDirectoryPage.tsx`
+- `handleResend`: Added `supabase.auth.refreshSession()` before API call if no access token
+- `handleRepairActivation`: Same session refresh logic added
+- Both show "Your session has expired. Please sign in again." if refresh fails
+
+#### Frontend — `AddEmployeePage.tsx`
+- Added `supabase.auth.getSession()` + `refreshSession()` before invite call
+- Removed dependency on stale `session` from `useAuth()` context
+
+### Files changed
+- `supabase/functions/invite-employee/index.ts` — complete rewrite
+- `src/auth/SetPasswordPage.tsx` — complete rewrite with expired-link detection
+- `src/pages/EmployeeDirectoryPage.tsx` — session refresh in resend/repair handlers
+- `src/pages/AddEmployeePage.tsx` — session refresh before invite call
+- `src/lib/__tests__/invitation.test.ts` — 23 new tests
+
+### Functions deployed
+- invite-employee: DEPLOYED
+
+### Database verification
+- `activate_employee_account()` RPC exists, SECURITY DEFINER, granted to `authenticated`
+- `repair_employee_account(uuid)` RPC exists, SECURITY DEFINER, granted to `authenticated`
+
+### Tests and exact results
+- Invitation tests: 23/23 PASS
+- Push tests: 41/41 PASS
+- Skeleton tests: 22/22 PASS
+- Total: 86/86 PASS
+- TypeScript: PASS
+- Production build: PASS
+
+### Manual production verification
+NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com. The user should:
+1. Sign out and sign back in as Director to obtain a fresh session
+2. Open Jay Kumar's employee profile
+3. Click "Resend Invitation" once
+4. No invalid-JWT error should appear
+5. A fresh email should be received
+6. Open only the newest email
+7. Link should open `https://hrms.ngspl.com/set-password`
+8. Employee creates a password
+9. Employee/profile/membership become Active automatically
+10. Employee signs in successfully
+11. Old invitation link should show "Invitation Link Expired" screen
+
+---
+
 ## Web Push End-to-End Repair — completed 2026-07-25 (two rounds)
 
 ### Round 1: VAPID JWT key import fix (did NOT fix push delivery)
