@@ -49,6 +49,7 @@ export function EmployeeDirectoryPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [resending, setResending] = useState<string | null>(null)
   const [resendMessage, setResendMessage] = useState<string | null>(null)
+  const [resendLink, setResendLink] = useState<string | null>(null)
   const [activating, setActivating] = useState<string | null>(null)
   const [repairing, setRepairing] = useState<string | null>(null)
   const canCreate = permissions.includes('employee.create')
@@ -140,8 +141,10 @@ export function EmployeeDirectoryPage() {
       const data = await response.json()
       if (!response.ok) {
         setResendMessage(data.error || 'Failed to resend invitation')
+        setResendLink(null)
       } else {
-        setResendMessage('Invitation email resent successfully.')
+        setResendMessage(data.message || 'Invitation link generated.')
+        setResendLink(data.setup_link ?? null)
       }
     } catch (err) {
       setResendMessage(err instanceof Error ? err.message : 'Failed to resend invitation')
@@ -244,8 +247,22 @@ export function EmployeeDirectoryPage() {
 
       {error && <div className="form-error">{error}</div>}
       {resendMessage && (
-        <div className={resendMessage.includes('success') ? 'form-success' : 'form-error'} style={{ marginBottom: 'var(--space-3)' }}>
+        <div className={resendMessage.includes('success') || resendMessage.includes('generated') ? 'form-success' : 'form-error'} style={{ marginBottom: 'var(--space-3)' }}>
           {resendMessage}
+          {resendLink && (
+            <div style={{ marginTop: 'var(--space-2)', wordBreak: 'break-all' }}>
+              <label style={{ fontWeight: 700, display: 'block', marginBottom: 'var(--space-1)' }}>Password Setup Link:</label>
+              <code style={{ display: 'block', padding: 'var(--space-2)', background: 'var(--surface-2)', borderRadius: '4px', fontSize: '0.85em' }}>{resendLink}</code>
+              <button
+                type="button"
+                className="btn btn-sm"
+                style={{ marginTop: 'var(--space-2)' }}
+                onClick={() => navigator.clipboard.writeText(resendLink)}
+              >
+                Copy Link
+              </button>
+            </div>
+          )}
         </div>
       )}
 

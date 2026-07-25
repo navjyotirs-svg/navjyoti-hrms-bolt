@@ -195,8 +195,10 @@ async function handleInvite(
 
   if (dupProfile) return jsonError(409, "A user with this email already exists");
 
-  // Use inviteUserByEmail — sends a secure invitation email, no temporary password
-  const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(
+  // Use generateLink to create the auth user AND get a direct setup link.
+  // This avoids relying on Supabase's rate-limited built-in email service.
+  const { data: linkData, error: inviteError } = await admin.auth.admin.generateLink(
+    "invite",
     body.work_email,
     {
       redirectTo: `${appUrl}/set-password`,
@@ -213,7 +215,8 @@ async function handleInvite(
     return jsonError(500, `Failed to send invitation: ${inviteError.message}`);
   }
 
-  const userId = inviteData.user.id;
+  const userId = linkData.user.id;
+  const setupLink = linkData.properties?.action_link ?? `${appUrl}/set-password`;
 
   // Create user_profile — pending activation until password is set
   const { error: profileInsertError } = await admin.from("user_profiles").insert({
@@ -292,9 +295,10 @@ async function handleInvite(
   });
 
   return jsonResponse(201, {
-    message: "Invitation email sent successfully",
+    message: "Employee invited successfully. Share the setup link below with the employee.",
     user_id: userId,
     employee_id: employee?.id,
+    setup_link: setupLink,
   });
 }
 
@@ -352,8 +356,9 @@ async function handleResendInvitation(
     }
   }
 
-  // Resend invitation using the same email
-  const { error: resendError } = await admin.auth.admin.inviteUserByEmail(
+  // Resend invitation using generateLink (avoids rate-limited built-in email service)
+  const { data: resendLinkData, error: resendError } = await admin.auth.admin.generateLink(
+    "invite",
     employee.work_email,
     {
       redirectTo: `${appUrl}/set-password`,
@@ -370,6 +375,8 @@ async function handleResendInvitation(
     return jsonError(500, `Failed to resend invitation: ${resendError.message}`);
   }
 
+  const setupLink = resendLinkData.properties?.action_link ?? `${appUrl}/set-password`;
+
   // Audit log
   await admin.from("audit_logs").insert({
     actor_id: callerId,
@@ -383,8 +390,9 @@ async function handleResendInvitation(
   });
 
   return jsonResponse(200, {
-    message: "Invitation email resent successfully",
+    message: "Invitation link generated successfully. Share it with the employee.",
     employee_id: employee.id,
+    setup_link: setupLink,
   });
 }
 

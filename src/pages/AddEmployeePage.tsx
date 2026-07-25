@@ -18,6 +18,7 @@ export function AddEmployeePage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [setupLink, setSetupLink] = useState<string | null>(null)
 
   const [fullName, setFullName] = useState('')
   const [workEmail, setWorkEmail] = useState('')
@@ -87,7 +88,8 @@ export function AddEmployeePage() {
         setError(data.error || 'Failed to invite employee')
         setSubmitting(false)
       } else {
-        setSuccessMessage('An invitation email has been sent. The employee must open the secure invitation link and create a password.')
+        setSuccessMessage(data.message || 'Employee invited successfully.')
+        setSetupLink(data.setup_link ?? null)
         setSubmitting(false)
       }
     } catch {
@@ -108,6 +110,20 @@ export function AddEmployeePage() {
           {successMessage && (
             <div className="form-success" style={{ marginBottom: 'var(--space-4)' }}>
               {successMessage}
+              {setupLink && (
+                <div style={{ marginTop: 'var(--space-3)', wordBreak: 'break-all' }}>
+                  <label style={{ fontWeight: 700, display: 'block', marginBottom: 'var(--space-1)' }}>Password Setup Link:</label>
+                  <code style={{ display: 'block', padding: 'var(--space-2)', background: 'var(--surface-2)', borderRadius: '4px', fontSize: '0.85em' }}>{setupLink}</code>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    style={{ marginTop: 'var(--space-2)' }}
+                    onClick={() => navigator.clipboard.writeText(setupLink)}
+                  >
+                    Copy Link
+                  </button>
+                </div>
+              )}
               <div style={{ marginTop: 'var(--space-3)' }}>
                 <button type="button" className="btn btn-sm" onClick={() => navigate('/employees')}>
                   Back to Employees
