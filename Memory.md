@@ -2088,3 +2088,61 @@ NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com/setting
 3. Click "Send Test Push Notification" — should now show "Test push sent to 1 device(s)." and a Windows notification should appear
 4. If it still fails, the UI will now display the actual safe error category (e.g., "PUSH_PROVIDER_BAD_REQUEST", "SUBSCRIPTION_EXPIRED") instead of the generic "temporarily unavailable" message
 
+
+---
+
+## Attendance Policy Version Schema Fix — completed 2026-07-25
+
+### Symptom
+Every role (Director, HR, Manager, Employee) got this error on Check In:
+`Failed to create attendance record: invalid input syntax for type integer: "POLICY_540_FULL_DAY"`
+
+### Root cause
+The `attendance-action` edge function inserted `attendance_policy_version: "POLICY_540_FULL_DAY"` (a string) into a column that was defined as `integer NOT NULL DEFAULT 1` by migration `20260725043502_fix_attendance_policy_columns.sql`. PostgreSQL cannot cast the text `POLICY_540_FULL_DAY` to integer, so every check-in insert failed.
+
+### Old database type
+`attendance_records.attendance_policy_version`: `integer NOT NULL DEFAULT 1`
+
+### Selected canonical schema
+`attendance_records.attendance_policy_version`: `text NOT NULL DEFAULT 'POLICY_540_FULL_DAY'` with CHECK constraint `^POLICY_[0-9]+_FULL_DAY$`
+
+### Migration created
+`fix_attendance_policy_version_to_text` — forward-only migration that:
+1. Added a temporary TEXT column
+2. Converted all existing integer values (1 → POLICY_540_FULL_DAY, NULL → POLICY_540_FULL_DAY)
+3. Dropped the old integer column
+4. Renamed the new TEXT column to `attendance_policy_version`
+5. Set NOT NULL, DEFAULT 'POLICY_540_FULL_DAY', and CHECK constraint
+
+### Historical-value conversion performed
+All 16 existing records converted from integer `1` to text `POLICY_540_FULL_DAY`. No records were lost.
+
+### Files/functions changed
+- `supabase/migrations/fix_attendance_policy_version_to_text.sql` — new migration (applied via MCP)
+- `src/lib/attendance.ts` — added `attendance_policy_version: string` to `AttendanceRecord` interface
+- `supabase/functions/attendance-action/index.ts` — already correct (sends string constant), no change needed
+
+### What was NOT changed (already correct)
+- `attendance-action` edge function: already uses `ATTENDANCE_POLICY_VERSION = "POLICY_540_FULL_DAY"` as a string constant
+- `attendance-scheduler`: uses `parseInt` only for config values (ATTENDANCE_TOTAL_MINUTES), not for policy_version
+- No numeric casts of `attendance_policy_version` found anywhere else in the codebase
+- No frontend fallback inserts of attendance records (all go through the edge function)
+
+### Tests and exact results
+- Invitation tests: 23/23 PASS
+- Push tests: 41/41 PASS
+- Skeleton tests: 22/22 PASS
+- Total: 86/86 PASS
+- TypeScript: PASS
+- Production build: PASS
+
+### Production verification
+NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com. The user should:
+1. Sign in as Director → Check In → should succeed
+2. Sign in as Manager → Check In → should succeed
+3. Sign in as Employee → Check In → should succeed
+4. Verify the new record has `attendance_policy_version = 'POLICY_540_FULL_DAY'`
+5. Verify `required_checkout_at` = check-in time + 540 minutes
+6. Verify checkout before 540 minutes = HALF_DAY
+7. Verify checkout at/after 540 minutes = FULL_DAY
+8. Verify existing 16 records are still readable in monthly reports

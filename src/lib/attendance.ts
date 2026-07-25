@@ -19,6 +19,7 @@ export interface AttendanceRecord {
   required_break_minutes: number
   required_total_minutes: number
   actual_elapsed_minutes: number | null
+  attendance_policy_version: string
   final_status: AttendanceStatus
   status_reason: string | null
   pre_checkout_reminder_sent_at: string | null
