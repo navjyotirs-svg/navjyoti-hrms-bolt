@@ -43,14 +43,15 @@ Deno.serve(async (req: Request) => {
         success: false,
         message: vapidConfig.message,
         subscriptionsFound: 0,
+        attempted: 0,
         sent: 0,
         failed: 0,
-        invalidSubscriptionsRemoved: 0,
-        safeErrors: [vapidConfig.errorCategory],
+        invalidRemoved: 0,
+        results: [],
+        errorCategory: vapidConfig.errorCategory,
       });
     }
 
-    // Check for VAPID key mismatch — if the subscription was created with a different key, it will fail
     const vapidKeyFp = vapidConfig.publicKey.slice(0, 16);
 
     const { data: subs, error: subErr } = await adminClient
@@ -62,12 +63,14 @@ Deno.serve(async (req: Request) => {
     if (subErr) {
       return jsonResponse({
         success: false,
-        message: "Failed to fetch subscriptions",
+        message: "Failed to fetch subscriptions from database.",
         subscriptionsFound: 0,
+        attempted: 0,
         sent: 0,
         failed: 0,
-        invalidSubscriptionsRemoved: 0,
-        safeErrors: ["server_error"],
+        invalidRemoved: 0,
+        results: [{ statusCode: 0, errorCategory: "server_error" }],
+        errorCategory: "server_error",
       });
     }
 
@@ -78,59 +81,64 @@ Deno.serve(async (req: Request) => {
         success: false,
         message: "No active subscription was found. Enable notifications in Account Settings first.",
         subscriptionsFound: 0,
+        attempted: 0,
         sent: 0,
         failed: 0,
-        invalidSubscriptionsRemoved: 0,
-        safeErrors: ["no_subscription"],
+        invalidRemoved: 0,
+        results: [{ statusCode: 0, errorCategory: "no_subscription" }],
+        errorCategory: "no_subscription",
       });
     }
 
-    // Detect VAPID key mismatch — subscriptions with old fingerprint need to be re-registered
+    // Detect VAPID key mismatch — subscriptions with old fingerprint need re-registration
     const staleSubs = subs.filter((s: { vapid_key_fp?: string | null }) => s.vapid_key_fp && s.vapid_key_fp !== vapidKeyFp);
     const validSubs = subs.filter((s: { vapid_key_fp?: string | null }) => !s.vapid_key_fp || s.vapid_key_fp === vapidKeyFp);
 
-    let invalidSubscriptionsRemoved = 0;
+    let invalidRemoved = 0;
     for (const sub of staleSubs) {
       await adminClient
         .from("push_subscriptions")
         .update({ is_active: false, revoked_at: new Date().toISOString() })
         .eq("id", sub.id);
-      invalidSubscriptionsRemoved++;
+      invalidRemoved++;
     }
 
     if (validSubs.length === 0) {
       return jsonResponse({
         success: false,
-        message: "Your push subscription was created with an older key and has been deactivated. Please re-enable notifications in Account Settings.",
+        message: "Your push subscription was created with an older key and has been deactivated. Please repair your push subscription in Account Settings.",
         subscriptionsFound,
+        attempted: 0,
         sent: 0,
         failed: 0,
-        invalidSubscriptionsRemoved,
-        safeErrors: ["vapid_key_mismatch"],
+        invalidRemoved,
+        results: [{ statusCode: 0, errorCategory: "vapid_key_mismatch" }],
+        errorCategory: "vapid_key_mismatch",
       });
     }
 
     let sent = 0;
     let failed = 0;
     let deactivated = 0;
-    const safeErrors: string[] = [];
+    const results: { statusCode: number; errorCategory: string }[] = [];
 
     for (const sub of validSubs) {
       const result = await sendWebPush(sub, {
-        title: "Test Notification",
-        body: "This is a test push notification from Navjyoti HRMS.",
+        title: "Navjyoti HRMS Test",
+        body: "Push notifications are working on this device.",
         category: "system",
         priority: "normal",
-        actionUrl: "/notifications",
+        actionUrl: "/settings",
         icon: "/icon-192.png",
         badge: "/badge-72.png",
       }, vapidConfig);
+
+      results.push({ statusCode: result.statusCode, errorCategory: result.errorCategory });
 
       if (result.ok) {
         sent++;
       } else {
         failed++;
-        safeErrors.push(result.errorCategory);
         if (result.deactivate) {
           deactivated++;
           await adminClient
@@ -141,21 +149,24 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    const totalInvalidRemoved = invalidRemoved + deactivated;
     const message = sent > 0
       ? `Test push sent to ${sent} device(s).`
-      : mapErrorCategoryToMessage(safeErrors[0] || "temporary_failure");
+      : mapErrorCategoryToMessage(results[0]?.errorCategory || "temporary_failure");
 
     return jsonResponse({
       success: sent > 0,
       message,
       subscriptionsFound,
+      attempted: validSubs.length,
       sent,
       failed,
-      invalidSubscriptionsRemoved: invalidSubscriptionsRemoved + deactivated,
-      safeErrors: safeErrors.length > 0 ? safeErrors : undefined,
+      invalidRemoved: totalInvalidRemoved,
+      results,
+      errorCategory: sent > 0 ? undefined : results[0]?.errorCategory,
     });
   } catch (err) {
-    return errorResponse((err as Error).message, 500);
+    return errorResponse(`Server error: ${(err as Error).message}`, 500);
   }
 });
 
@@ -173,11 +184,11 @@ function validateVapidConfig(): VapidConfigResult {
   const subject = Deno.env.get("VAPID_SUBJECT") || "";
 
   if (!privateKey || !publicKey) {
-    return { errorCategory: "missing_vapid", message: "Push service is not configured correctly." };
+    return { errorCategory: "missing_vapid", message: "Push service is not configured correctly. VAPID keys are missing." };
   }
 
   if (!subject) {
-    return { errorCategory: "missing_vapid", message: "Push service is not configured correctly." };
+    return { errorCategory: "missing_vapid", message: "Push service is not configured correctly. VAPID subject is missing." };
   }
 
   if (!subject.startsWith("mailto:") && !subject.startsWith("https://")) {
@@ -210,13 +221,20 @@ interface PushPayload {
   badge?: string;
 }
 
+interface SendResult {
+  ok: boolean;
+  deactivate: boolean;
+  statusCode: number;
+  errorCategory: string;
+}
+
 async function sendWebPush(
   sub: { endpoint: string; p256dh_key: string; auth_key: string },
   payload: PushPayload,
   vapid: VapidConfig
-): Promise<{ ok: boolean; deactivate: boolean; errorCategory: string }> {
+): Promise<SendResult> {
   try {
-    const jwt = await generateVapidJWT(sub.endpoint, vapid.subject, vapid.privateKey, vapid.publicKey);
+    const jwt = await generateVapidJWT(sub.endpoint, vapid.subject, vapid.privateKey);
     const body = JSON.stringify(payload);
 
     const response = await fetch(sub.endpoint, {
@@ -231,38 +249,108 @@ async function sendWebPush(
     });
 
     if (response.ok || response.status === 201 || response.status === 202) {
-      return { ok: true, deactivate: false, errorCategory: "" };
+      return { ok: true, deactivate: false, statusCode: response.status, errorCategory: "" };
     }
 
     if (response.status === 404 || response.status === 410) {
-      return { ok: false, deactivate: true, errorCategory: "expired_subscription" };
+      return { ok: false, deactivate: true, statusCode: response.status, errorCategory: "expired_subscription" };
     }
 
     if (response.status === 401 || response.status === 403) {
-      return { ok: false, deactivate: true, errorCategory: "invalid_vapid" };
+      return { ok: false, deactivate: true, statusCode: response.status, errorCategory: "invalid_vapid" };
+    }
+
+    if (response.status === 400) {
+      return { ok: false, deactivate: true, statusCode: response.status, errorCategory: "malformed_subscription" };
     }
 
     if (response.status === 429) {
-      return { ok: false, deactivate: false, errorCategory: "temporary_failure" };
+      return { ok: false, deactivate: false, statusCode: response.status, errorCategory: "rate_limited" };
     }
 
-    return { ok: false, deactivate: false, errorCategory: "temporary_failure" };
-  } catch {
-    return { ok: false, deactivate: false, errorCategory: "temporary_failure" };
+    if (response.status >= 500) {
+      return { ok: false, deactivate: false, statusCode: response.status, errorCategory: "provider_error" };
+    }
+
+    return { ok: false, deactivate: false, statusCode: response.status, errorCategory: "temporary_failure" };
+  } catch (err) {
+    const msg = (err as Error).message || "";
+    if (msg.includes("timed out") || msg.includes("timeout")) {
+      return { ok: false, deactivate: false, statusCode: 0, errorCategory: "timeout" };
+    }
+    if (msg.includes("network") || msg.includes("connect") || msg.includes("fetch")) {
+      return { ok: false, deactivate: false, statusCode: 0, errorCategory: "network_error" };
+    }
+    return { ok: false, deactivate: false, statusCode: 0, errorCategory: "temporary_failure" };
   }
 }
 
+/**
+ * Generate a VAPID JWT for Web Push authentication.
+ *
+ * The VAPID private key is a 32-byte raw P-256 scalar stored as base64url.
+ * Web Crypto's importKey for ECDSA private keys requires PKCS#8 DER format,
+ * not raw scalar bytes. We construct a minimal PKCS#8 wrapper around the
+ * raw key before importing it.
+ */
 async function generateVapidJWT(
   endpoint: string,
   subject: string,
-  privateKeyB64: string,
-  _publicKeyB64: string
+  privateKeyB64: string
 ): Promise<string> {
   const rawKey = base64UrlDecode(privateKeyB64);
 
+  // Construct PKCS#8 DER wrapper for a P-256 ECDSA private key.
+  // The fixed prefix is the ASN.1 structure:
+  //   SEQUENCE { INTEGER 1, SEQUENCE { OID secp256r1 }, OCTET STRING { ... } }
+  // where the inner OCTET STRING contains the raw 32-byte scalar.
+  const pkcs8Prefix = new Uint8Array([
+    0x30, 0x77, 0x02, 0x01, 0x01, 0x04, 0x20,
+    ...rawKey,
+    0xa0, 0x0a, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+    0xa1, 0x42, 0x03, 0x40, 0x00,
+    0x04,
+  ]);
+
+  // We need the public key bytes (65 bytes, uncompressed point) for the PKCS#8.
+  // However, Web Crypto can import with just the private scalar if we use
+  // the ECDSA import with "pkcs8" format and a proper PKCS#8 structure.
+  // For VAPID, we only need the private key for signing — the public key is
+  // sent separately in the Authorization header.
+
+  // Actually, the simplest correct approach: use the JWK format for import.
+  // P-256 private key JWK only needs: kty, crv, d (private scalar), x, y (public point).
+  // But we don't have x, y from the raw private key alone.
+
+  // Alternative: Use the raw scalar directly with a minimal PKCS#8 wrapper.
+  // The PKCS#8 for ECDSA P-256 is:
+  // SEQUENCE { version=1, privateKeyAlgorithm, privateKey }
+  // We can build this with just the 32-byte scalar.
+
+  // Build the full PKCS#8 DER manually:
+  // SEQUENCE {
+  //   INTEGER 1
+  //   SEQUENCE { OID 1.2.840.10045.2.1 (ecPublicKey), OID 1.2.840.10045.3.1.7 (secp256r1) }
+  //   OCTET STRING { SEQUENCE { INTEGER 1, OCTET STRING <32 bytes> } }
+  // }
+
+  const oidEcPublicKey = new Uint8Array([0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01]);
+  const oidSecp256r1 = new Uint8Array([0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]);
+
+  // Inner: OCTET STRING containing the raw private key scalar
+  const innerOctetString = new Uint8Array([0x04, 0x20, ...rawKey]);
+  // Inner SEQUENCE { INTEGER 1, OCTET STRING }
+  const innerSeq = new Uint8Array([0x30, 0x26, 0x02, 0x01, 0x01, ...innerOctetString]);
+  // Outer OCTET STRING wrapping inner
+  const outerOctetString = new Uint8Array([0x04, 0x28, ...innerSeq]);
+  // Algorithm identifier SEQUENCE
+  const algoSeq = new Uint8Array([0x30, 0x13, ...oidEcPublicKey, ...oidSecp256r1]);
+  // Top-level SEQUENCE { INTEGER 1, algoSeq, outerOctetString }
+  const pkcs8 = new Uint8Array([0x30, 0x74, 0x02, 0x01, 0x01, ...algoSeq, ...outerOctetString]);
+
   const key = await crypto.subtle.importKey(
-    "raw",
-    rawKey,
+    "pkcs8",
+    pkcs8,
     { name: "ECDSA", namedCurve: "P-256" },
     false,
     ["sign"]
@@ -295,21 +383,34 @@ async function generateVapidJWT(
 function mapErrorCategoryToMessage(category: string): string {
   switch (category) {
     case "missing_vapid":
-      return "Push service is not configured correctly.";
+      return "Push service is not configured correctly. VAPID keys are missing.";
     case "invalid_vapid":
-      return "Push authentication configuration is invalid.";
+      return "Push authentication configuration is invalid. Please contact support.";
     case "expired_subscription":
-      return "This device subscription has expired. Please register notifications again.";
+      return "This device subscription has expired. Please repair your push subscription.";
+    case "malformed_subscription":
+      return "This device subscription is malformed. Please repair your push subscription.";
     case "permission_denied":
-      return "Browser notifications are blocked.";
+      return "Browser notifications are blocked. Please allow notifications in your browser settings.";
     case "no_service_worker":
-      return "Push service worker is not active on this device.";
+      return "Push service worker is not active on this device. Please reload the page.";
     case "vapid_key_mismatch":
-      return "Your push subscription was created with an older key. Please re-enable notifications.";
+      return "Your push subscription was created with an older key. Please repair your push subscription.";
+    case "rate_limited":
+      return "Push provider rate limited this request. Please retry in a moment.";
+    case "provider_error":
+      return "Push provider returned an error. Please retry shortly.";
+    case "timeout":
+      return "Push request timed out. Please check your connection and retry.";
+    case "network_error":
+      return "Network error while contacting push provider. Please check your connection.";
+    case "no_subscription":
+      return "No active subscription was found. Enable notifications in Account Settings first.";
+    case "server_error":
+      return "Server error while processing push request. Please contact support.";
     case "temporary_failure":
-      return "Push delivery is temporarily unavailable. Please retry.";
     default:
-      return "Push delivery failed. Please try again.";
+      return "Push delivery is temporarily unavailable. Please retry.";
   }
 }
 

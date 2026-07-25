@@ -268,4 +268,87 @@ describe('Push delivery flow', () => {
       }
     }
   })
+
+  it('25. send-test-push uses PKCS#8 format for VAPID private key import', () => {
+    const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
+    assert(code.includes('pkcs8'), 'send-test-push should use pkcs8 format for key import')
+    assert(!code.includes('"raw"'), 'send-test-push should NOT use raw format for private key import')
+  })
+
+  it('26. send-push-notification uses PKCS#8 format for VAPID private key import', () => {
+    const code = readFileSync(join(process.cwd(), 'supabase/functions/send-push-notification/index.ts'), 'utf-8')
+    assert(code.includes('pkcs8'), 'send-push-notification should use pkcs8 format for key import')
+  })
+
+  it('27. send-test-push returns structured result with subscriptionsFound, sent, failed', () => {
+    const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
+    assert(code.includes('subscriptionsFound'), 'Should return subscriptionsFound')
+    assert(code.includes('sent'), 'Should return sent count')
+    assert(code.includes('failed'), 'Should return failed count')
+    assert(code.includes('invalidRemoved'), 'Should return invalidRemoved count')
+    assert(code.includes('results'), 'Should return results array')
+  })
+
+  it('28. send-test-push handles 404/410 by deactivating subscription', () => {
+    const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
+    assert(code.includes('404'), 'Should handle 404 status')
+    assert(code.includes('410'), 'Should handle 410 status')
+    assert(code.includes('expired_subscription'), 'Should categorize 404/410 as expired_subscription')
+  })
+
+  it('29. send-test-push handles 401/403 as VAPID error', () => {
+    const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
+    assert(code.includes('401'), 'Should handle 401 status')
+    assert(code.includes('403'), 'Should handle 403 status')
+    assert(code.includes('invalid_vapid'), 'Should categorize 401/403 as invalid_vapid')
+  })
+
+  it('30. send-test-push handles 429 as rate limited', () => {
+    const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
+    assert(code.includes('429'), 'Should handle 429 status')
+    assert(code.includes('rate_limited'), 'Should categorize 429 as rate_limited')
+  })
+
+  it('31. send-test-push detects VAPID key mismatch', () => {
+    const code = readFileSync(join(process.cwd(), 'supabase/functions/send-test-push/index.ts'), 'utf-8')
+    assert(code.includes('vapid_key_fp'), 'Should check VAPID key fingerprint')
+    assert(code.includes('vapid_key_mismatch'), 'Should return vapid_key_mismatch error category')
+  })
+
+  it('32. subscribe-device deactivates duplicates on replace', () => {
+    const code = readFileSync(join(process.cwd(), 'supabase/functions/subscribe-device/index.ts'), 'utf-8')
+    assert(code.includes('replace'), 'Should support replace parameter')
+    assert(code.includes('is_active'), 'Should deactivate old subscriptions')
+  })
+
+  it('33. Service worker has version constant', () => {
+    const swCode = readFileSync(join(process.cwd(), 'public/sw.js'), 'utf-8')
+    assert(swCode.includes('SW_VERSION'), 'Service worker should have version constant')
+  })
+
+  it('34. Service worker has SKIP_WAITING message handler', () => {
+    const swCode = readFileSync(join(process.cwd(), 'public/sw.js'), 'utf-8')
+    assert(swCode.includes('SKIP_WAITING'), 'Service worker should handle SKIP_WAITING message')
+  })
+
+  it('35. send-push-notification creates notification_deliveries records', () => {
+    const code = readFileSync(join(process.cwd(), 'supabase/functions/send-push-notification/index.ts'), 'utf-8')
+    assert(code.includes('notification_deliveries'), 'Should create notification_deliveries records')
+    assert(code.includes('web_push'), 'Should use web_push channel')
+    assert(code.includes('idempotency_key'), 'Should use idempotency key')
+  })
+
+  it('36. No VAPID private key in frontend source', () => {
+    const webPushCode = readFileSync(join(process.cwd(), 'src/lib/webPush.ts'), 'utf-8')
+    assert(!webPushCode.includes('VAPID_PRIVATE_KEY'), 'Frontend should not reference VAPID_PRIVATE_KEY')
+    assert(!webPushCode.includes('private_key'), 'Frontend should not reference private_key')
+  })
+
+  it('37. repairPushSubscription deactivates duplicates before re-subscribing', () => {
+    const code = readFileSync(join(process.cwd(), 'src/lib/webPush.ts'), 'utf-8')
+    assert(code.includes('repairPushSubscription'), 'Should have repairPushSubscription function')
+    // Should deactivate old subscriptions with same browser+platform before creating new one
+    const repairSection = code.substring(code.indexOf('export async function repairPushSubscription'))
+    assert(repairSection.includes('is_active') && repairSection.includes('false'), 'Should deactivate old subscriptions')
+  })
 })

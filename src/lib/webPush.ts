@@ -146,7 +146,7 @@ export async function subscribeToPush(): Promise<PushSubscription | null> {
   }
 }
 
-export async function saveSubscriptionToServer(sub: PushSubscription): Promise<boolean> {
+export async function saveSubscriptionToServer(sub: PushSubscription, replace = false): Promise<boolean> {
   const { data: session } = await supabase.auth.getSession()
   if (!session.session) return false
 
@@ -174,6 +174,7 @@ export async function saveSubscriptionToServer(sub: PushSubscription): Promise<b
         deviceName,
         platform,
         browser,
+        replace,
       }),
     })
     return response.ok
@@ -261,6 +262,17 @@ export async function repairPushSubscription(): Promise<{ success: boolean; mess
     const { data: session } = await supabase.auth.getSession()
     if (!session.session) return { success: false, message: 'Not authenticated' }
 
+    // Deactivate ALL existing active subscriptions for this user + same browser/platform
+    // to eliminate duplicate device records
+    const { browser, platform } = parseUserAgent()
+    await supabase
+      .from('push_subscriptions')
+      .update({ is_active: false, revoked_at: new Date().toISOString() })
+      .eq('is_active', true)
+      .eq('browser', browser)
+      .eq('platform', platform)
+
+    // Also deactivate the old endpoint if it exists
     if (existing) {
       const subJson = existing.toJSON()
       if (subJson.endpoint) {
@@ -281,7 +293,7 @@ export async function repairPushSubscription(): Promise<{ success: boolean; mess
       applicationServerKey: urlBase64ToUint8Array(vapidKey).buffer as ArrayBuffer,
     })
 
-    const saved = await saveSubscriptionToServer(newSub)
+    const saved = await saveSubscriptionToServer(newSub, true)
     if (!saved) {
       return { success: false, message: 'Could not save subscription. Please try again.' }
     }
@@ -290,7 +302,7 @@ export async function repairPushSubscription(): Promise<{ success: boolean; mess
     return {
       success: testResult.success,
       message: testResult.success
-        ? 'Push subscription repaired and test notification sent.'
+        ? 'Push subscription repaired successfully.'
         : `Subscription repaired but test failed: ${testResult.message}`,
     }
   } catch {

@@ -1,8 +1,9 @@
-// Navjyoti HRMS Service Worker
+// Navjyoti HRMS Service Worker v2
 // Handles push events, notification clicks, and service-worker updates.
 // Does NOT cache authenticated/private API responses.
 
-const CACHE_NAME = 'navjyoti-hrms-shell-v1'
+const SW_VERSION = 'v2'
+const CACHE_NAME = `navjyoti-hrms-shell-${SW_VERSION}`
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -65,6 +66,13 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => caches.match(event.request))
     )
+  }
+})
+
+// Message handler — allows page to trigger service worker update
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting()
   }
 })
 

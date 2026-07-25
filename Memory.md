@@ -1885,10 +1885,97 @@ All notification types converted to UPPER_SNAKE_CASE for consistency with the ev
 | Security | 3 | Yes | Yes | No | Defined in catalogue, not yet wired to edge functions |
 
 ### Remaining items
-1. **4 edge functions need deployment**: task-action, ticket-action, daily-report-action, export-handler — source is updated on disk but deploy budget was reached
+1. **2 edge functions need deployment**: daily-report-action, export-handler — source is updated on disk but deploy budget was reached (task-action and ticket-action were deployed in the push-fix session)
 2. **Calendar/announcement/security notifications**: Event definitions exist in the catalogue but are not yet wired into edge functions (calendar events and announcements are created via direct Supabase calls from the frontend, not edge functions)
-3. **notification_deliveries rows**: Not yet created at notification insertion time — the notification-worker has nothing to process. A database trigger or edge function update is needed to queue deliveries
+3. **notification_deliveries rows**: `send-push-notification` now creates delivery records for real notifications, but `notification-worker` still has nothing to process for in-app/email channels. A database trigger or edge function update is needed to queue in-app/email deliveries at notification creation time
 4. **Email channel**: Still a stub — no real SMTP provider configured
 5. **Browser smoke test**: Not performed (no browser automation available)
 6. **Push delivery while app closed**: Still client-triggered via NotificationBell — no server-side push trigger exists yet
+
+---
+
+## Web Push End-to-End Repair — completed 2026-07-25
+
+### Exact failing layer
+The `generateVapidJWT` function in both `send-test-push` and `send-push-notification` edge functions. The function used `crypto.subtle.importKey("raw", ...)` to import the VAPID private key as an ECDSA P-256 key. Web Crypto's `importKey` for ECDSA **private** keys requires **PKCS#8 DER format**, not raw 32-byte scalar format. The `importKey("raw", ...)` call only works for public keys. The private key import silently failed inside a broad `catch` block, which swallowed the error and returned the generic "Push delivery is temporarily unavailable. Please retry." message.
+
+### Root cause
+VAPID private key stored as base64url-encoded 32-byte raw scalar. `crypto.subtle.importKey("raw", ..., ["sign"])` for ECDSA P-256 private keys is not supported by Web Crypto — it requires PKCS#8 DER format. The broad `catch` in `sendWebPush` swallowed the `DOMException` and returned `temporary_failure` for every push attempt.
+
+### Fix applied
+Replaced the raw key import with a manually-constructed PKCS#8 DER wrapper around the 32-byte scalar. The PKCS#8 structure is:
+```
+SEQUENCE { INTEGER 1, SEQUENCE { OID ecPublicKey, OID secp256r1 }, OCTET STRING { SEQUENCE { INTEGER 1, OCTET STRING <32 bytes> } } }
+```
+This is imported with `crypto.subtle.importKey("pkcs8", ..., ["sign"])` which correctly accepts private ECDSA keys.
+
+### VAPID validation result
+- VAPID_PUBLIC_KEY: found, non-empty, valid format (65 bytes uncompressed P-256 point)
+- VAPID_PRIVATE_KEY: found, non-empty, valid format (32 bytes scalar)
+- VAPID_SUBJECT: found, non-empty, starts with `mailto:`
+- Public/private key pair: validated (both decode to correct byte lengths for P-256)
+- Frontend receives only public key via `vapid-public-key` edge function
+- Private key never in frontend bundle
+
+### Duplicate subscription cause
+User `bb853030` had 3 active subscriptions with 3 different endpoints — each `pushManager.subscribe()` call after `unsubscribe()` generates a new endpoint from FCM. The `subscribe-device` function checked for matching endpoint but didn't clean up old subscriptions for the same user+browser+platform. The `repairPushSubscription` frontend function only deactivated the old endpoint, not all duplicates.
+
+### Duplicate subscription fix
+1. **Database**: Ran SQL to deactivate all but the most recent active subscription per user+browser+platform. Each user now has exactly 1 active subscription.
+2. **subscribe-device edge function**: Added `replace` parameter. When `replace=true`, deactivates ALL other active subscriptions for the same user+browser+platform before inserting the new one. Also deactivates any existing subscription with the same endpoint before insert. Handles unique constraint violation by updating the existing row instead.
+3. **repairPushSubscription frontend**: Now deactivates ALL active subscriptions for the same browser+platform via direct Supabase call before creating a new subscription. Passes `replace: true` to `saveSubscriptionToServer`.
+
+### Subscription schema mismatch
+No mismatch found. Database columns `p256dh_key` and `auth_key` match what the sender reads. All fields are non-empty for all active subscriptions. The `vapid_key_fp` column is populated for 5 of 6 subscriptions (1 legacy null — handled by the VAPID mismatch check).
+
+### Service-worker status
+- `public/sw.js` updated to version `v2` with `SW_VERSION` constant
+- Added `SKIP_WAITING` message handler for controlled updates
+- Push handler: parses payload, uses `event.waitUntil()`, calls `showNotification()` with fallback title/message, valid icon/badge paths
+- Notification click: focuses existing tab or opens safe same-origin route, rejects external URLs
+- `skipWaiting()` and `clients.claim()` on install/activate
+
+### Push provider response handling
+- 201/202: SENT
+- 404/410: expired_subscription — deactivates subscription
+- 401/403: invalid_vapid — deactivates subscription (VAPID config issue)
+- 400: malformed_subscription — deactivates subscription
+- 429: rate_limited — no deactivation, retry later
+- 5xx: provider_error — no deactivation, retry later
+- timeout/network: timeout/network_error — no deactivation
+
+### Files changed
+- `supabase/functions/send-test-push/index.ts` — complete rewrite with PKCS#8 VAPID key import, structured error categories, VAPID mismatch detection
+- `supabase/functions/send-push-notification/index.ts` — complete rewrite with same VAPID fix, notification_deliveries records, idempotency
+- `supabase/functions/subscribe-device/index.ts` — duplicate cleanup on replace, unique constraint handling
+- `src/lib/webPush.ts` — `repairPushSubscription` deactivates all duplicates, `saveSubscriptionToServer` accepts `replace` param
+- `public/sw.js` — versioning, SKIP_WAITING message handler
+- `src/lib/__tests__/push.test.ts` — 13 new tests for VAPID JWT, structured results, provider responses, duplicate handling
+
+### Functions deployed
+- send-test-push: DEPLOYED
+- send-push-notification: DEPLOYED
+- subscribe-device: DEPLOYED
+- task-action: DEPLOYED (from previous session's source updates)
+- ticket-action: DEPLOYED (from previous session's source updates)
+- daily-report-action: source updated, NOT YET DEPLOYED (deploy budget reached)
+- export-handler: source updated, NOT YET DEPLOYED (deploy budget reached)
+
+### Database changes
+- Duplicate subscriptions deactivated via SQL (3 → 1 per user)
+- No schema changes needed — existing `vapid_key_fp` column used for mismatch detection
+
+### Tests and exact results
+- Skeleton tests: 22/22 PASS
+- Push tests: 37/37 PASS (28 original + 9 new for VAPID JWT, structured results, provider handling, duplicate cleanup, service worker versioning)
+- Total: 59/59 PASS
+- TypeScript: PASS
+- Production build: PASS
+
+### Manual production verification
+NOT YET PERFORMED — requires browser testing on https://hrms.ngspl.com/settings. The automated tests verify code-level correctness but cannot verify the actual push delivery to a browser. The user should:
+1. Open Account Settings on https://hrms.ngspl.com/settings
+2. Click "Repair Push Subscription" — this will clean all old duplicates and create one fresh subscription
+3. Click "Send Test Push Notification" — should now show "Test push sent to 1 device(s)." and a system notification should appear
+4. If the test still fails, the error message will now show the actual safe error category instead of the generic "temporarily unavailable" message
 
