@@ -14,7 +14,7 @@ import {
   type AttendanceEvidence,
   type AttendanceCorrection,
 } from '@/lib/attendance'
-import { ATTENDANCE_STATUS_LABELS, CORRECTION_TYPE_LABELS, type AttendanceStatus } from '@/types/roles'
+import { ATTENDANCE_STATUS_LABELS, CORRECTION_TYPE_LABELS, CHECKOUT_TYPE_LABELS, CHECKOUT_STATUS_LABELS, type AttendanceStatus, type CheckoutType, type CheckoutStatus } from '@/types/roles'
 import { CheckoutModal } from '@/components/CheckoutModal'
 import { AttendanceSkeleton } from '@/components/Skeleton'
 import '@/styles/attendance.css'
@@ -247,6 +247,24 @@ export function AttendancePage() {
                       {ATTENDANCE_STATUS_LABELS[todayRecord.final_status as AttendanceStatus] ?? todayRecord.final_status}
                     </span>
                   </div>
+                  <div className="attendance-result-row">
+                    <span>Checkout Type</span>
+                    <span className="mono">{CHECKOUT_TYPE_LABELS[todayRecord.checkout_type as CheckoutType] ?? todayRecord.checkout_type}</span>
+                  </div>
+                  <div className="attendance-result-row">
+                    <span>Checkout Status</span>
+                    <span className={`attendance-badge ${todayRecord.checkout_status.toLowerCase()}`}>
+                      {CHECKOUT_STATUS_LABELS[todayRecord.checkout_status as CheckoutStatus] ?? todayRecord.checkout_status}
+                    </span>
+                  </div>
+                  {todayRecord.checkout_type === 'AUTO' && (
+                    <div className="attendance-result-row">
+                      <span>Checkout</span>
+                      <span style={{ fontSize: '12px', color: 'var(--slate)' }}>
+                        Automatically closed — employee did not manually check out
+                      </span>
+                    </div>
+                  )}
                   {todayRecord.status_reason && (
                     <div className="attendance-result-row">
                       <span>Reason</span>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
-import { ATTENDANCE_STATUS_LABELS, type AttendanceStatus } from '@/types/roles'
+import { ATTENDANCE_STATUS_LABELS, CHECKOUT_TYPE_LABELS, CHECKOUT_STATUS_LABELS, type AttendanceStatus, type CheckoutType, type CheckoutStatus } from '@/types/roles'
 import { formatTimestamp, formatDate, createEvidenceSignedUrl } from '@/lib/attendance'
 import { TableSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
@@ -17,6 +17,8 @@ interface AttendanceRow {
   actual_elapsed_minutes: number | null
   final_status: string
   status_reason: string | null
+  checkout_type: string
+  checkout_status: string
   correction_version: number
   employees: { full_name: string; employee_code: string } | null
   branches: { name: string } | null
@@ -52,6 +54,7 @@ export function AttendanceManagementPage() {
     imageUrl: string | null
     loading: boolean
   } | null>(null)
+  const [checkoutTypeFilter, setCheckoutTypeFilter] = useState('all')
   const [page, setPage] = useState(0)
   const PAGE_SIZE = 25
 
@@ -79,6 +82,7 @@ export function AttendanceManagementPage() {
       .select(`
         id, employee_id, attendance_date, check_in_at, required_checkout_at,
         check_out_at, actual_elapsed_minutes, final_status, status_reason, correction_version,
+        checkout_type, checkout_status,
         employees!inner (full_name, employee_code),
         branches (name)
       `)
@@ -109,11 +113,12 @@ export function AttendanceManagementPage() {
     const matchesSearch = !q || (emp?.full_name.toLowerCase().includes(q) || emp?.employee_code.toLowerCase().includes(q))
     let matchesStatus = statusFilter === 'all' || r.final_status === statusFilter
     if (statusFilter === 'checked_in') matchesStatus = CHECKED_IN_STATUSES.includes(r.final_status)
-    return matchesSearch && matchesStatus
+    const matchesCheckoutType = checkoutTypeFilter === 'all' || r.checkout_type === checkoutTypeFilter
+    return matchesSearch && matchesStatus && matchesCheckoutType
   })
   const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
-  const hasFilters = statusFilter !== 'all' || search.trim() !== ''
+  const hasFilters = statusFilter !== 'all' || checkoutTypeFilter !== 'all' || search.trim() !== ''
 
   async function viewEvidence(recordId: string, employeeName: string, date: string) {
     setEvidenceLoading(true)
@@ -161,6 +166,7 @@ export function AttendanceManagementPage() {
 
   function clearFilters() {
     setStatusFilter('all')
+    setCheckoutTypeFilter('all')
     setSearch('')
     setPage(0)
   }
@@ -208,6 +214,14 @@ export function AttendanceManagementPage() {
             <label htmlFor="att-date">Date</label>
             <input id="att-date" type="date" value={dateFilter} onChange={(e) => { setDateFilter(e.target.value); setPage(0) }} />
           </div>
+          <div className="form-field">
+            <label htmlFor="att-checkout-type">Checkout Type</label>
+            <select id="att-checkout-type" value={checkoutTypeFilter} onChange={(e) => { setCheckoutTypeFilter(e.target.value); setPage(0) }}>
+              <option value="all">All Checkout Types</option>
+              <option value="MANUAL">Manual</option>
+              <option value="AUTO">Automatic</option>
+            </select>
+          </div>
         </div>
 
         {loading ? (
@@ -222,7 +236,7 @@ export function AttendanceManagementPage() {
                 <tr>
                   <th>Employee</th><th>Code</th><th>Branch</th><th>Date</th>
                   <th>Check-In</th><th>Required Checkout</th><th>Actual Checkout</th>
-                  <th>Elapsed</th><th>Status</th><th>Correction</th><th>Evidence</th>
+                  <th>Elapsed</th><th>Status</th><th>Checkout</th><th>Correction</th><th>Evidence</th>
                 </tr>
               </thead>
               <tbody>
@@ -237,6 +251,12 @@ export function AttendanceManagementPage() {
                     <td data-label="Actual Checkout" className="mono">{r.check_out_at ? formatTimestamp(r.check_out_at) : '—'}</td>
                     <td data-label="Elapsed" className="mono">{r.actual_elapsed_minutes ? `${r.actual_elapsed_minutes}m` : '—'}</td>
                     <td data-label="Status"><span className={`attendance-badge ${r.final_status.toLowerCase()}`}>{ATTENDANCE_STATUS_LABELS[r.final_status as AttendanceStatus] ?? r.final_status}</span></td>
+                    <td data-label="Checkout">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ fontSize: '11px' }}>{CHECKOUT_TYPE_LABELS[r.checkout_type as CheckoutType] ?? r.checkout_type}</span>
+                        <span className={`attendance-badge ${r.checkout_status.toLowerCase()}`} style={{ fontSize: '10px' }}>{CHECKOUT_STATUS_LABELS[r.checkout_status as CheckoutStatus] ?? r.checkout_status}</span>
+                      </div>
+                    </td>
                     <td data-label="Correction">{r.correction_version > 0 ? <span className="tag tag-amber">v{r.correction_version}</span> : '—'}</td>
                     <td data-label="Evidence">
                       {canReadEvidence && (

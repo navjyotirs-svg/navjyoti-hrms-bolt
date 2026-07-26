@@ -22,6 +22,8 @@ export interface AttendanceRecord {
   attendance_policy_version: string
   final_status: AttendanceStatus
   status_reason: string | null
+  checkout_type: 'MANUAL' | 'AUTO'
+  checkout_status: 'COMPLETED' | 'MISSED_CHECKOUT' | 'PENDING'
   pre_checkout_reminder_sent_at: string | null
   checkout_ready_reminder_sent_at: string | null
   created_at: string

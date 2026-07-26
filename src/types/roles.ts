@@ -150,6 +150,21 @@ export const ATTENDANCE_STATUS_LABELS: Record<AttendanceStatus, string> = {
   HALF_DAY: 'Half Day',
 }
 
+export type CheckoutType = 'MANUAL' | 'AUTO'
+
+export const CHECKOUT_TYPE_LABELS: Record<CheckoutType, string> = {
+  MANUAL: 'Manual',
+  AUTO: 'Automatic',
+}
+
+export type CheckoutStatus = 'COMPLETED' | 'MISSED_CHECKOUT' | 'PENDING'
+
+export const CHECKOUT_STATUS_LABELS: Record<CheckoutStatus, string> = {
+  COMPLETED: 'Completed',
+  MISSED_CHECKOUT: 'Missed Checkout',
+  PENDING: 'Pending',
+}
+
 export type LeaveStatus =
   | 'DRAFT'
   | 'PENDING_MANAGER'

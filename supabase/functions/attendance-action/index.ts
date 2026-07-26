@@ -405,7 +405,8 @@ async function handleCheckOut(
     ? `Checked out at ${elapsedMinutes} minutes (full-day threshold: ${requiredTotal})`
     : `Checked out early at ${elapsedMinutes} minutes (full-day threshold: ${requiredTotal})`;
 
-  // Update attendance record
+  // Update attendance record — manual checkout takes priority over any
+  // pending automatic checkout. checkout_type = MANUAL, checkout_status = COMPLETED.
   const { error: updateError } = await admin
     .from("attendance_records")
     .update({
@@ -413,8 +414,11 @@ async function handleCheckOut(
       actual_elapsed_minutes: elapsedMinutes,
       final_status: finalStatus,
       status_reason: statusReason,
+      checkout_type: "MANUAL",
+      checkout_status: "COMPLETED",
     })
-    .eq("id", record.id);
+    .eq("id", record.id)
+    .eq("final_status", "PENDING_CHECKOUT");
 
   if (updateError) {
     return jsonError(500, `Failed to update attendance record: ${updateError.message}`);
