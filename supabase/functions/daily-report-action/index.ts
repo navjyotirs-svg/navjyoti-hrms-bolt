@@ -438,6 +438,22 @@ async function handleSubmit(
     });
   }
 
+  // One notification per submitted report (not per photo) to manager + HR + Directors
+  await notifyBusinessEvent(supabase, {
+    eventCode: "DAILY_REPORT_SUBMITTED",
+    actorUserId: userId,
+    employeeId: employee.id,
+    organizationId: orgId,
+    entityType: "daily_report",
+    entityId: reportId,
+    title: "Daily Report Submitted",
+    message: `A daily report for ${reportDate} has been submitted for review.`,
+    priority: "normal",
+    category: "daily_report",
+    actionUrl: "/team-reports",
+    recipientRoles: ["manager", "hr_admin", "director"],
+  });
+
   await writeAudit(supabase, userId, "daily_report.submit", "daily_report", reportId, null, { report_date: reportDate });
 
   return successResponse({ message: "Report submitted", report_id: reportId });

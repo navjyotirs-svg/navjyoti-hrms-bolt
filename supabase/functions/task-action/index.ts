@@ -461,6 +461,21 @@ async function handleCreate(
     "/my-tasks"
   );
 
+  // If task has a cost, notify assignee with TASK_COST_CREATED (no amount in notification)
+  if (parsedCost !== null) {
+    await createNotification(
+      supabase,
+      assignee_id,
+      "TASK_COST_CREATED",
+      "Task Assigned with Cost",
+      `Task ${taskCode}: ${title} has been assigned with an operational task cost.`,
+      "normal",
+      `task_cost_created:${task.id}:${assignee_id}`,
+      "task",
+      "/my-tasks"
+    );
+  }
+
   // Audit
   await writeAudit(supabase, userId, "task.create", "task", task.id, null, { task_code: taskCode, title });
 

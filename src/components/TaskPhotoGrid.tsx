@@ -6,6 +6,7 @@ import {
   type DailyReportTaskPhoto,
 } from '@/lib/dailyReports'
 import { useAuth } from '@/auth/AuthContext'
+import { processImage, isHeic } from '@/lib/imageProcessing'
 
 interface TaskPhotoGridProps {
   dailyReportId: string
@@ -98,6 +99,11 @@ export function TaskPhotoGrid({ dailyReportId, taskItemId, taskId, employeeId, i
       const uploadId = crypto.randomUUID()
       setUploading(prev => [...prev, { id: uploadId, fileName: file.name, progress: 0, error: null }])
 
+      if (isHeic(file)) {
+        setUploading(prev => prev.map(u => u.id === uploadId ? { ...u, error: 'HEIC/HEIF format is not supported. Please convert to JPG or PNG.' } : u))
+        continue
+      }
+
       const validationError = validatePhotoFile(file)
       if (validationError) {
         setUploading(prev => prev.map(u => u.id === uploadId ? { ...u, error: validationError } : u))
@@ -105,9 +111,15 @@ export function TaskPhotoGrid({ dailyReportId, taskItemId, taskId, employeeId, i
       }
 
       try {
+        // Process image: EXIF orientation, resize to 1920px max, compress to 82-85% quality
+        const processed = await processImage(file)
+        const processedFile = new File([processed.blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
+          type: processed.blob.type || 'image/jpeg',
+        })
+
         const newPhoto = await uploadTaskPhoto(
           dailyReportId, taskItemId, taskId, employeeId,
-          profile.organization_id, file, photos.length + uploading.length,
+          profile.organization_id, processedFile, photos.length + uploading.length,
           sourceType
         )
         const signedUrl = await createTaskPhotoSignedUrl(newPhoto.storage_path).catch(() => null)

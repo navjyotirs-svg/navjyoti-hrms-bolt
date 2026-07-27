@@ -2444,7 +2444,7 @@ Every destination page has a "Back to Dashboard" button that navigates to /. Bro
 
 ### Manual Verification
 
-NOT YET PERFORMED — requires browser testing. The user should verify all 15 checklist items from the request.
+NOT YET PERFORMED — requires browser testing on the published HTTPS app. See Phase 8 verification below for what was automated.
 
 ---
 
@@ -2460,9 +2460,10 @@ Operational/project cost field on tasks. Does NOT affect salary, payroll, incent
 - 5 new permissions: `task.cost_set`, `task.cost_update`, `task.cost_read_self`, `task.cost_read_team`, `task.cost_read_all`
 - Director: all 5; HR Admin: cost_set/cost_update/cost_read_all; Manager: cost_set/cost_update/cost_read_team; Employee: cost_read_self; System Admin: none
 
-#### Edge function: `task-action` (DEPLOYED)
+#### Edge function: `task-action` (DEPLOYED 2026-07-27)
 - `create` action: validates and saves `task_cost` (numeric, 2 decimal places, >= 0), requires `task.cost_set` permission
 - New `update_cost` action: requires `task.cost_update` permission, requires change reason, writes `task_cost_history` + audit log
+- Fires `TASK_COST_CREATED` notification to assignee when task created with cost (no amount in notification)
 
 #### Frontend changes
 - `src/lib/tasks.ts`: added `task_cost` fields to `TaskRow` interface, `task_cost` param to `createTask`, new `updateTaskCost` function, new `formatTaskCost` helper (₹ prefix, en-IN locale, 2 decimal places)
@@ -2478,45 +2479,96 @@ Per-task-item photo evidence in Daily Reports. Each task item maintains its own 
 #### Migration (same file)
 - New table `daily_report_task_photos`: id, organization_id, daily_report_id, daily_report_task_item_id, task_id, employee_id, uploaded_by, storage_path, file_name, mime_type, file_size_bytes, display_order, caption, source_type (GALLERY/CAMERA), width, height, uploaded_at, deleted_at
 - RLS: SELECT (owner or manager/HR/director in same org), INSERT (owner + report must be draft/returned), UPDATE (owner only), DELETE (owner + report must be draft/returned — protects submitted evidence)
-- Private storage bucket `daily-report-task-photos` (public=false) with INSERT/SELECT/DELETE storage policies
+- Private storage bucket `daily-report-task-photos` (public=false) with TIGHTENED storage policies (owner-scoped path prefix for INSERT/DELETE, same-org for SELECT)
+
+#### Storage policy tightening (migration: `tighten_daily_report_task_photos_storage_policies`)
+- Original policies allowed ANY authenticated user cross-org access — SECURITY FIX
+- New INSERT policy: path must start with auth.uid() (owner only)
+- New DELETE policy: path must start with auth.uid() (owner only)
+- New SELECT policy: owner OR same-org manager/hr_admin/director (cross-org denied)
+
+#### Edge function: `daily-report-action` (DEPLOYED 2026-07-27)
+- Fires `DAILY_REPORT_SUBMITTED` notification on report submission (one per report, not per photo)
+- Recipients: manager + hr_admin + director in same org
+- Idempotency key: `orgId:DAILY_REPORT_SUBMITTED:reportId:recipientId`
+
+#### Image processing (NEW: `src/lib/imageProcessing.ts`)
+- Client-side processing BEFORE upload
+- EXIF orientation correction via createImageBitmap
+- Resize to max 1920px longest side
+- Compress to 82% quality (JPEG) / 85% quality (WebP)
+- Thumbnail generation (320px, 70% quality)
+- HEIC/HEIF detection with clear "not supported, please convert" message
+- Processing failure shows controlled error with retry option
 
 #### Frontend changes
 - `src/lib/dailyReports.ts`: added `DailyReportTaskPhoto` interface, `fetchTaskPhotos`, `uploadTaskPhoto`, `deleteTaskPhoto`, `updateTaskPhotoCaption`, `reorderTaskPhotos`, `createTaskPhotoSignedUrl`, `validatePhotoFile`, constants (MAX_PHOTOS=10, MAX_SIZE=10MB, MAX_TOTAL=50MB, allowed types)
-- `src/components/TaskPhotoGrid.tsx` (NEW): reusable photo grid component with gallery picker (multiple, accept=image/*), camera button (capture=environment), thumbnail grid, upload progress, retry failed, remove, caption editing, full-screen preview, "X of 10 photos added" counter, responsive grid (auto-fill minmax 100px)
+- `src/lib/imageProcessing.ts` (NEW): processImage function, isHeic detector, constants
+- `src/components/TaskPhotoGrid.tsx` (NEW): reusable photo grid with gallery picker (multiple), camera button (capture=environment), image processing before upload, thumbnail grid, upload progress, retry failed, remove, caption editing, full-screen preview, "X of 10 photos added" counter, responsive grid
 - `src/pages/DailyReportPage.tsx`: renders task items with work_done/result_achieved fields + TaskPhotoGrid per item (read-only when report submitted/reviewed/locked)
 - `src/pages/ReportReviewPage.tsx`: shows photos grouped under each task item for managers/HR/Director review
 
 #### Notification events added
-- `TASK_COST_CREATED`: "A task was assigned with an operational task cost." (no amount in push)
-- `DAILY_REPORT_EVIDENCE_ADDED`: "Supporting evidence has been added to a daily report after a correction request."
-- `DAILY_REPORT_SUBMITTED`: "A daily report with supporting task evidence has been submitted."
+- `TASK_COST_CREATED`: "Task {code}: {title} has been assigned with an operational task cost." (no amount in push, no salary terminology)
+- `DAILY_REPORT_EVIDENCE_ADDED`: "Supporting evidence has been added to a daily report after a correction request." (fired only on returned reports)
+- `DAILY_REPORT_SUBMITTED`: "A daily report for {date} has been submitted for review." (one per report, not per photo)
 
-### Build & Tests
+### Verification Results (2026-07-27)
+
+#### 1. Functions deployed
+- `task-action`: ACTIVE, verify_jwt=true — fires TASK_COST_CREATED on create with cost
+- `daily-report-action`: ACTIVE, verify_jwt=true — fires DAILY_REPORT_SUBMITTED on submit
+- `notification-worker`: ACTIVE, verify_jwt=false — generic, supports all event codes
+- `create-business-notification`: ACTIVE, verify_jwt=true — generic, supports all event codes
+
+#### 2. Live database schema verified
+- `tasks.task_cost`: numeric, nullable — CONFIRMED
+- `tasks.task_cost_currency`: text, NOT NULL, default 'INR' — CONFIRMED
+- `tasks.task_cost_updated_by`: uuid, nullable — CONFIRMED
+- `tasks.task_cost_updated_at`: timestamptz, nullable — CONFIRMED
+- CHECK constraint `tasks_task_cost_non_negative`: task_cost >= 0 OR NULL — CONFIRMED
+- CHECK constraint `tasks_task_cost_currency_inr`: task_cost_currency = 'INR' — CONFIRMED
+- `task_cost_history` table: 7 FKs + PK + index on (task_id, created_at DESC) — CONFIRMED
+- `task_cost_history` RLS: enabled, SELECT+INSERT only (no UPDATE/DELETE) — CONFIRMED
+- `daily_report_task_photos` table: 6 FKs + PK + 5 indexes — CONFIRMED
+- `daily_report_task_photos` RLS: enabled, 4 policies (SELECT/INSERT/UPDATE/DELETE) — CONFIRMED
+- Storage bucket `daily-report-task-photos`: public=false — CONFIRMED
+- Storage policies: 3 policies (SELECT/INSERT/DELETE), owner-scoped + same-org — CONFIRMED
+
+#### 3. New automated tests
+- `src/lib/__tests__/phase8_features.test.ts`: 46 tests covering:
+  - Task cost formatting (7 tests)
+  - Task cost validation (6 tests)
+  - Cost history immutability (1 test)
+  - No salary/payroll effect (1 test)
+  - Photo file validation (8 tests)
+  - Photo limits (3 tests)
+  - Storage path security (2 tests)
+  - Submitted evidence protection (4 tests)
+  - Cross-org access denial (1 test)
+  - Notification behavior (3 tests)
+  - Task item separation (1 test)
+  - Failed upload isolation (1 test)
+  - Returned report evidence (1 test)
+  - Storage bucket privacy (1 test)
+  - Signed URL expiry (1 test)
+  - Failed upload cleanup (1 test)
+  - Image processing (3 tests)
+
+#### 4. Test results
+- New Phase 8 tests: 46 pass / 0 fail
+- Existing tests: 126 pass / 0 fail
+- Total: 172 pass / 0 fail
+
+#### 5. Production build
 - TypeScript: PASS
-- Production build: PASS (204 modules, 781.86 kB JS / 42.04 kB CSS)
-- All 126 existing tests PASS (no new tests added — no test framework for UI components)
-- Edge function deployed: task-action
-
-### Files changed
-1. `supabase/migrations/phase8_task_cost_and_daily_report_photos.sql` — migration (applied via MCP)
-2. `supabase/functions/task-action/index.ts` — task_cost on create + update_cost action
-3. `src/lib/tasks.ts` — task_cost fields, updateTaskCost, formatTaskCost
-4. `src/lib/dailyReports.ts` — photo CRUD functions + constants
-5. `src/lib/notificationEvents.ts` — 3 new notification events
-6. `src/types/roles.ts` — 5 cost permissions
-7. `src/pages/CreateTaskPage.tsx` — Task Cost field
-8. `src/pages/TaskDetailPage.tsx` — cost display
-9. `src/pages/TeamTasksPage.tsx` — cost column
-10. `src/pages/TaskReviewPage.tsx` — cost display + photo grid
-11. `src/pages/DailyReportPage.tsx` — task items + photo grid
-12. `src/pages/ReportReviewPage.tsx` — photos in review
-13. `src/components/TaskPhotoGrid.tsx` — NEW: photo grid component
+- Vite build: PASS (204 modules, 783.53 kB JS / 42.04 kB CSS)
 
 ### Remaining limitations
-- Browser smoke test not performed (no browser automation available)
-- Image compression/orientation correction (EXIF) not implemented — photos uploaded as-is; a future enhancement would add client-side canvas-based compression to 1920px max dimension at 80-85% quality
-- HEIC/HEIF not supported (shows "format not supported" message)
+- Browser/mobile smoke test NOT performed — this environment has no browser automation or access to the published HTTPS app. The user must verify the 18-step mobile workflow and 11-step task cost browser workflow manually on the published app.
 - Photo reordering UI not implemented (backend `reorderTaskPhotos` function exists but no drag-and-drop UI)
-- No automated tests for the new features (no test framework for UI components in this project)
-- The daily-report-action edge function was not updated for photo actions — all photo CRUD is handled client-side via Supabase JS client with RLS enforcement
+- HEIC/HEIF not supported (shows clear "not supported, please convert to JPG or PNG" message)
+- EXIF orientation correction relies on browser createImageBitmap support; older browsers without it fall back to img element loading (orientation may not be corrected on very old browsers)
+- Thumbnail generation is implemented in imageProcessing.ts but thumbnails are not yet stored separately in the database (the thumbnail blob is generated but not uploaded to a separate storage path)
+
 
