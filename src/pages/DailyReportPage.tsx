@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getKolkataDate, fetchMyReport, saveDraft, submitReport, type DailyReportRow, type DailyReportTaskItem } from '@/lib/dailyReports'
 import { DailyReportSkeleton } from '@/components/Skeleton'
+import { TaskPhotoGrid } from '@/components/TaskPhotoGrid'
 import '@/styles/shared.css'
 
 export function DailyReportPage() {
@@ -162,6 +163,42 @@ export function DailyReportPage() {
                 </select>
               </div>
             </div>
+
+            {taskItems.length > 0 && (
+              <div style={{ marginBottom: 'var(--space-4)' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: 'var(--space-3)' }}>Task Items</h3>
+                {taskItems.map((item, idx) => (
+                  <div key={item.id || idx} className="card" style={{ marginBottom: 'var(--space-3)', padding: 'var(--space-3)', border: '1px solid var(--border)' }}>
+                    <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: 'var(--space-2)' }}>
+                      Task Item {idx + 1}
+                    </div>
+                    <div className="form-grid">
+                      <div className="form-field">
+                        <label>Work Done</label>
+                        <textarea rows={2} value={item.work_done || ''} onChange={(e) => {
+                          const next = [...taskItems]; next[idx] = { ...next[idx], work_done: e.target.value }; setTaskItems(next)
+                        }} disabled={!!isReadOnly} />
+                      </div>
+                      <div className="form-field">
+                        <label>Result Achieved</label>
+                        <textarea rows={2} value={item.result_achieved || ''} onChange={(e) => {
+                          const next = [...taskItems]; next[idx] = { ...next[idx], result_achieved: e.target.value }; setTaskItems(next)
+                        }} disabled={!!isReadOnly} />
+                      </div>
+                    </div>
+                    {existing?.id && (
+                      <TaskPhotoGrid
+                        dailyReportId={existing.id}
+                        taskItemId={item.id || null}
+                        taskId={item.task_id || null}
+                        employeeId={existing.employee_id}
+                        isReadOnly={!!isReadOnly}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {!isReadOnly && (
               <div style={{ display: 'flex', gap: 'var(--space-3)' }}>

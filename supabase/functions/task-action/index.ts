@@ -99,6 +99,8 @@ Deno.serve(async (req: Request) => {
         return await handleAddComment(supabase, body, user.id, permissions);
       case "add_dependency":
         return await handleAddDependency(supabase, body, user.id, permissions);
+      case "update_cost":
+        return await handleUpdateCost(supabase, body, user.id, orgId, permissions);
       default:
         return errorResponse(`Unknown action: ${action}`, 400);
     }
@@ -310,6 +312,7 @@ async function handleCreate(
     collaborators = [],
     reviewers = [],
     dependencies = [],
+    task_cost,
   } = body;
 
   if (!title || !title.trim()) return errorResponse("Title is required", 400);
@@ -319,6 +322,21 @@ async function handleCreate(
   if (!start_date) return errorResponse("Start date is required", 400);
   if (new Date(deadline) < new Date(start_date)) {
     return errorResponse("Deadline cannot be before start date", 400);
+  }
+
+  // Validate task_cost if provided
+  let parsedCost: number | null = null;
+  if (task_cost !== undefined && task_cost !== null && task_cost !== '') {
+    parsedCost = Number(task_cost);
+    if (isNaN(parsedCost) || parsedCost < 0) {
+      return errorResponse("Task cost must be zero or greater", 400);
+    }
+    parsedCost = Math.round(parsedCost * 100) / 100; // 2 decimal places
+  }
+
+  // Check cost_set permission if task_cost is provided
+  if (parsedCost !== null && !hasPerm(perms, "task.cost_set")) {
+    return errorResponse("No permission to set task cost", 403);
   }
 
   // Validate assignee belongs to same org
@@ -364,6 +382,10 @@ async function handleCreate(
       estimated_hours: estimated_hours || null,
       status: initialStatus,
       acceptance_required,
+      task_cost: parsedCost,
+      task_cost_currency: 'INR',
+      task_cost_updated_by: parsedCost !== null ? userId : null,
+      task_cost_updated_at: parsedCost !== null ? new Date().toISOString() : null,
     })
     .select()
     .single();
@@ -1591,4 +1613,71 @@ async function handleAddDependency(
   if (error) return errorResponse(`Failed to add dependency: ${error.message}`, 500);
 
   return successResponse({ message: "Dependency added", dependency: dep });
+}
+
+// ============================================================
+// UPDATE TASK COST
+// ============================================================
+async function handleUpdateCost(
+  supabase: ReturnType<typeof createClient>,
+  body: any,
+  userId: string,
+  orgId: string,
+  perms: string[]
+) {
+  if (!hasPerm(perms, "task.cost_update")) {
+    return errorResponse("No permission to update task cost", 403);
+  }
+
+  const { task_id, new_cost, reason } = body;
+  if (!task_id) return errorResponse("Task ID required", 400);
+  if (!reason || !reason.trim()) return errorResponse("Change reason is required", 400);
+
+  let parsedCost: number | null = null;
+  if (new_cost !== undefined && new_cost !== null && new_cost !== '') {
+    parsedCost = Number(new_cost);
+    if (isNaN(parsedCost) || parsedCost < 0) {
+      return errorResponse("Task cost must be zero or greater", 400);
+    }
+    parsedCost = Math.round(parsedCost * 100) / 100;
+  }
+
+  const { data: task, error: taskError } = await supabase
+    .from("tasks")
+    .select("id, task_cost, task_cost_currency, organization_id")
+    .eq("id", task_id)
+    .single();
+
+  if (taskError || !task) return errorResponse("Task not found", 404);
+  if (task.organization_id !== orgId) return errorResponse("Cross-organization access denied", 403);
+
+  const oldCost = task.task_cost;
+
+  // Update task cost
+  const { error: updateError } = await supabase
+    .from("tasks")
+    .update({
+      task_cost: parsedCost,
+      task_cost_currency: 'INR',
+      task_cost_updated_by: userId,
+      task_cost_updated_at: new Date().toISOString(),
+    })
+    .eq("id", task_id);
+
+  if (updateError) return errorResponse(`Failed to update cost: ${updateError.message}`, 500);
+
+  // Insert history record
+  await supabase.from("task_cost_history").insert({
+    task_id,
+    old_cost: oldCost,
+    new_cost: parsedCost,
+    currency: 'INR',
+    reason: reason.trim(),
+    changed_by: userId,
+  });
+
+  // Audit log
+  await writeAudit(supabase, userId, "task.cost_update", "task", task_id, { task_cost: oldCost }, { task_cost: parsedCost });
+
+  return successResponse({ message: "Task cost updated", old_cost: oldCost, new_cost: parsedCost });
 }

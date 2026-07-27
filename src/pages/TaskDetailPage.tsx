@@ -14,7 +14,7 @@ import {
 import {
   fetchTaskById, fetchTaskActionRequests, acceptTask,
   addProgressUpdate, submitTask, addTaskComment, uploadTaskAttachment,
-  createTaskAttachmentSignedUrl, formatDate, formatDateTime,
+  createTaskAttachmentSignedUrl, formatDate, formatDateTime, formatTaskCost,
 } from '@/lib/tasks'
 import { DetailPageSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
@@ -215,6 +215,12 @@ export function TaskDetailPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Target</span>
                 <span className="mono" style={{ fontSize: '13px' }}>{task.target_quantity} {task.target_unit || ''}</span>
+              </div>
+            )}
+            {task.task_cost != null && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Task Cost</span>
+                <span className="mono" style={{ fontSize: '13px', fontWeight: 600 }}>{formatTaskCost(task.task_cost, task.task_cost_currency)}</span>
               </div>
             )}
             {task.completion_outcome && (

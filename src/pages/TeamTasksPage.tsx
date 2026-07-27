@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { TASK_STATUS_LABELS, TASK_PRIORITY_LABELS, type TaskStatus, type TaskPriority } from '@/types/roles'
-import { fetchTeamTasks, formatDate, type TaskWithAssignments } from '@/lib/tasks'
+import { fetchTeamTasks, formatDate, formatTaskCost, type TaskWithAssignments } from '@/lib/tasks'
 import { TaskSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
@@ -70,7 +70,7 @@ export function TeamTasksPage() {
           <div className="table-wrap">
             <table className="data-table">
               <thead>
-                <tr><th>Code</th><th>Title</th><th>Priority</th><th>Status</th><th>Deadline</th><th>Outcome</th></tr>
+                <tr><th>Code</th><th>Title</th><th>Priority</th><th>Status</th><th>Deadline</th><th>Cost</th><th>Outcome</th></tr>
               </thead>
               <tbody>
                 {filtered.map((t) => (
@@ -80,6 +80,7 @@ export function TeamTasksPage() {
                     <td><span className={`tag tag-${t.priority.toLowerCase()}`}>{TASK_PRIORITY_LABELS[t.priority as TaskPriority]}</span></td>
                     <td><span className={`attendance-badge ${t.status.toLowerCase()}`}>{TASK_STATUS_LABELS[t.status as TaskStatus]}</span></td>
                     <td className="mono">{formatDate(t.current_deadline)}</td>
+                    <td className="mono">{formatTaskCost(t.task_cost, t.task_cost_currency)}</td>
                     <td>{t.completion_outcome || '—'}</td>
                   </tr>
                 ))}

@@ -349,3 +349,144 @@ export async function getAttachmentDownloadUrl(storagePath: string) {
   if (error) throw error
   return data?.signedUrl || null
 }
+
+// ============================================================
+// DAILY REPORT TASK PHOTOS
+// ============================================================
+
+export interface DailyReportTaskPhoto {
+  id: string
+  organization_id: string
+  daily_report_id: string
+  daily_report_task_item_id: string | null
+  task_id: string | null
+  employee_id: string
+  uploaded_by: string
+  storage_path: string
+  file_name: string
+  mime_type: string
+  file_size_bytes: number
+  display_order: number
+  caption: string | null
+  source_type: string | null
+  width: number | null
+  height: number | null
+  uploaded_at: string
+  deleted_at: string | null
+}
+
+export const MAX_PHOTOS_PER_TASK_ITEM = 10
+export const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024 // 10 MB
+export const MAX_TOTAL_PHOTO_BYTES_PER_TASK_ITEM = 50 * 1024 * 1024 // 50 MB
+export const ALLOWED_PHOTO_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+export const ALLOWED_PHOTO_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
+
+export function validatePhotoFile(file: File): string | null {
+  if (!ALLOWED_PHOTO_MIME_TYPES.includes(file.type)) {
+    return 'This image format is not currently supported. Please upload JPG, PNG or WEBP.'
+  }
+  if (file.size > MAX_PHOTO_SIZE_BYTES) {
+    return 'File too large. Maximum 10 MB per photo.'
+  }
+  return null
+}
+
+export async function fetchTaskPhotos(dailyReportId: string): Promise<DailyReportTaskPhoto[]> {
+  const { data, error } = await supabase
+    .from('daily_report_task_photos')
+    .select('*')
+    .eq('daily_report_id', dailyReportId)
+    .is('deleted_at', null)
+    .order('display_order', { ascending: true })
+  if (error) throw error
+  return (data || []) as DailyReportTaskPhoto[]
+}
+
+export async function createTaskPhotoSignedUrl(storagePath: string): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from('daily-report-task-photos')
+    .createSignedUrl(storagePath, 300)
+  if (error) throw error
+  return data?.signedUrl || null
+}
+
+export async function uploadTaskPhoto(
+  reportId: string,
+  taskItemId: string | null,
+  taskId: string | null,
+  employeeId: string,
+  orgId: string,
+  file: File,
+  displayOrder: number,
+  sourceType: string = 'GALLERY',
+  caption?: string
+): Promise<DailyReportTaskPhoto> {
+  const userId = (await supabase.auth.getUser()).data.user?.id
+  if (!userId) throw new Error('Not authenticated')
+
+  const validationError = validatePhotoFile(file)
+  if (validationError) throw new Error(validationError)
+
+  const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+  const randomUuid = crypto.randomUUID()
+  const storagePath = `${userId}/${reportId}/${randomUuid}.${fileExt}`
+
+  const { error: uploadError } = await supabase.storage
+    .from('daily-report-task-photos')
+    .upload(storagePath, file, { contentType: file.type })
+
+  if (uploadError) throw uploadError
+
+  const { data, error } = await supabase
+    .from('daily_report_task_photos')
+    .insert({
+      organization_id: orgId,
+      daily_report_id: reportId,
+      daily_report_task_item_id: taskItemId,
+      task_id: taskId,
+      employee_id: employeeId,
+      uploaded_by: userId,
+      storage_path: storagePath,
+      file_name: file.name,
+      mime_type: file.type,
+      file_size_bytes: file.size,
+      display_order: displayOrder,
+      caption: caption || null,
+      source_type: sourceType,
+    })
+    .select()
+    .single()
+
+  if (error) {
+    await supabase.storage.from('daily-report-task-photos').remove([storagePath])
+    throw error
+  }
+  return data as DailyReportTaskPhoto
+}
+
+export async function deleteTaskPhoto(photoId: string, storagePath: string): Promise<void> {
+  const { error } = await supabase
+    .from('daily_report_task_photos')
+    .delete()
+    .eq('id', photoId)
+    .eq('uploaded_by', (await supabase.auth.getUser()).data.user?.id)
+
+  if (error) throw error
+
+  await supabase.storage.from('daily-report-task-photos').remove([storagePath])
+}
+
+export async function updateTaskPhotoCaption(photoId: string, caption: string): Promise<void> {
+  const { error } = await supabase
+    .from('daily_report_task_photos')
+    .update({ caption })
+    .eq('id', photoId)
+  if (error) throw error
+}
+
+export async function reorderTaskPhotos(photoIds: string[]): Promise<void> {
+  const updates = photoIds.map((id, index) =>
+    supabase.from('daily_report_task_photos').update({ display_order: index }).eq('id', id)
+  )
+  await Promise.all(updates)
+}

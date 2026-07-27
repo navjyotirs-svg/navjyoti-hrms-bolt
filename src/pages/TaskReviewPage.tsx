@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { type TaskRequestStatus, type SubmissionReviewStatus } from '@/types/roles'
 import { TASK_REQUEST_TYPE_LABELS } from '@/types/roles'
-import { fetchPendingActionRequests, fetchPendingSubmissions, reviewTaskRequest, reviewSubmission, formatDate, formatDateTime } from '@/lib/tasks'
+import { fetchPendingActionRequests, fetchPendingSubmissions, reviewTaskRequest, reviewSubmission, formatDate, formatDateTime, formatTaskCost } from '@/lib/tasks'
 import { ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
@@ -119,6 +119,12 @@ export function TaskReviewPage() {
                     <span className="mono" style={{ fontSize: '12px', color: 'var(--slate)' }}>{formatDateTime(s.submitted_at)}</span>
                   </div>
                   <p style={{ fontSize: '13px' }}>{s.result_summary}</p>
+                  {s.tasks?.task_cost != null && (
+                    <p style={{ fontSize: '13px', marginTop: 'var(--space-1)' }}>
+                      <span style={{ color: 'var(--slate)' }}>Task Cost: </span>
+                      <span className="mono" style={{ fontWeight: 600 }}>{formatTaskCost(s.tasks.task_cost, s.tasks.task_cost_currency)}</span>
+                    </p>
+                  )}
                   {s.submission_note && <p style={{ fontSize: '13px', color: 'var(--slate)', marginTop: 'var(--space-1)' }}>{s.submission_note}</p>}
                   <div className="form-field" style={{ marginTop: 'var(--space-2)' }}>
                     <label>Reviewer Feedback</label>

@@ -85,6 +85,11 @@ export type Permission =
   | 'task.attachment_upload'
   | 'task.attachment_read'
   | 'task.report_read'
+  | 'task.cost_set'
+  | 'task.cost_update'
+  | 'task.cost_read_self'
+  | 'task.cost_read_team'
+  | 'task.cost_read_all'
   | 'ticket.create_self'
   | 'ticket.read_self'
   | 'ticket.read_team'
@@ -610,6 +615,11 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'task.attachment_upload': 'Upload Task Attachment',
   'task.attachment_read': 'Read Task Attachment',
   'task.report_read': 'Read Task Reports',
+  'task.cost_set': 'Set Task Cost',
+  'task.cost_update': 'Update Task Cost',
+  'task.cost_read_self': 'Read Own Task Cost',
+  'task.cost_read_team': 'Read Team Task Cost',
+  'task.cost_read_all': 'Read All Task Cost',
   'ticket.create_self': 'Raise Ticket',
   'ticket.read_self': 'Read Own Tickets',
   'ticket.read_team': 'Read Team Tickets',

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from '@/types/roles'
-import { createTask } from '@/lib/tasks'
+import { createTask, formatTaskCost } from '@/lib/tasks'
 import { FormSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
@@ -26,6 +26,7 @@ export function CreateTaskPage() {
     target_quantity: '',
     target_unit: '',
     estimated_hours: '',
+    task_cost: '',
     acceptance_required: true,
     branch_id: '',
     department_id: '',
@@ -57,6 +58,15 @@ export function CreateTaskPage() {
       return
     }
 
+    let taskCost: number | null = null
+    if (form.task_cost.trim()) {
+      taskCost = Number(form.task_cost)
+      if (isNaN(taskCost) || taskCost < 0) {
+        setError('Task cost must be zero or greater')
+        return
+      }
+    }
+
     setLoading(true)
     setError(null)
     try {
@@ -73,6 +83,7 @@ export function CreateTaskPage() {
         target_quantity: form.target_quantity ? Number(form.target_quantity) : null,
         target_unit: form.target_unit || null,
         estimated_hours: form.estimated_hours ? Number(form.estimated_hours) : null,
+        task_cost: taskCost,
         acceptance_required: form.acceptance_required,
         branch_id: form.branch_id || null,
         department_id: form.department_id || null,
@@ -163,6 +174,28 @@ export function CreateTaskPage() {
               <label htmlFor="t-hours">Estimated Hours</label>
               <input id="t-hours" type="number" value={form.estimated_hours} onChange={(e) => setForm({ ...form, estimated_hours: e.target.value })} />
             </div>
+          </div>
+          <div className="form-field">
+            <label htmlFor="t-cost">Task Cost (₹)</label>
+            <input
+              id="t-cost"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.task_cost}
+              onChange={(e) => {
+                const val = e.target.value
+                if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) {
+                  setForm({ ...form, task_cost: val })
+                }
+              }}
+              placeholder="0.00"
+            />
+            {form.task_cost && Number(form.task_cost) > 0 && (
+              <div style={{ fontSize: '12px', color: 'var(--slate)', marginTop: '4px' }}>
+                Preview: {formatTaskCost(Number(form.task_cost))}
+              </div>
+            )}
           </div>
           <div className="form-field">
             <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>

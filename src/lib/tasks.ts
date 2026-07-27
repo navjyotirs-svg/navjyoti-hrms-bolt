@@ -64,6 +64,10 @@ export interface TaskRow {
   owner_id: string
   branch_id: string | null
   department_id: string | null
+  task_cost: number | null
+  task_cost_currency: string
+  task_cost_updated_by: string | null
+  task_cost_updated_at: string | null
 }
 
 export interface TaskWithAssignments extends TaskRow {
@@ -178,8 +182,17 @@ export async function createTask(payload: {
   collaborators?: string[]
   reviewers?: string[]
   dependencies?: string[]
+  task_cost?: number | null
 }) {
   return callTaskAction('create', payload)
+}
+
+export async function updateTaskCost(payload: {
+  task_id: string
+  new_cost: number | null
+  reason: string
+}) {
+  return callTaskAction('update_cost', payload)
 }
 
 export async function acceptTask(taskId: string) {
@@ -341,6 +354,12 @@ export async function createTaskAttachmentSignedUrl(storagePath: string) {
 // ============================================================
 // Helpers
 // ============================================================
+
+export function formatTaskCost(cost: number | null, currency: string = 'INR'): string {
+  if (cost === null || cost === undefined) return '—'
+  const symbol = currency === 'INR' ? '₹' : ''
+  return `${symbol}${cost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
 
 export function formatDate(dateStr: string): string {
   if (!dateStr) return '—'

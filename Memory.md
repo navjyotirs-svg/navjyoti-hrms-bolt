@@ -2445,3 +2445,78 @@ Every destination page has a "Back to Dashboard" button that navigates to /. Bro
 ### Manual Verification
 
 NOT YET PERFORMED — requires browser testing. The user should verify all 15 checklist items from the request.
+
+---
+
+## Phase 8: Task Cost + Daily Report Task Photos — completed 2026-07-27
+
+### Feature 1: Task Cost
+Operational/project cost field on tasks. Does NOT affect salary, payroll, incentives, deductions, attendance, or performance calculations.
+
+#### Migration: `phase8_task_cost_and_daily_report_photos`
+- `tasks` table: added `task_cost` (numeric(14,2) nullable), `task_cost_currency` (text NOT NULL DEFAULT 'INR'), `task_cost_updated_by` (uuid nullable), `task_cost_updated_at` (timestamptz nullable)
+- CHECK constraints: `task_cost >= 0`, `task_cost_currency = 'INR'`
+- New table `task_cost_history` (append-only): id, task_id, old_cost, new_cost, currency, reason, changed_by, created_at — RLS: SELECT/INSERT only (no UPDATE/DELETE)
+- 5 new permissions: `task.cost_set`, `task.cost_update`, `task.cost_read_self`, `task.cost_read_team`, `task.cost_read_all`
+- Director: all 5; HR Admin: cost_set/cost_update/cost_read_all; Manager: cost_set/cost_update/cost_read_team; Employee: cost_read_self; System Admin: none
+
+#### Edge function: `task-action` (DEPLOYED)
+- `create` action: validates and saves `task_cost` (numeric, 2 decimal places, >= 0), requires `task.cost_set` permission
+- New `update_cost` action: requires `task.cost_update` permission, requires change reason, writes `task_cost_history` + audit log
+
+#### Frontend changes
+- `src/lib/tasks.ts`: added `task_cost` fields to `TaskRow` interface, `task_cost` param to `createTask`, new `updateTaskCost` function, new `formatTaskCost` helper (₹ prefix, en-IN locale, 2 decimal places)
+- `src/pages/CreateTaskPage.tsx`: added Task Cost field (₹ label, numeric input, min=0, step=0.01, regex validation preventing non-numeric, comma-formatted preview)
+- `src/pages/TaskDetailPage.tsx`: displays "Task Cost: ₹X,XXX.XX" in task overview
+- `src/pages/TeamTasksPage.tsx`: added Cost column to team tasks table
+- `src/pages/TaskReviewPage.tsx`: displays task cost on submission review cards
+- `src/types/roles.ts`: added 5 cost permission codes to Permission type + PERMISSION_LABELS
+
+### Feature 2: Daily Report Task Photos
+Per-task-item photo evidence in Daily Reports. Each task item maintains its own photo collection.
+
+#### Migration (same file)
+- New table `daily_report_task_photos`: id, organization_id, daily_report_id, daily_report_task_item_id, task_id, employee_id, uploaded_by, storage_path, file_name, mime_type, file_size_bytes, display_order, caption, source_type (GALLERY/CAMERA), width, height, uploaded_at, deleted_at
+- RLS: SELECT (owner or manager/HR/director in same org), INSERT (owner + report must be draft/returned), UPDATE (owner only), DELETE (owner + report must be draft/returned — protects submitted evidence)
+- Private storage bucket `daily-report-task-photos` (public=false) with INSERT/SELECT/DELETE storage policies
+
+#### Frontend changes
+- `src/lib/dailyReports.ts`: added `DailyReportTaskPhoto` interface, `fetchTaskPhotos`, `uploadTaskPhoto`, `deleteTaskPhoto`, `updateTaskPhotoCaption`, `reorderTaskPhotos`, `createTaskPhotoSignedUrl`, `validatePhotoFile`, constants (MAX_PHOTOS=10, MAX_SIZE=10MB, MAX_TOTAL=50MB, allowed types)
+- `src/components/TaskPhotoGrid.tsx` (NEW): reusable photo grid component with gallery picker (multiple, accept=image/*), camera button (capture=environment), thumbnail grid, upload progress, retry failed, remove, caption editing, full-screen preview, "X of 10 photos added" counter, responsive grid (auto-fill minmax 100px)
+- `src/pages/DailyReportPage.tsx`: renders task items with work_done/result_achieved fields + TaskPhotoGrid per item (read-only when report submitted/reviewed/locked)
+- `src/pages/ReportReviewPage.tsx`: shows photos grouped under each task item for managers/HR/Director review
+
+#### Notification events added
+- `TASK_COST_CREATED`: "A task was assigned with an operational task cost." (no amount in push)
+- `DAILY_REPORT_EVIDENCE_ADDED`: "Supporting evidence has been added to a daily report after a correction request."
+- `DAILY_REPORT_SUBMITTED`: "A daily report with supporting task evidence has been submitted."
+
+### Build & Tests
+- TypeScript: PASS
+- Production build: PASS (204 modules, 781.86 kB JS / 42.04 kB CSS)
+- All 126 existing tests PASS (no new tests added — no test framework for UI components)
+- Edge function deployed: task-action
+
+### Files changed
+1. `supabase/migrations/phase8_task_cost_and_daily_report_photos.sql` — migration (applied via MCP)
+2. `supabase/functions/task-action/index.ts` — task_cost on create + update_cost action
+3. `src/lib/tasks.ts` — task_cost fields, updateTaskCost, formatTaskCost
+4. `src/lib/dailyReports.ts` — photo CRUD functions + constants
+5. `src/lib/notificationEvents.ts` — 3 new notification events
+6. `src/types/roles.ts` — 5 cost permissions
+7. `src/pages/CreateTaskPage.tsx` — Task Cost field
+8. `src/pages/TaskDetailPage.tsx` — cost display
+9. `src/pages/TeamTasksPage.tsx` — cost column
+10. `src/pages/TaskReviewPage.tsx` — cost display + photo grid
+11. `src/pages/DailyReportPage.tsx` — task items + photo grid
+12. `src/pages/ReportReviewPage.tsx` — photos in review
+13. `src/components/TaskPhotoGrid.tsx` — NEW: photo grid component
+
+### Remaining limitations
+- Browser smoke test not performed (no browser automation available)
+- Image compression/orientation correction (EXIF) not implemented — photos uploaded as-is; a future enhancement would add client-side canvas-based compression to 1920px max dimension at 80-85% quality
+- HEIC/HEIF not supported (shows "format not supported" message)
+- Photo reordering UI not implemented (backend `reorderTaskPhotos` function exists but no drag-and-drop UI)
+- No automated tests for the new features (no test framework for UI components in this project)
+- The daily-report-action edge function was not updated for photo actions — all photo CRUD is handled client-side via Supabase JS client with RLS enforcement
+

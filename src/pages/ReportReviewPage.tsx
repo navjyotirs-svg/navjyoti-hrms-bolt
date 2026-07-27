@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchPendingReviews, reviewReport, reopenReport } from '@/lib/dailyReports'
+import { TaskPhotoGrid } from '@/components/TaskPhotoGrid'
 import { ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
@@ -68,6 +69,26 @@ export function ReportReviewPage() {
                 {r.blockers && <div style={{ marginBottom: 'var(--space-2)' }}><strong>Blockers:</strong> {r.blockers}</div>}
                 {r.pending_work && <div style={{ marginBottom: 'var(--space-2)' }}><strong>Pending:</strong> {r.pending_work}</div>}
                 {r.tomorrow_plan && <div style={{ marginBottom: 'var(--space-2)' }}><strong>Tomorrow:</strong> {r.tomorrow_plan}</div>}
+
+                {r.daily_report_task_items && r.daily_report_task_items.length > 0 && (
+                  <div style={{ marginTop: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Task Items</h4>
+                    {r.daily_report_task_items.map((item: any, idx: number) => (
+                      <div key={item.id || idx} style={{ marginBottom: 'var(--space-3)', padding: 'var(--space-2)', border: '1px solid var(--border)', borderRadius: '6px' }}>
+                        <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: 'var(--space-1)' }}>{item.task_title || `Task ${idx + 1}`}</div>
+                        {item.work_completed && <div style={{ fontSize: '13px', marginBottom: '2px' }}><strong>Work:</strong> {item.work_completed}</div>}
+                        {item.result_achieved && <div style={{ fontSize: '13px', marginBottom: '2px' }}><strong>Result:</strong> {item.result_achieved}</div>}
+                        <TaskPhotoGrid
+                          dailyReportId={r.id}
+                          taskItemId={item.id || null}
+                          taskId={item.task_id || null}
+                          employeeId={r.employee_id}
+                          isReadOnly={true}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 <div className="form-field" style={{ marginTop: 'var(--space-3)' }}>
                   <label htmlFor={`comment-${r.id}`}>Manager Comments</label>
