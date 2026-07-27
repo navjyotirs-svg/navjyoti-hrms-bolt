@@ -10,6 +10,8 @@ interface Branch { id: string; name: string }
 interface Department { id: string; name: string }
 interface Manager { id: string; full_name: string; employee_code: string }
 
+type CreateMode = 'invite' | 'direct'
+
 export function AddEmployeePage() {
   const { profile } = useAuth()
   const navigate = useNavigate()
@@ -21,7 +23,9 @@ export function AddEmployeePage() {
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [setupLink, setSetupLink] = useState<string | null>(null)
+  const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string } | null>(null)
 
+  const [mode, setMode] = useState<CreateMode>('invite')
   const [fullName, setFullName] = useState('')
   const [workEmail, setWorkEmail] = useState('')
   const [role, setRole] = useState<Role>('employee')
@@ -32,6 +36,8 @@ export function AddEmployeePage() {
   const [managerId, setManagerId] = useState('')
   const [joiningDate, setJoiningDate] = useState(new Date().toISOString().slice(0, 10))
   const [workMode, setWorkMode] = useState('Office')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
     if (!profile?.organization_id) return
@@ -52,10 +58,19 @@ export function AddEmployeePage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    setSuccessMessage(null)
+    setSetupLink(null)
+    setCreatedCredentials(null)
     setSubmitting(true)
 
     if (!fullName.trim() || !workEmail.trim() || !employeeCode.trim() || !joiningDate) {
       setError('Full name, work email, employee code, and joining date are required')
+      setSubmitting(false)
+      return
+    }
+
+    if (mode === 'direct' && password.length < 8) {
+      setError('Password must be at least 8 characters')
       setSubmitting(false)
       return
     }
@@ -73,6 +88,24 @@ export function AddEmployeePage() {
         accessToken = refreshData.session.access_token
       }
 
+      const payload: Record<string, unknown> = {
+        full_name: fullName.trim(),
+        work_email: workEmail.trim(),
+        role,
+        employee_code: employeeCode.trim(),
+        designation: designation.trim() || null,
+        branch_id: branchId || null,
+        department_id: departmentId || null,
+        reporting_manager_id: managerId || null,
+        joining_date: joiningDate,
+        work_mode: workMode,
+      }
+
+      if (mode === 'direct') {
+        payload.action = 'create_direct'
+        payload.password = password
+      }
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-employee`,
         {
@@ -82,29 +115,22 @@ export function AddEmployeePage() {
             Authorization: `Bearer ${accessToken}`,
             apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
-          body: JSON.stringify({
-            full_name: fullName.trim(),
-            work_email: workEmail.trim(),
-            role,
-            employee_code: employeeCode.trim(),
-            designation: designation.trim() || null,
-            branch_id: branchId || null,
-            department_id: departmentId || null,
-            reporting_manager_id: managerId || null,
-            joining_date: joiningDate,
-            work_mode: workMode,
-          }),
+          body: JSON.stringify(payload),
         }
       )
 
       const data = await response.json()
 
       if (!response.ok) {
-        setError(data.error || 'Failed to invite employee')
+        setError(data.error || 'Failed to create employee')
         setSubmitting(false)
       } else {
-        setSuccessMessage(data.message || 'Employee invited successfully.')
-        setSetupLink(data.setup_link ?? null)
+        setSuccessMessage(data.message || 'Employee created successfully.')
+        if (mode === 'direct' && data.credentials) {
+          setCreatedCredentials(data.credentials)
+        } else {
+          setSetupLink(data.setup_link ?? null)
+        }
         setSubmitting(false)
       }
     } catch {
@@ -118,7 +144,7 @@ export function AddEmployeePage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h2 className="page-title">Invite Employee</h2>
+        <h2 className="page-title">{mode === 'direct' ? 'Create Employee' : 'Invite Employee'}</h2>
       </div>
 
       <div className="card">
@@ -141,6 +167,23 @@ export function AddEmployeePage() {
                   </button>
                 </div>
               )}
+              {createdCredentials && (
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <label style={{ fontWeight: 700, display: 'block', marginBottom: 'var(--space-1)' }}>Login Credentials (give these to the employee):</label>
+                  <div style={{ padding: 'var(--space-3)', background: 'var(--surface-2)', borderRadius: '6px', fontSize: '0.9em' }}>
+                    <div><strong>Email:</strong> {createdCredentials.email}</div>
+                    <div><strong>Password:</strong> {createdCredentials.password}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    style={{ marginTop: 'var(--space-2)' }}
+                    onClick={() => navigator.clipboard.writeText(`Email: ${createdCredentials.email}\nPassword: ${createdCredentials.password}`)}
+                  >
+                    Copy Credentials
+                  </button>
+                </div>
+              )}
               <div style={{ marginTop: 'var(--space-3)' }}>
                 <button type="button" className="btn btn-sm" onClick={() => navigate('/employees')}>
                   Back to Employees
@@ -149,6 +192,34 @@ export function AddEmployeePage() {
             </div>
           )}
           {!successMessage && (
+          <>
+          <div className="form-grid" style={{ marginBottom: 'var(--space-4)' }}>
+            <div className="form-field">
+              <label>Creation Mode</label>
+              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${mode === 'invite' ? '' : 'btn-secondary'}`}
+                  onClick={() => setMode('invite')}
+                >
+                  Send Invitation
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${mode === 'direct' ? '' : 'btn-secondary'}`}
+                  onClick={() => setMode('direct')}
+                >
+                  Create with Password
+                </button>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--slate)', marginTop: 'var(--space-1)' }}>
+                {mode === 'invite'
+                  ? 'Sends an invitation email with a password-setup link.'
+                  : 'Creates the account with a password you choose. No email is sent. Give the credentials to the employee directly.'}
+              </div>
+            </div>
+          </div>
+
           <form onSubmit={handleSubmit}>
             <div className="form-grid">
               <div className="form-field">
@@ -171,6 +242,31 @@ export function AddEmployeePage() {
                   ))}
                 </select>
               </div>
+              {mode === 'direct' && (
+                <div className="form-field">
+                  <label htmlFor="password">Password *</label>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      minLength={8}
+                      placeholder="At least 8 characters"
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-secondary"
+                      onClick={() => setShowPassword((s) => !s)}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      {showPassword ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="form-field">
                 <label htmlFor="designation">Designation</label>
                 <input id="designation" value={designation} onChange={(e) => setDesignation(e.target.value)} />
@@ -213,10 +309,13 @@ export function AddEmployeePage() {
             <div className="form-actions">
               <button type="button" className="btn btn-secondary" onClick={() => navigate('/employees')}>Cancel</button>
               <button type="submit" className="btn" disabled={submitting}>
-                {submitting ? 'Inviting…' : 'Invite Employee'}
+                {submitting
+                  ? (mode === 'direct' ? 'Creating…' : 'Inviting…')
+                  : (mode === 'direct' ? 'Create Employee' : 'Invite Employee')}
               </button>
             </div>
           </form>
+          </>
           )}
         </div>
       </div>

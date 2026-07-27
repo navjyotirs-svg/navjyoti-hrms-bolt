@@ -52,7 +52,22 @@ interface RepairActivationRequest {
   employee_id: string;
 }
 
-type FunctionRequest = InviteEmployeeRequest | ResendInvitationRequest | ActivateAccountRequest | RepairActivationRequest;
+interface CreateDirectRequest {
+  action: "create_direct";
+  full_name: string;
+  work_email: string;
+  role: string;
+  employee_code: string;
+  password: string;
+  designation?: string;
+  branch_id?: string | null;
+  department_id?: string | null;
+  reporting_manager_id?: string | null;
+  joining_date: string;
+  work_mode: string;
+}
+
+type FunctionRequest = InviteEmployeeRequest | ResendInvitationRequest | ActivateAccountRequest | RepairActivationRequest | CreateDirectRequest;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -182,6 +197,10 @@ Deno.serve(async (req: Request) => {
 
     if (body.action === "resend_invitation") {
       return handleResendInvitation(admin, callerId, callerProfile, body as ResendInvitationRequest, appUrl, correlationId);
+    }
+
+    if (body.action === "create_direct") {
+      return handleCreateDirect(admin, callerId, callerProfile, body as CreateDirectRequest, orgId, correlationId);
     }
 
     return handleInvite(admin, callerId, callerProfile, body as InviteEmployeeRequest, orgId, appUrl, correlationId);
@@ -462,6 +481,195 @@ async function handleResendInvitation(
     message: "A fresh invitation email has been sent. Previous invitation links are no longer valid.",
     employee_id: employee.id,
     setup_link: setupLink,
+    correlationId,
+  });
+}
+
+async function handleCreateDirect(
+  admin: ReturnType<typeof createClient>,
+  callerId: string,
+  callerProfile: { id: string; role: string; organization_id: string },
+  body: CreateDirectRequest,
+  orgId: string,
+  correlationId: string
+): Promise<Response> {
+  if (!body.full_name || !body.work_email || !body.role || !body.joining_date || !body.employee_code || !body.password) {
+    return jsonError(400, "Missing required fields", correlationId);
+  }
+
+  if (body.password.length < 8) {
+    return jsonError(400, "Password must be at least 8 characters", correlationId);
+  }
+
+  if (!VALID_ROLES.includes(body.role)) {
+    return jsonError(400, "Invalid role code", correlationId);
+  }
+
+  if (body.role === "director" && callerProfile.role !== "director") {
+    return jsonError(403, "Only a Director can assign Director-level access", correlationId);
+  }
+
+  if (
+    body.role === "system_admin" &&
+    callerProfile.role !== "director" &&
+    callerProfile.role !== "system_admin"
+  ) {
+    return jsonError(403, "Only a Director or System Administrator can assign System Administrator role", correlationId);
+  }
+
+  const { data: dupCode } = await admin
+    .from("employees")
+    .select("id")
+    .eq("organization_id", orgId)
+    .eq("employee_code", body.employee_code)
+    .maybeSingle();
+
+  if (dupCode) return jsonError(409, "Employee code already exists", correlationId);
+
+  const { data: dupEmail } = await admin
+    .from("employees")
+    .select("id")
+    .eq("organization_id", orgId)
+    .eq("work_email", body.work_email)
+    .maybeSingle();
+
+  if (dupEmail) return jsonError(409, "Work email already exists", correlationId);
+
+  const { data: dupProfile } = await admin
+    .from("user_profiles")
+    .select("id, status")
+    .eq("email", body.work_email)
+    .maybeSingle();
+
+  if (dupProfile) {
+    const { data: authUser } = await admin.auth.admin.getUserById(dupProfile.id);
+    const neverSignedIn = !authUser?.user?.last_sign_in_at;
+    const { data: existingEmp } = await admin
+      .from("employees")
+      .select("id")
+      .eq("user_id", dupProfile.id)
+      .maybeSingle();
+
+    if (neverSignedIn && !existingEmp) {
+      await admin.from("user_organization_memberships").delete().eq("user_id", dupProfile.id);
+      await admin.from("user_profiles").delete().eq("id", dupProfile.id);
+      await admin.auth.admin.deleteUser(dupProfile.id);
+    } else {
+      return jsonError(409, "A user with this email already exists", correlationId);
+    }
+  } else {
+    const { data: existingAuthUsers } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const orphanedAuth = existingAuthUsers?.users?.find(
+      (u: { email?: string; last_sign_in_at?: string | null }) =>
+        u.email === body.work_email && !u.last_sign_in_at
+    );
+    if (orphanedAuth) {
+      await admin.auth.admin.deleteUser(orphanedAuth.id);
+    }
+  }
+
+  // Create the auth user with a password and email already confirmed — no invitation email sent.
+  const { data: authData, error: authError } = await admin.auth.admin.createUser({
+    email: body.work_email,
+    password: body.password,
+    email_confirm: true,
+    user_metadata: {
+      full_name: body.full_name,
+      employee_code: body.employee_code,
+      organization_id: orgId,
+      created_by: callerId,
+    },
+  });
+
+  if (authError || !authData.user) {
+    return jsonError(500, `Failed to create user account: ${authError?.message ?? "unknown error"}`, correlationId);
+  }
+
+  const userId = authData.user.id;
+
+  const { error: profileInsertError } = await admin.from("user_profiles").insert({
+    id: userId,
+    email: body.work_email,
+    full_name: body.full_name,
+    role: body.role,
+    organization_id: orgId,
+    status: "active",
+    is_active: true,
+  });
+
+  if (profileInsertError) {
+    await admin.auth.admin.deleteUser(userId);
+    return jsonError(500, `Failed to create user profile: ${profileInsertError.message}`, correlationId);
+  }
+
+  const { data: employee, error: empError } = await admin
+    .from("employees")
+    .insert({
+      user_id: userId,
+      organization_id: orgId,
+      branch_id: body.branch_id || null,
+      department_id: body.department_id || null,
+      employee_code: body.employee_code,
+      full_name: body.full_name,
+      designation: body.designation || null,
+      work_email: body.work_email,
+      work_mode: body.work_mode || "Office",
+      employment_status: "active",
+      joining_date: body.joining_date,
+      is_active: true,
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (empError) {
+    await admin.from("user_profiles").delete().eq("id", userId);
+    await admin.auth.admin.deleteUser(userId);
+    return jsonError(500, `Failed to create employee record: ${empError.message}`, correlationId);
+  }
+
+  const { error: membershipError } = await admin
+    .from("user_organization_memberships")
+    .insert({ user_id: userId, organization_id: orgId, is_active: true });
+
+  if (membershipError) {
+    console.error("Membership creation failed:", membershipError.message);
+  }
+
+  if (body.reporting_manager_id && employee) {
+    const { error: reportingError } = await admin
+      .from("employee_reporting_lines")
+      .insert({ employee_id: employee.id, manager_id: body.reporting_manager_id });
+
+    if (reportingError) {
+      console.error("Reporting line creation failed:", reportingError.message);
+    }
+  }
+
+  await admin.from("audit_logs").insert({
+    actor_id: callerId,
+    action: "employee.create_direct",
+    entity_type: "employee",
+    entity_id: employee?.id,
+    new_values: {
+      user_id: userId,
+      full_name: body.full_name,
+      work_email: body.work_email,
+      role: body.role,
+      employee_code: body.employee_code,
+      organization_id: orgId,
+      created_at: new Date().toISOString(),
+      method: "direct_with_password",
+    },
+  });
+
+  return jsonResponse(201, {
+    message: "Employee created successfully. They can log in immediately with the email and password you set.",
+    user_id: userId,
+    employee_id: employee?.id,
+    credentials: {
+      email: body.work_email,
+      temporary_password: body.password,
+    },
     correlationId,
   });
 }
