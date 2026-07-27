@@ -484,6 +484,27 @@ export async function updateTaskPhotoCaption(photoId: string, caption: string): 
   if (error) throw error
 }
 
+export async function addTaskItem(payload: {
+  report_id: string
+  task_id: string
+  progress_before?: number
+  progress_after?: number
+  work_done?: string
+  result_achieved?: string
+  pending_item?: string
+  blocker?: string
+  support_required?: string
+  follow_up?: boolean
+  hours_spent?: number
+  evidence_required?: boolean
+}) {
+  return callReportAction('add_task_item', payload)
+}
+
+export async function deleteTaskItem(itemId: string) {
+  return callReportAction('delete_task_item', { item_id: itemId })
+}
+
 export async function reorderTaskPhotos(photoIds: string[]): Promise<void> {
   const updates = photoIds.map((id, index) =>
     supabase.from('daily_report_task_photos').update({ display_order: index }).eq('id', id)

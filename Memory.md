@@ -2571,4 +2571,83 @@ Per-task-item photo evidence in Daily Reports. Each task item maintains its own 
 - EXIF orientation correction relies on browser createImageBitmap support; older browsers without it fall back to img element loading (orientation may not be corrected on very old browsers)
 - Thumbnail generation is implemented in imageProcessing.ts but thumbnails are not yet stored separately in the database (the thumbnail blob is generated but not uploaded to a separate storage path)
 
+---
+
+## Phase 8 Fix: Daily Report Task Section + Photo Grid Wiring — 2026-07-27
+
+### Root Cause
+The Daily Report page (`src/pages/DailyReportPage.tsx`) only rendered task items that already existed in the database (`taskItems.length > 0`), but had **no task selector UI** — employees had no way to add tasks to their report. Without task items, the TaskPhotoGrid component never rendered. The feature was built (component, database, edge function) but never connected to the page's rendering flow.
+
+### Fix Applied
+Rewrote `src/pages/DailyReportPage.tsx` to add:
+
+1. **Tasks Worked On Today section** — visible after Overall Summary, with:
+   - "Select Assigned Tasks" button (opens searchable task picker)
+   - "No Assigned Task Today" button (for days with no assigned tasks)
+   - Task search input (filter by task code or title)
+   - Task count display ("N tasks available")
+
+2. **Task selector** — loads the authenticated employee's active assigned tasks:
+   - Filters by statuses: ASSIGNED, ACCEPTED, IN_PROGRESS, REVISION_REQUIRED, REVIEW_REQUIRED, REVISION_REQUESTED, ACCEPTANCE_PENDING
+   - Uses `fetchMyTasks()` which queries `task_assignments!inner` (RLS ensures only own tasks)
+   - Already-selected tasks are marked "Added" and disabled
+   - Shows "No active assigned tasks are available for this date." when empty
+
+3. **Auto-draft creation workflow**:
+   - When a task is selected and no report exists, `saveDraft()` is called first to create the draft
+   - Then `addTaskItem()` is called with the returned `report_id` to create the task item
+   - The returned item ID is used to wire up TaskPhotoGrid
+   - Shows "Preparing…" on the button and "Preparing task evidence…" while creating
+   - No manual "Save Draft" required before photo upload
+
+4. **Task item cards** — each selected task renders a card with:
+   - Task Code, Title, Status badge, Deadline, Priority
+   - Work Done Today (required), Result Achieved (required)
+   - Progress Before %, Progress After %, Hours Spent
+   - Blocker, Support Required, Pending Item, Follow-up toggle
+   - Remove button (when editable)
+
+5. **TaskPhotoGrid wired** — rendered inside every task item card:
+   - `<TaskPhotoGrid dailyReportId={existing.id} taskItemId={item.id} taskId={item.task_id} employeeId={existing.employee_id} isReadOnly={isReadOnly} />`
+   - Gallery button (multiple, accept=image/jpeg,png,webp)
+   - Camera button (capture=environment)
+   - Photo grid with thumbnails, progress, retry, remove, captions, full-screen preview
+   - Read-only mode for submitted/approved/locked reports (shows photos, hides upload/remove)
+
+6. **No-assigned-task flow**:
+   - "No Assigned Task Today" button toggles a form with explanation + work completed
+   - Photo upload is not shown without a task (task-wise evidence only)
+
+7. **Submission validation**:
+   - Overall summary required
+   - Each task item requires Work Done Today and Result Achieved
+   - Evidence-required tasks must have at least one uploaded photo
+
+### Client API additions (`src/lib/dailyReports.ts`)
+- `addTaskItem()` — calls edge function `add_task_item`
+- `deleteTaskItem()` — calls edge function `delete_task_item`
+
+### Edge function (`daily-report-action`) — DEPLOYED 2026-07-27
+- `add_task_item` action: inserts into `daily_report_task_items` with report_id + task_id
+- `delete_task_item` action: deletes from `daily_report_task_items`
+- `save_draft` and `submit` both handle `task_items` array (delete + re-insert)
+
+### Files changed
+1. `src/pages/DailyReportPage.tsx` — full rewrite with task selector, auto-draft, task cards, TaskPhotoGrid wiring
+2. `src/lib/dailyReports.ts` — added `addTaskItem()` and `deleteTaskItem()` functions
+3. `src/lib/__tests__/daily_report_page.test.ts` — NEW: 27 tests for page wiring
+
+### Test results
+- New Daily Report page tests: 27 pass / 0 fail
+- Phase 8 feature tests: 46 pass / 0 fail
+- Existing tests: 126 pass / 0 fail
+- Total: 199 pass / 0 fail
+- Production build: PASS (792.99 kB JS / 42.04 kB CSS)
+
+### Remaining limitations
+- Browser/mobile smoke test NOT performed — no browser automation available
+- Photo reordering UI not implemented
+- HEIC/HEIF not supported (clear message shown)
+- The `fetchMyTasks()` function queries all tasks for the user (RLS filters to own tasks) — it does not filter by status server-side; the client filters by `ACTIVE_TASK_STATUSES`. A future enhancement could add server-side status filtering.
+
 
