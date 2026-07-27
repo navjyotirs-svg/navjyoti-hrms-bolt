@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchPendingReviews, reviewReport, reopenReport } from '@/lib/dailyReports'
-import { TaskPhotoGrid } from '@/components/TaskPhotoGrid'
+import { fetchPendingReviews, reviewReport, reopenReport, fetchTaskPhotos, createTaskPhotoSignedUrl, type DailyReportTaskPhoto } from '@/lib/dailyReports'
 import { ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
@@ -10,6 +9,9 @@ export function ReportReviewPage() {
   const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [comments, setComments] = useState<Record<string, string>>({})
+  const [photoMap, setPhotoMap] = useState<Record<string, DailyReportTaskPhoto[]>>({})
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
+  const [lightbox, setLightbox] = useState<string | null>(null)
 
   useEffect(() => { loadReports() }, [])
 
@@ -18,6 +20,18 @@ export function ReportReviewPage() {
     try {
       const data = await fetchPendingReviews()
       setReports(data)
+      const pMap: Record<string, DailyReportTaskPhoto[]> = {}
+      const uMap: Record<string, string> = {}
+      await Promise.all(data.map(async (r: any) => {
+        const list = await fetchTaskPhotos(r.id)
+        pMap[r.id] = list
+        await Promise.all(list.map(async p => {
+          const url = await createTaskPhotoSignedUrl(p.storage_path)
+          if (url) uMap[p.id] = url
+        }))
+      }))
+      setPhotoMap(pMap)
+      setPhotoUrls(uMap)
     } catch (e) { setError((e as Error).message) }
     setLoading(false)
   }
@@ -70,25 +84,31 @@ export function ReportReviewPage() {
                 {r.pending_work && <div style={{ marginBottom: 'var(--space-2)' }}><strong>Pending:</strong> {r.pending_work}</div>}
                 {r.tomorrow_plan && <div style={{ marginBottom: 'var(--space-2)' }}><strong>Tomorrow:</strong> {r.tomorrow_plan}</div>}
 
-                {r.daily_report_task_items && r.daily_report_task_items.length > 0 && (
-                  <div style={{ marginTop: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
-                    <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Task Items</h4>
-                    {r.daily_report_task_items.map((item: any, idx: number) => (
-                      <div key={item.id || idx} style={{ marginBottom: 'var(--space-3)', padding: 'var(--space-2)', border: '1px solid var(--border)', borderRadius: '6px' }}>
-                        <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: 'var(--space-1)' }}>{item.task_title || `Task ${idx + 1}`}</div>
-                        {item.work_completed && <div style={{ fontSize: '13px', marginBottom: '2px' }}><strong>Work:</strong> {item.work_completed}</div>}
-                        {item.result_achieved && <div style={{ fontSize: '13px', marginBottom: '2px' }}><strong>Result:</strong> {item.result_achieved}</div>}
-                        <TaskPhotoGrid
-                          dailyReportId={r.id}
-                          taskItemId={item.id || null}
-                          taskId={item.task_id || null}
-                          employeeId={r.employee_id}
-                          isReadOnly={true}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {/* Photos */}
+                <div style={{ marginTop: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+                  <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: 'var(--space-2)' }}>
+                    Photos {(photoMap[r.id] || []).length > 0 && `(${photoMap[r.id].length})`}
+                  </h4>
+                  {(photoMap[r.id] || []).length === 0 ? (
+                    <div style={{ fontSize: '13px', color: 'var(--slate)' }}>No photos attached to this report.</div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 'var(--space-2)' }}>
+                      {(photoMap[r.id] || []).map(p => (
+                        <div
+                          key={p.id}
+                          onClick={() => photoUrls[p.id] && setLightbox(photoUrls[p.id])}
+                          style={{ aspectRatio: '1', borderRadius: '6px', overflow: 'hidden', background: '#f0f0f0', cursor: photoUrls[p.id] ? 'zoom-in' : 'default' }}
+                        >
+                          {photoUrls[p.id] ? (
+                            <img src={photoUrls[p.id]} alt={p.file_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', color: 'var(--slate)' }}>…</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 <div className="form-field" style={{ marginTop: 'var(--space-3)' }}>
                   <label htmlFor={`comment-${r.id}`}>Manager Comments</label>
@@ -105,6 +125,15 @@ export function ReportReviewPage() {
           </div>
         )}
       </div>
+
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, cursor: 'zoom-out' }}
+        >
+          <img src={lightbox} alt="Preview" style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '8px', objectFit: 'contain' }} />
+        </div>
+      )}
     </div>
   )
 }
