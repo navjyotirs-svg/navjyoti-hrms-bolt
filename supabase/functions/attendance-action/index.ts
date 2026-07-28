@@ -14,9 +14,8 @@ const MAX_EVIDENCE_BYTES = 10 * 1024 * 1024; // 10MB
 
 interface CheckInRequest {
   action: "check_in";
-  evidence_storage_path: string;
+  photo_base64: string;
   evidence_mime_type: string;
-  evidence_file_size: number;
   latitude: number;
   longitude: number;
   location_accuracy?: number;
@@ -24,9 +23,8 @@ interface CheckInRequest {
 
 interface CheckOutRequest {
   action: "check_out";
-  evidence_storage_path: string;
+  photo_base64: string;
   evidence_mime_type: string;
-  evidence_file_size: number;
   latitude: number;
   longitude: number;
   location_accuracy?: number;
@@ -106,9 +104,9 @@ Deno.serve(async (req: Request) => {
     const body: AttendanceRequest = await req.json();
 
     if (body.action === "check_in") {
-      return handleCheckIn(admin, callerId, employee, totalMinutes, body as CheckInRequest);
+      return handleCheckIn(admin, supabaseUrl, serviceKey, callerId, employee, totalMinutes, body as CheckInRequest);
     } else if (body.action === "check_out") {
-      return handleCheckOut(admin, callerId, employee, body as CheckOutRequest);
+      return handleCheckOut(admin, supabaseUrl, serviceKey, callerId, employee, body as CheckOutRequest);
     } else {
       return jsonError(400, "Invalid action");
     }
@@ -138,132 +136,61 @@ async function loadAttendanceConfig(admin: ReturnType<typeof createClient>): Pro
   return { testMode, isProduction, totalMinutes, preAlertMinutes };
 }
 
-async function notifyBusinessEvent(
-  adminClient: any,
-  params: {
-    eventCode: string;
-    actorUserId: string;
-    employeeId?: string;
-    organizationId: string;
-    entityType: string;
-    entityId: string;
-    title: string;
-    message: string;
-    priority?: "low" | "normal" | "high" | "urgent";
-    category: string;
-    actionUrl?: string;
-    recipientRoles?: string[];
-    includeEmployee?: boolean;
-    includeActor?: boolean;
-    acknowledgementRequired?: boolean;
-    metadata?: Record<string, unknown>;
+/**
+ * Upload a base64-encoded photo to the attendance-evidence storage bucket
+ * using the service role key (bypasses RLS). Returns the storage path.
+ */
+async function uploadEvidencePhoto(
+  supabaseUrl: string,
+  serviceKey: string,
+  callerId: string,
+  photoBase64: string,
+  mimeType: string
+): Promise<string> {
+  const ext = mimeType.split("/")[1] ?? "jpg";
+  const path = `${callerId}/${crypto.randomUUID()}.${ext}`;
+
+  // Decode base64 to binary
+  const binaryString = atob(photoBase64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
   }
-): Promise<void> {
-  try {
-    const recipientUserIds = new Set<string>();
 
-    if (params.recipientRoles && params.recipientRoles.length > 0) {
-      const { data: roleUsers } = await adminClient
-        .from("user_profiles")
-        .select("id")
-        .eq("organization_id", params.organizationId)
-        .eq("status", "active")
-        .eq("is_active", true)
-        .in("role", params.recipientRoles);
-      (roleUsers ?? []).forEach((u: { id: string }) => recipientUserIds.add(u.id));
-    }
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/attendance-evidence/${path}`;
 
-    if (params.employeeId) {
-      const { data: managerLink } = await adminClient
-        .from("employee_reporting_lines")
-        .select("manager_id")
-        .eq("employee_id", params.employeeId)
-        .limit(1)
-        .maybeSingle();
-      if (managerLink) {
-        const { data: managerEmp } = await adminClient
-          .from("employees")
-          .select("user_id")
-          .eq("id", managerLink.manager_id)
-          .eq("is_active", true)
-          .maybeSingle();
-        if (managerEmp?.user_id) recipientUserIds.add(managerEmp.user_id);
-      }
-      if (params.includeEmployee) {
-        const { data: emp } = await adminClient
-          .from("employees")
-          .select("user_id")
-          .eq("id", params.employeeId)
-          .eq("is_active", true)
-          .maybeSingle();
-        if (emp?.user_id) recipientUserIds.add(emp.user_id);
-      }
-    }
+  const resp = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${serviceKey}`,
+      "Content-Type": mimeType,
+      "x-upsert": "false",
+    },
+    body: bytes,
+  });
 
-    if (params.includeActor) recipientUserIds.add(params.actorUserId);
-    if (!params.includeActor) recipientUserIds.delete(params.actorUserId);
-    if (recipientUserIds.size === 0) return;
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Storage upload failed (${resp.status}): ${text}`);
+  }
 
-    const notificationsToInsert: Array<Record<string, unknown>> = [];
-    for (const recipientId of recipientUserIds) {
-      const idempotencyKey = `${params.organizationId}:${params.eventCode}:${params.entityId}:${recipientId}`;
-      const { data: existing } = await adminClient
-        .from("notifications")
-        .select("id")
-        .eq("idempotency_key", idempotencyKey)
-        .maybeSingle();
-      if (existing) continue;
-      notificationsToInsert.push({
-        recipient_id: recipientId,
-        organization_id: params.organizationId,
-        notification_type: params.eventCode,
-        event_code: params.eventCode,
-        title: params.title,
-        message: params.message,
-        priority: params.priority || "normal",
-        category: params.category,
-        action_url: params.actionUrl || null,
-        dedup_key: idempotencyKey,
-        idempotency_key: idempotencyKey,
-        metadata: { ...params.metadata, entityType: params.entityType, entityId: params.entityId, actorUserId: params.actorUserId },
-        related_entity_type: params.entityType,
-        related_entity_id: params.entityId,
-        acknowledgement_required: params.acknowledgementRequired || false,
-        delivery_status: "in_app",
-      });
-    }
-    if (notificationsToInsert.length === 0) return;
-
-    const { data: inserted } = await adminClient
-      .from("notifications")
-      .insert(notificationsToInsert)
-      .select("id, recipient_id");
-    const deliveryJobs = (inserted ?? []).map((n: { id: string; recipient_id: string }) => ({
-      notification_id: n.id,
-      channel: "web_push",
-      recipient: n.recipient_id,
-      status: "queued",
-      idempotency_key: `push:${n.id}`,
-    }));
-    if (deliveryJobs.length > 0) await adminClient.from("notification_deliveries").insert(deliveryJobs);
-  } catch { /* best-effort */ }
+  return path;
 }
 
 /**
- * Validate the photo + location evidence payload submitted with a check-in.
+ * Validate the photo + location evidence payload.
  * Returns an error string on failure, or null when the payload is valid.
  */
 function validateEvidencePayload(
-  body: CheckInRequest,
+  body: CheckInRequest | CheckOutRequest,
   callerId: string
 ): string | null {
-  if (
-    !body.evidence_storage_path ||
-    !body.evidence_mime_type ||
-    body.evidence_file_size === undefined ||
-    body.evidence_file_size === null
-  ) {
-    return "Evidence storage path, MIME type, and file size are required";
+  if (!body.photo_base64 || typeof body.photo_base64 !== "string") {
+    return "Photo evidence is required";
+  }
+
+  if (!body.evidence_mime_type) {
+    return "Photo MIME type is required";
   }
 
   if (typeof body.latitude !== "number" || typeof body.longitude !== "number") {
@@ -274,13 +201,10 @@ function validateEvidencePayload(
     return "Invalid image format. Approved formats: JPG, JPEG, PNG, WebP";
   }
 
-  if (body.evidence_file_size > MAX_EVIDENCE_BYTES) {
+  // Estimate base64 size — 4/3 ratio overhead
+  const estimatedBytes = Math.ceil(body.photo_base64.length * 3 / 4);
+  if (estimatedBytes > MAX_EVIDENCE_BYTES) {
     return "Image size exceeds 10MB limit";
-  }
-
-  const expectedPrefix = `${callerId}/`;
-  if (!body.evidence_storage_path.startsWith(expectedPrefix)) {
-    return "Evidence does not belong to the authenticated user";
   }
 
   return null;
@@ -288,6 +212,8 @@ function validateEvidencePayload(
 
 async function handleCheckIn(
   admin: ReturnType<typeof createClient>,
+  supabaseUrl: string,
+  serviceKey: string,
   callerId: string,
   employee: Record<string, unknown>,
   totalMinutes: number,
@@ -322,6 +248,16 @@ async function handleCheckIn(
     return jsonError(409, "You have already checked in today. Please check out first.");
   }
 
+  // Upload evidence photo to storage (server-side with service role key)
+  let storagePath: string;
+  let fileSizeBytes: number;
+  try {
+    storagePath = await uploadEvidencePhoto(supabaseUrl, serviceKey, callerId, body.photo_base64, body.evidence_mime_type);
+    fileSizeBytes = Math.ceil(body.photo_base64.length * 3 / 4);
+  } catch (err) {
+    return jsonError(500, `Failed to upload evidence photo: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // Create attendance record
   const { data: record, error: insertError } = await admin
     .from("attendance_records")
@@ -350,9 +286,9 @@ async function handleCheckIn(
     attendance_record_id: record.id,
     employee_id: employee.id as string,
     evidence_type: "CHECK_IN_PHOTO",
-    storage_path: body.evidence_storage_path,
+    storage_path: storagePath,
     mime_type: body.evidence_mime_type,
-    file_size_bytes: body.evidence_file_size,
+    file_size_bytes: fileSizeBytes,
     latitude: body.latitude,
     longitude: body.longitude,
     location_accuracy: body.location_accuracy ?? null,
@@ -375,7 +311,7 @@ async function handleCheckIn(
       required_checkout_at: record.required_checkout_at,
       required_total_minutes: record.required_total_minutes,
       evidence_type: "CHECK_IN_PHOTO",
-      storage_path: body.evidence_storage_path,
+      storage_path: storagePath,
       latitude: body.latitude,
       longitude: body.longitude,
     },
@@ -604,6 +540,8 @@ async function generateRecurringTasksForCheckIn(
 
 async function handleCheckOut(
   admin: ReturnType<typeof createClient>,
+  supabaseUrl: string,
+  serviceKey: string,
   callerId: string,
   employee: Record<string, unknown>,
   body: CheckOutRequest
@@ -614,29 +552,9 @@ async function handleCheckOut(
   }
 
   // Validate evidence
-  if (!body.evidence_storage_path || !body.evidence_mime_type || !body.evidence_file_size) {
-    return jsonError(400, "Evidence storage path, MIME type, and file size are required");
-  }
-
-  if (typeof body.latitude !== "number" || typeof body.longitude !== "number") {
-    return jsonError(400, "Latitude and longitude are required");
-  }
-
-  // Validate MIME type
-  const approvedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-  if (!approvedMimes.includes(body.evidence_mime_type)) {
-    return jsonError(400, "Invalid image format. Approved formats: JPG, JPEG, PNG, WebP");
-  }
-
-  // Validate file size (10MB max)
-  if (body.evidence_file_size > 10 * 1024 * 1024) {
-    return jsonError(400, "Image size exceeds 10MB limit");
-  }
-
-  // Validate evidence ownership — path must start with caller's user_id
-  const expectedPrefix = `${callerId}/`;
-  if (!body.evidence_storage_path.startsWith(expectedPrefix)) {
-    return jsonError(403, "Evidence does not belong to the authenticated user");
+  const evidenceError = validateEvidencePayload(body, callerId);
+  if (evidenceError) {
+    return jsonError(400, evidenceError);
   }
 
   const now = new Date();
@@ -653,6 +571,16 @@ async function handleCheckOut(
 
   if (recordError || !record) {
     return jsonError(404, "No active check-in found for today. Please check in first.");
+  }
+
+  // Upload evidence photo to storage (server-side with service role key)
+  let storagePath: string;
+  let fileSizeBytes: number;
+  try {
+    storagePath = await uploadEvidencePhoto(supabaseUrl, serviceKey, callerId, body.photo_base64, body.evidence_mime_type);
+    fileSizeBytes = Math.ceil(body.photo_base64.length * 3 / 4);
+  } catch (err) {
+    return jsonError(500, `Failed to upload evidence photo: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // Calculate elapsed minutes
@@ -678,6 +606,7 @@ async function handleCheckOut(
       status_reason: statusReason,
       checkout_type: "MANUAL",
       checkout_status: "COMPLETED",
+      check_out_evidence_status: "VERIFIED",
     })
     .eq("id", record.id)
     .eq("final_status", "PENDING_CHECKOUT");
@@ -691,9 +620,9 @@ async function handleCheckOut(
     attendance_record_id: record.id,
     employee_id: employee.id as string,
     evidence_type: "CHECK_OUT_PHOTO",
-    storage_path: body.evidence_storage_path,
+    storage_path: storagePath,
     mime_type: body.evidence_mime_type,
-    file_size_bytes: body.evidence_file_size,
+    file_size_bytes: fileSizeBytes,
     latitude: body.latitude,
     longitude: body.longitude,
     location_accuracy: body.location_accuracy ?? null,
@@ -710,7 +639,7 @@ async function handleCheckOut(
       event_type: "evidence_upload",
       event_data: {
         evidence_type: "CHECK_OUT_PHOTO",
-        storage_path: body.evidence_storage_path,
+        storage_path: storagePath,
         latitude: body.latitude,
         longitude: body.longitude,
       },
@@ -819,6 +748,117 @@ async function handleCheckOut(
     required_total_minutes: requiredTotal,
     final_status: finalStatus,
   });
+}
+
+async function notifyBusinessEvent(
+  adminClient: any,
+  params: {
+    eventCode: string;
+    actorUserId: string;
+    employeeId?: string;
+    organizationId: string;
+    entityType: string;
+    entityId: string;
+    title: string;
+    message: string;
+    priority?: "low" | "normal" | "high" | "urgent";
+    category: string;
+    actionUrl?: string;
+    recipientRoles?: string[];
+    includeEmployee?: boolean;
+    includeActor?: boolean;
+    acknowledgementRequired?: boolean;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  try {
+    const recipientUserIds = new Set<string>();
+
+    if (params.recipientRoles && params.recipientRoles.length > 0) {
+      const { data: roleUsers } = await adminClient
+        .from("user_profiles")
+        .select("id")
+        .eq("organization_id", params.organizationId)
+        .eq("status", "active")
+        .eq("is_active", true)
+        .in("role", params.recipientRoles);
+      (roleUsers ?? []).forEach((u: { id: string }) => recipientUserIds.add(u.id));
+    }
+
+    if (params.employeeId) {
+      const { data: managerLink } = await adminClient
+        .from("employee_reporting_lines")
+        .select("manager_id")
+        .eq("employee_id", params.employeeId)
+        .limit(1)
+        .maybeSingle();
+      if (managerLink) {
+        const { data: managerEmp } = await adminClient
+          .from("employees")
+          .select("user_id")
+          .eq("id", managerLink.manager_id)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (managerEmp?.user_id) recipientUserIds.add(managerEmp.user_id);
+      }
+      if (params.includeEmployee) {
+        const { data: emp } = await adminClient
+          .from("employees")
+          .select("user_id")
+          .eq("id", params.employeeId)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (emp?.user_id) recipientUserIds.add(emp.user_id);
+      }
+    }
+
+    if (params.includeActor) recipientUserIds.add(params.actorUserId);
+    if (!params.includeActor) recipientUserIds.delete(params.actorUserId);
+    if (recipientUserIds.size === 0) return;
+
+    const notificationsToInsert: Array<Record<string, unknown>> = [];
+    for (const recipientId of recipientUserIds) {
+      const idempotencyKey = `${params.organizationId}:${params.eventCode}:${params.entityId}:${recipientId}`;
+      const { data: existing } = await adminClient
+        .from("notifications")
+        .select("id")
+        .eq("idempotency_key", idempotencyKey)
+        .maybeSingle();
+      if (existing) continue;
+      notificationsToInsert.push({
+        recipient_id: recipientId,
+        organization_id: params.organizationId,
+        notification_type: params.eventCode,
+        event_code: params.eventCode,
+        title: params.title,
+        message: params.message,
+        priority: params.priority || "normal",
+        category: params.category,
+        action_url: params.actionUrl || null,
+        dedup_key: idempotencyKey,
+        idempotency_key: idempotencyKey,
+        metadata: { ...params.metadata, entityType: params.entityType, entityId: params.entityId, actorUserId: params.actorUserId },
+        related_entity_type: params.entityType,
+        related_entity_id: params.entityId,
+        acknowledgement_required: params.acknowledgementRequired || false,
+        delivery_status: "in_app",
+      });
+    }
+    if (notificationsToInsert.length === 0) return;
+
+    const { data: inserted } = await adminClient
+      .from("notifications")
+      .insert(notificationsToInsert)
+      .select("id, recipient_id");
+    const deliveryJobs = (inserted ?? []).map((n: { id: string; recipient_id: string }) => ({
+      notification_id: n.id,
+      channel: "web_push",
+      recipient: n.recipient_id,
+      status: "queued",
+      idempotency_key: `push:${n.id}`,
+    }));
+    if (deliveryJobs.length > 0) await adminClient.from("notification_deliveries").insert(deliveryJobs);
+  } catch { /* best-effort */ }
 }
 
 async function checkPermission(

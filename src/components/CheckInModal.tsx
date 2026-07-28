@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   validateEvidenceFile,
-  uploadAttendanceEvidence,
+  blobToBase64,
   checkIn,
 } from '@/lib/attendance'
 import '@/styles/attendance.css'
@@ -22,7 +22,7 @@ type Step = 'intro' | 'camera' | 'captured' | 'location' | 'uploading' | 'done'
 const MAX_DIMENSION = 1920
 const JPEG_QUALITY = 0.85
 
-export function CheckInModal({ userId, onClose, onSuccess }: Props) {
+export function CheckInModal({ userId: _userId, onClose, onSuccess }: Props) {
   const [step, setStep] = useState<Step>('intro')
   const [error, setError] = useState<string | null>(null)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
@@ -266,11 +266,10 @@ export function CheckInModal({ userId, onClose, onSuccess }: Props) {
         return
       }
 
-      const storagePath = await uploadAttendanceEvidence(userId, normalized, mimeType)
+      const photoBase64 = await blobToBase64(normalized)
       const result = await checkIn({
-        evidence_storage_path: storagePath,
+        photo_base64: photoBase64,
         evidence_mime_type: mimeType,
-        evidence_file_size: normalized.size,
         latitude: coords.lat,
         longitude: coords.lng,
         location_accuracy: coords.accuracy,

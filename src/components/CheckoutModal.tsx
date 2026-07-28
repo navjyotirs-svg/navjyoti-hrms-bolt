@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   validateEvidenceFile,
-  uploadAttendanceEvidence,
+  blobToBase64,
   checkOut,
 } from '@/lib/attendance'
 import '@/styles/attendance.css'
@@ -14,7 +14,7 @@ interface Props {
 
 type Step = 'intro' | 'camera' | 'captured' | 'location' | 'uploading' | 'done'
 
-export function CheckoutModal({ userId, onClose, onSuccess }: Props) {
+export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
   const [step, setStep] = useState<Step>('intro')
   const [error, setError] = useState<string | null>(null)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
@@ -143,11 +143,10 @@ export function CheckoutModal({ userId, onClose, onSuccess }: Props) {
         return
       }
 
-      const storagePath = await uploadAttendanceEvidence(userId, photoBlob, mimeType)
+      const photoBase64 = await blobToBase64(photoBlob)
       const result = await checkOut({
-        evidence_storage_path: storagePath,
+        photo_base64: photoBase64,
         evidence_mime_type: mimeType,
-        evidence_file_size: photoBlob.size,
         latitude: coords.lat,
         longitude: coords.lng,
         location_accuracy: coords.accuracy,

@@ -100,9 +100,8 @@ async function callEdgeFunction(slug: string, body: Record<string, unknown>) {
 }
 
 export async function checkIn(params: {
-  evidence_storage_path: string
+  photo_base64: string
   evidence_mime_type: string
-  evidence_file_size: number
   latitude: number
   longitude: number
   location_accuracy?: number
@@ -111,9 +110,8 @@ export async function checkIn(params: {
 }
 
 export async function checkOut(params: {
-  evidence_storage_path: string
+  photo_base64: string
   evidence_mime_type: string
-  evidence_file_size: number
   latitude: number
   longitude: number
   location_accuracy?: number
@@ -417,18 +415,24 @@ export function validateEvidenceFile(file: File): string | null {
 }
 
 export async function uploadAttendanceEvidence(
-  userId: string,
-  file: Blob,
-  mimeType: string
+  _userId: string,
+  _file: Blob,
+  _mimeType: string
 ): Promise<string> {
-  const ext = mimeType.split('/')[1] ?? 'jpg'
-  const path = `${userId}/${crypto.randomUUID()}.${ext}`
-  const { error } = await supabase.storage
-    .from('attendance-evidence')
-    .upload(path, file, { contentType: mimeType })
+  throw new Error('Use checkIn/checkOut with photo_base64 instead')
+}
 
-  if (error) throw new Error(error.message)
-  return path
+export function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const result = reader.result as string
+      const base64 = result.includes(',') ? result.split(',')[1] : result
+      resolve(base64)
+    }
+    reader.onerror = () => reject(new Error('Failed to convert photo'))
+    reader.readAsDataURL(blob)
+  })
 }
 
 export async function createEvidenceSignedUrl(path: string): Promise<string | null> {
