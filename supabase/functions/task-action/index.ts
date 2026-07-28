@@ -101,6 +101,8 @@ Deno.serve(async (req: Request) => {
         return await handleAddDependency(supabase, body, user.id, permissions);
       case "update_cost":
         return await handleUpdateCost(supabase, body, user.id, orgId, permissions);
+      case "self_assign":
+        return await handleSelfAssign(supabase, body, user.id, orgId, permissions);
       default:
         return errorResponse(`Unknown action: ${action}`, 400);
     }
@@ -298,6 +300,7 @@ async function handleCreate(
     title,
     description,
     assignee_id,
+    project_id,
     priority = "MEDIUM",
     task_type = "GENERAL",
     start_date,
@@ -318,10 +321,21 @@ async function handleCreate(
   if (!title || !title.trim()) return errorResponse("Title is required", 400);
   if (!description || !description.trim()) return errorResponse("Description is required", 400);
   if (!assignee_id) return errorResponse("Assignee is required", 400);
+  if (!project_id) return errorResponse("Project is required", 400);
   if (!deadline) return errorResponse("Deadline is required", 400);
   if (!start_date) return errorResponse("Start date is required", 400);
   if (new Date(deadline) < new Date(start_date)) {
     return errorResponse("Deadline cannot be before start date", 400);
+  }
+
+  // Validate project belongs to same org
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, organization_id")
+    .eq("id", project_id)
+    .single();
+  if (!project || project.organization_id !== orgId) {
+    return errorResponse("Project not in same organization", 403);
   }
 
   // Validate task_cost if provided
@@ -349,6 +363,17 @@ async function handleCreate(
     return errorResponse("Assignee not in same organization", 403);
   }
 
+  // Resolve assignee's employee record for assigned_employee_id (recurring index compatibility)
+  const { data: assigneeEmployee } = await supabase
+    .from("employees")
+    .select("id")
+    .eq("user_id", assignee_id)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (!assigneeEmployee) {
+    return errorResponse("Assignee has no active employee record", 400);
+  }
+
   // Generate task code server-side
   const { data: taskCode, error: codeError } = await supabase.rpc("generate_task_code", {
     p_org_id: orgId,
@@ -366,6 +391,7 @@ async function handleCreate(
       organization_id: orgId,
       branch_id: branch_id || null,
       department_id: department_id || null,
+      project_id,
       task_code: taskCode,
       title: title.trim(),
       description: description.trim(),
@@ -373,6 +399,7 @@ async function handleCreate(
       task_type,
       created_by: userId,
       owner_id: assignee_id,
+      assigned_employee_id: assigneeEmployee.id,
       start_date,
       original_deadline: deadline,
       current_deadline: deadline,
@@ -480,6 +507,190 @@ async function handleCreate(
   await writeAudit(supabase, userId, "task.create", "task", task.id, null, { task_code: taskCode, title });
 
   return successResponse({ task, task_code: taskCode });
+}
+
+// ============================================================
+// SELF-ASSIGN TASK
+// ============================================================
+async function handleSelfAssign(
+  supabase: ReturnType<typeof createClient>,
+  body: any,
+  userId: string,
+  orgId: string,
+  perms: string[]
+) {
+  if (!hasPerm(perms, "task.self_assign")) {
+    return errorResponse("No permission to self-assign tasks", 403);
+  }
+
+  const {
+    project_id,
+    title,
+    description,
+    priority = "MEDIUM",
+    start_date,
+    deadline,
+    reason,
+    expected_result,
+    target_quantity,
+    target_unit,
+    estimated_hours,
+    task_cost,
+  } = body;
+
+  // Required fields
+  if (!project_id) return errorResponse("Project is required", 400);
+  if (!title || !title.trim()) return errorResponse("Title is required", 400);
+  if (!priority) return errorResponse("Priority is required", 400);
+  if (!start_date) return errorResponse("Start date is required", 400);
+  if (!deadline) return errorResponse("Deadline is required", 400);
+  if (!reason || !reason.trim()) return errorResponse("Reason is required for self-assignment", 400);
+  if (new Date(deadline) < new Date(start_date)) {
+    return errorResponse("Deadline cannot be before start date", 400);
+  }
+
+  // Validate project belongs to same org
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, organization_id")
+    .eq("id", project_id)
+    .single();
+  if (!project || project.organization_id !== orgId) {
+    return errorResponse("Project not in same organization", 403);
+  }
+
+  // Validate task_cost if provided
+  let parsedCost: number | null = null;
+  if (task_cost !== undefined && task_cost !== null && task_cost !== '') {
+    parsedCost = Number(task_cost);
+    if (isNaN(parsedCost) || parsedCost < 0) {
+      return errorResponse("Task cost must be zero or greater", 400);
+    }
+    parsedCost = Math.round(parsedCost * 100) / 100;
+  }
+
+  if (parsedCost !== null && !hasPerm(perms, "task.cost_set")) {
+    return errorResponse("No permission to set task cost", 403);
+  }
+
+  // Resolve the authenticated user's active employee record
+  const { data: employee, error: empError } = await supabase
+    .from("employees")
+    .select("id, user_id, full_name, organization_id")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (empError || !employee) {
+    return errorResponse("No active employee record found for user", 403);
+  }
+  if (employee.organization_id !== orgId) {
+    return errorResponse("Cross-organization access denied", 403);
+  }
+
+  // Generate task code server-side
+  const { data: taskCode, error: codeError } = await supabase.rpc("generate_task_code", {
+    p_org_id: orgId,
+  });
+  if (codeError || !taskCode) {
+    return errorResponse("Failed to generate task code", 500);
+  }
+
+  // Create task (self-assigned, already IN_PROGRESS)
+  const { data: task, error: taskError } = await supabase
+    .from("tasks")
+    .insert({
+      organization_id: orgId,
+      project_id,
+      task_code: taskCode,
+      title: title.trim(),
+      description: description ? description.trim() : "",
+      priority,
+      task_type: "GENERAL",
+      created_by: userId,
+      owner_id: userId,
+      assigned_employee_id: employee.id,
+      start_date,
+      original_deadline: deadline,
+      current_deadline: deadline,
+      expected_result: expected_result || "",
+      target_quantity: target_quantity || null,
+      target_unit: target_unit || null,
+      estimated_hours: estimated_hours || null,
+      status: "IN_PROGRESS",
+      acceptance_required: false,
+      is_self_assigned: true,
+      self_assigned_by: userId,
+      self_assigned_at: new Date().toISOString(),
+      self_assign_reason: reason.trim(),
+      task_cost: parsedCost,
+      task_cost_currency: 'INR',
+      task_cost_updated_by: parsedCost !== null ? userId : null,
+      task_cost_updated_at: parsedCost !== null ? new Date().toISOString() : null,
+    })
+    .select()
+    .single();
+
+  if (taskError) {
+    return errorResponse(`Failed to create self-assigned task: ${taskError.message}`, 500);
+  }
+
+  // Create primary assignment (to self)
+  await supabase.from("task_assignments").insert({
+    task_id: task.id,
+    assigned_to: userId,
+    assigned_by: userId,
+    assignment_type: "PRIMARY",
+    is_current: true,
+  });
+
+  // Status history (null -> IN_PROGRESS)
+  await supabase.from("task_status_history").insert({
+    task_id: task.id,
+    old_status: null,
+    new_status: "IN_PROGRESS",
+    changed_by: userId,
+    reason: `Self-assigned: ${reason.trim()}`,
+  });
+
+  // Audit
+  await writeAudit(supabase, userId, "task.self_assign", "task", task.id, null, {
+    task_code: taskCode,
+    title,
+    project_id,
+    reason: reason.trim(),
+  });
+
+  // Notify reporting manager + HR + directors
+  const message = `${employee.full_name} self-assigned a ${priority} priority task: ${title}.`;
+  await notifyBusinessEvent(supabase, {
+    eventCode: "TASK_SELF_ASSIGNED",
+    actorUserId: userId,
+    employeeId: employee.id,
+    organizationId: orgId,
+    entityType: "task",
+    entityId: task.id,
+    title: "Task Self-Assigned",
+    message,
+    priority: "normal",
+    category: "task",
+    actionUrl: "/team-tasks",
+    recipientRoles: ["hr_admin", "director"],
+  });
+
+  // Notify the employee (confirmation)
+  await createNotification(
+    supabase,
+    userId,
+    "TASK_SELF_ASSIGNED",
+    "Task Self-Assigned",
+    `Your self-assigned task ${taskCode}: ${title} has been created and is now in progress.`,
+    "normal",
+    `task_self_assigned:${task.id}`,
+    "task",
+    "/team-tasks"
+  );
+
+  return successResponse({ task_id: task.id, task_code: taskCode });
 }
 
 // ============================================================

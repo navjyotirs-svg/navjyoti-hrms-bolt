@@ -146,6 +146,28 @@ export type Permission =
   | 'export.self'
   | 'export.audit_read'
   | 'export.sensitive'
+  // Phase 9 — Self-Assigned Tasks
+  | 'task.self_assign'
+  // Phase 9 — Voice Notes
+  | 'voice_note.send'
+  | 'voice_note.read_self'
+  | 'voice_note.read_sent'
+  // Phase 9 — Projects
+  | 'project.create'
+  | 'project.read_self'
+  | 'project.read_team'
+  | 'project.read_all'
+  | 'project.update_team'
+  | 'project.update_all'
+  | 'project.archive'
+  | 'project.assign_task'
+  // Phase 9 — Recurring Tasks
+  | 'recurring_task.create'
+  | 'recurring_task.read_all'
+  | 'recurring_task.read_team'
+  | 'recurring_task.update'
+  | 'recurring_task.pause'
+  | 'recurring_task.deactivate'
 
 export type AttendanceStatus = 'PENDING_CHECKOUT' | 'FULL_DAY' | 'HALF_DAY'
 
@@ -672,6 +694,24 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'export.self': 'Export Own Data',
   'export.audit_read': 'Read Export Audit',
   'export.sensitive': 'Export Sensitive Data',
+  'task.self_assign': 'Self-Assign Task',
+  'voice_note.send': 'Send Voice Note',
+  'voice_note.read_self': 'Read Own Voice Notes',
+  'voice_note.read_sent': 'Read Sent Voice Notes',
+  'project.create': 'Create Project',
+  'project.read_self': 'Read Own Projects',
+  'project.read_team': 'Read Team Projects',
+  'project.read_all': 'Read All Projects',
+  'project.update_team': 'Update Team Projects',
+  'project.update_all': 'Update All Projects',
+  'project.archive': 'Archive Project',
+  'project.assign_task': 'Assign Task to Project',
+  'recurring_task.create': 'Create Recurring Task',
+  'recurring_task.read_all': 'Read All Recurring Tasks',
+  'recurring_task.read_team': 'Read Team Recurring Tasks',
+  'recurring_task.update': 'Update Recurring Task',
+  'recurring_task.pause': 'Pause/Resume Recurring Task',
+  'recurring_task.deactivate': 'Deactivate Recurring Task',
 }
 
 export type NavItem = {
@@ -875,6 +915,24 @@ export const NAV_ITEMS: NavItem[] = [
     permissions: [],
   },
   {
+    id: 'projects',
+    label: 'Projects',
+    icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z',
+    permissions: ['project.read_self', 'project.read_team', 'project.read_all', 'project.create'],
+  },
+  {
+    id: 'recurring-tasks',
+    label: 'Recurring Tasks',
+    icon: 'M4 4v5h.582m9.69-5L12 12m-8 0a8 8 0 1116 0 8 8 0 01-16 0z',
+    permissions: ['recurring_task.create', 'recurring_task.read_all', 'recurring_task.read_team'],
+  },
+  {
+    id: 'voice-notes',
+    label: 'Voice Notes',
+    icon: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4a2 2 0 002 2h2a2 2 0 002-2v-4M12 2a3 3 0 013 3v6a3 3 0 01-6 0V5a3 3 0 013-3z',
+    permissions: ['voice_note.send', 'voice_note.read_self', 'voice_note.read_sent'],
+  },
+  {
     id: 'settings',
     label: 'Account Settings',
     icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z',
@@ -926,3 +984,48 @@ export const APPROVED_MIME_TYPES = [
 export const APPROVED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png']
 
 export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10MB
+
+// ============================================================
+// Phase 9 — Project Types
+// ============================================================
+
+export type ProjectStatus = 'DRAFT' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED' | 'CANCELLED' | 'ARCHIVED'
+
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  DRAFT: 'Draft',
+  ACTIVE: 'Active',
+  ON_HOLD: 'On Hold',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+  ARCHIVED: 'Archived',
+}
+
+// ============================================================
+// Phase 9 — Voice Note Types
+// ============================================================
+
+export type VoiceNoteStatus = 'SENT' | 'DELETED'
+
+export const VOICE_NOTE_STATUS_LABELS: Record<VoiceNoteStatus, string> = {
+  SENT: 'Sent',
+  DELETED: 'Deleted',
+}
+
+export const VOICE_NOTE_MAX_DURATION_SECONDS = 300 // 5 minutes
+export const VOICE_NOTE_MAX_FILE_SIZE = 15 * 1024 * 1024 // 15MB
+
+// ============================================================
+// Phase 9 — Recurring Task Types
+// ============================================================
+
+export type RecurrenceType = 'DAILY'
+
+export const RECURRENCE_TYPE_LABELS: Record<RecurrenceType, string> = {
+  DAILY: 'Daily',
+}
+
+export type AssignmentTrigger = 'EMPLOYEE_CHECK_IN'
+
+export const ASSIGNMENT_TRIGGER_LABELS: Record<AssignmentTrigger, string> = {
+  EMPLOYEE_CHECK_IN: 'On Check-In',
+}

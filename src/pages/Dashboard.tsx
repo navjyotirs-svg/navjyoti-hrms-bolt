@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { ATTENDANCE_STATUS_LABELS, ROLE_LABELS, type AttendanceStatus } from '@/types/roles'
-import { formatTimeRemaining, formatTimestamp, checkIn, fetchTodayAttendance } from '@/lib/attendance'
+import { formatTimeRemaining, formatTimestamp, fetchTodayAttendance } from '@/lib/attendance'
+import { CheckInModal } from '@/components/CheckInModal'
 import { CheckoutModal } from '@/components/CheckoutModal'
 import { DashboardSkeleton } from '@/components/Skeleton'
 import '@/styles/dashboard.css'
@@ -37,9 +38,7 @@ export function Dashboard() {
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [checkingIn, setCheckingIn] = useState(false)
   const [showCheckout, setShowCheckout] = useState(false)
-  const [attendanceError, setAttendanceError] = useState<string | null>(null)
   const [attendanceSuccess, setAttendanceSuccess] = useState<string | null>(null)
 
   const canReadAll = permissions.includes('attendance.read_all')
@@ -252,35 +251,11 @@ export function Dashboard() {
   const greeting = profile?.full_name ?? profile?.email
   const roleLabel = profile?.role ? (ROLE_LABELS as Record<string, string>)[profile.role] ?? profile.role : ''
 
+  const [showDashboardCheckIn, setShowDashboardCheckIn] = useState(false)
+
   const handleDashboardCheckIn = useCallback(async () => {
-    setAttendanceError(null)
-    setAttendanceSuccess(null)
-    setCheckingIn(true)
-    try {
-      await checkIn()
-      setAttendanceSuccess('Checked in successfully!')
-      if (profile?.id) {
-        const { data: emp } = await supabase
-          .from('employees')
-          .select('id')
-          .eq('user_id', profile.id)
-          .maybeSingle()
-        const empId = (emp as { id: string } | null)?.id
-        if (empId) {
-          const rec = await fetchTodayAttendance(empId)
-          setTodayAttendance(rec ? {
-            check_in_at: rec.check_in_at,
-            required_checkout_at: rec.required_checkout_at,
-            final_status: rec.final_status,
-            actual_elapsed_minutes: (rec as { actual_elapsed_minutes?: number }).actual_elapsed_minutes ?? null,
-          } : null)
-        }
-      }
-    } catch (e) {
-      setAttendanceError((e as Error).message)
-    }
-    setCheckingIn(false)
-  }, [profile?.id])
+    setShowDashboardCheckIn(true)
+  }, [])
 
   function handleDashboardCheckoutSuccess(result: { final_status: string; elapsed_minutes: number }) {
     setShowCheckout(false)
@@ -330,7 +305,6 @@ export function Dashboard() {
         <div className="dashboard-section">
           <h3 className="dashboard-section-title">Today's Attendance</h3>
           <div className="card dashboard-status-card">
-            {attendanceError && <div className="form-error" style={{ marginBottom: '12px' }}>{attendanceError}</div>}
             {attendanceSuccess && <div className="form-success" style={{ marginBottom: '12px' }}>{attendanceSuccess}</div>}
             {todayAttendance ? (
               <>
@@ -393,8 +367,8 @@ export function Dashboard() {
                 <div className="dashboard-status-row">
                   <span className="dashboard-status-label">No check-in yet today</span>
                 </div>
-                <button className="btn btn-checkin" style={{ marginTop: '12px', width: '100%' }} onClick={handleDashboardCheckIn} disabled={checkingIn}>
-                  {checkingIn ? 'Checking in…' : 'Check In'}
+                <button className="btn btn-checkin" style={{ marginTop: '12px', width: '100%' }} onClick={handleDashboardCheckIn}>
+                  Check In
                 </button>
               </>
             )}
@@ -470,6 +444,37 @@ export function Dashboard() {
           userId={profile!.id}
           onClose={() => setShowCheckout(false)}
           onSuccess={handleDashboardCheckoutSuccess}
+        />
+      )}
+      {showDashboardCheckIn && profile?.id && (
+        <CheckInModal
+          userId={profile.id}
+          onClose={() => setShowDashboardCheckIn(false)}
+          onSuccess={(result) => {
+            setShowDashboardCheckIn(false)
+            setAttendanceSuccess(result.recurring_tasks_generated
+              ? `Checked in! ${result.recurring_tasks_generated} recurring task(s) assigned for today.`
+              : 'Checked in successfully!')
+            if (profile?.id) {
+              ;(async () => {
+                const { data: emp } = await supabase
+                  .from('employees')
+                  .select('id')
+                  .eq('user_id', profile!.id)
+                  .maybeSingle()
+                const empId = (emp as { id: string } | null)?.id
+                if (empId) {
+                  const rec = await fetchTodayAttendance(empId)
+                  setTodayAttendance(rec ? {
+                    check_in_at: rec.check_in_at,
+                    required_checkout_at: rec.required_checkout_at,
+                    final_status: rec.final_status,
+                    actual_elapsed_minutes: (rec as { actual_elapsed_minutes?: number }).actual_elapsed_minutes ?? null,
+                  } : null)
+                }
+              })()
+            }
+          }}
         />
       )}
     </div>

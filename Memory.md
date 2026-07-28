@@ -2651,3 +2651,100 @@ Rewrote `src/pages/DailyReportPage.tsx` to add:
 - The `fetchMyTasks()` function queries all tasks for the user (RLS filters to own tasks) — it does not filter by status server-side; the client filters by `ACTIVE_TASK_STATUSES`. A future enhancement could add server-side status filtering.
 
 
+---
+
+## Phase 9: Management Workflow Enhancements — completed 2026-07-28
+
+### Objective
+Five approved HRMS enhancements: (1) Mandatory photo + location evidence during Check-In, (2) Employee Self-Assigned Tasks, (3) Director/Manager Voice Notes to Employees, (4) Project Management and mandatory Project selection during Task Assignment, (5) Recurring/Repeated Tasks generated when the employee checks in. No payroll, salary, or financial-performance features.
+
+### Migrations Applied (2)
+1. `phase9_management_workflow_enhancements` — All schema changes:
+   - Attendance: `check_in_evidence_status`, `check_out_evidence_status` on attendance_records; `evidence_status`, `location_source` on attendance_evidence
+   - Tasks: `is_self_assigned`, `self_assigned_by`, `self_assigned_at`, `self_assign_reason`, `project_id`, `recurring_template_id`, `recurrence_date`, `is_recurring_instance`, `assigned_employee_id` columns
+   - New tables: `voice_notes`, `voice_note_recipients`, `projects`, `project_history` (append-only), `recurring_task_templates`
+   - 18 new permissions + role-permission matrix across 7 roles
+   - RLS on all new tables (org-scoped, sender+recipient scoped for voice notes, append-only for project_history)
+   - Private storage bucket `voice-notes` with owner/recipient-scoped policies
+   - Default "General Internal Operations" project created per org; existing unlinked tasks migrated
+   - Updated_at triggers on projects and recurring_task_templates
+   - 4 new tables added to supabase_realtime publication
+   - Unique partial index `idx_recurring_task_instance` prevents duplicate recurring task generation
+2. `phase9_code_generation_rpcs` — `generate_project_code(uuid)` and `generate_recurring_template_code(uuid)` SECURITY DEFINER RPCs using org_code_sequences
+
+### Edge Functions Deployed (5)
+1. `attendance-action` (UPDATED) — Check-in now requires photo + location evidence (evidence_storage_path, mime_type, file_size, latitude, longitude, location_accuracy). Validates MIME type, file size, evidence ownership. Creates attendance_evidence row with CHECK_IN_PHOTO. After check-in, generates recurring task instances for active, non-paused templates within date range. Catches unique violations to prevent duplicates. Recurring generation failure does not roll back check-in. Returns `recurring_tasks_generated` count.
+2. `task-action` (UPDATED) — New `self_assign` action: requires `task.self_assign` permission, validates project_id belongs to org, creates task with `is_self_assigned=true`, `status=IN_PROGRESS`, creates primary assignment, status history, audit log, notifies manager+HR+directors with `TASK_SELF_ASSIGNED`. Updated `create` action: `project_id` now mandatory, validated against org, `assigned_employee_id` added to task insert.
+3. `voice-note-action` (NEW) — Actions: send (validates recipient in same org, manager scope check for reporting subtree, uploads to private bucket, creates voice_note + voice_note_recipient rows, notifies recipient with `VOICE_NOTE_RECEIVED`), record_play, acknowledge, delete (soft delete + storage removal).
+4. `project-action` (NEW) — Actions: create (generates PRJ-YYYY-NNNNNN code, creates project + history + audit), update, change_status (DRAFT/ACTIVE/ON_HOLD/COMPLETED/CANCELLED/ARCHIVED), archive.
+5. `recurring-task-action` (NEW) — Actions: create (validates project+employee in org, manager scope check, generates RCT-YYYY-NNNNNN code), update (future instances only), pause, resume, deactivate (soft deactivation with timestamp).
+
+### Frontend Files Created (9 new)
+- `src/lib/projects.ts` — Project CRUD API (fetchProjects, createProject, updateProject, changeProjectStatus, archiveProject, fetchProjectTaskCount)
+- `src/lib/voiceNotes.ts` — Voice note API (fetchReceivedVoiceNotes, fetchSentVoiceNotes, uploadVoiceNote, createVoiceNoteSignedUrl, sendVoiceNote, recordVoiceNotePlay, acknowledgeVoiceNote, deleteVoiceNote, getSupportedAudioMimeType)
+- `src/lib/recurringTasks.ts` — Recurring task API (fetchRecurringTemplates, createRecurringTemplate, updateRecurringTemplate, pauseRecurringTemplate, resumeRecurringTemplate, deactivateRecurringTemplate)
+- `src/components/CheckInModal.tsx` — Live camera capture + geolocation modal for check-in (6-step flow: intro→camera→captured→location→uploading→done, camera switch, image compression, orientation correction, error handling)
+- `src/pages/ProjectsPage.tsx` — Project management page with stat row, create modal, status change actions, table
+- `src/pages/VoiceNotesPage.tsx` — Voice note recording/sending page with MediaRecorder, 5-min timer, playback preview, employee selector, sent notes list
+- `src/pages/MyVoiceNotesPage.tsx` — Employee voice note inbox with audio player, play tracking, acknowledge
+- `src/pages/RecurringTasksPage.tsx` — Recurring task template management with create modal, pause/resume/deactivate actions
+- `src/pages/SelfAssignTaskPage.tsx` — Employee self-assign task form with project selection, all required fields, reason
+
+### Frontend Files Updated (8)
+- `src/types/roles.ts` — 18 new permissions, ProjectStatus/VOICE_NOTE_STATUS/RecurrenceType/AssignmentTrigger types, 3 new nav items (Projects, Recurring Tasks, Voice Notes)
+- `src/lib/tasks.ts` — Added `selfAssignTask()` function, `project_id` param to `createTask`
+- `src/lib/attendance.ts` — `checkIn()` now requires evidence params (evidence_storage_path, mime_type, file_size, latitude, longitude, location_accuracy)
+- `src/lib/queryClient.ts` — Added projects, recurring_task_templates, voice_notes, voice_note_recipients to query invalidation map
+- `src/lib/notificationEvents.ts` — 13 new event codes (CHECK_IN_EVIDENCE_CAPTURED, CHECK_IN_EVIDENCE_FAILED, TASK_SELF_ASSIGNED, VOICE_NOTE_RECEIVED, PROJECT_CREATED, PROJECT_UPDATED, RECURRING_TASK_CREATED/MODIFIED/PAUSED/RESUMED/ASSIGNED/GENERATION_FAILED). Added voice_note, project, recurring_task to NotificationCategory type.
+- `src/components/AppRealtimeProvider.tsx` — Added projects, project_history, recurring_task_templates, voice_notes, voice_note_recipients to subscribed tables
+- `src/components/AppShell.tsx` — Added page titles for /projects, /voice-notes, /my-voice-notes, /recurring-tasks, /self-assign-task
+- `src/App.tsx` — Added 5 new routes with PermissionRoute guards
+- `src/components/Topbar.tsx` — Check-in now opens CheckInModal instead of calling checkIn() directly
+- `src/pages/Dashboard.tsx` — Check-in now opens CheckInModal, shows recurring tasks generated count
+- `src/pages/AttendancePage.tsx` — Check-in button opens CheckInModal, shows recurring tasks message on success
+- `src/pages/CreateTaskPage.tsx` — Added mandatory Project dropdown with "Create New Project" modal
+
+### Database Tables (5 new)
+1. `voice_notes` (id, organization_id, sender_user_id, sender_employee_id, title, message, storage_path, mime_type, file_size_bytes, duration_seconds, status, created_at, deleted_at) — RLS: SELECT (sender/recipient/director/hr), INSERT (sender), UPDATE (sender)
+2. `voice_note_recipients` (id, voice_note_id, recipient_user_id, recipient_employee_id, delivered_at, first_played_at, last_played_at, play_count, acknowledged_at, created_at) — RLS: SELECT (recipient/sender), INSERT (sender), UPDATE (recipient/sender)
+3. `projects` (id, organization_id, project_code, project_name, description, project_owner_employee_id, branch_id, department_id, priority, start_date, expected_end_date, actual_end_date, status, created_by, created_at, updated_at, is_active) — RLS: SELECT (org), INSERT (org), UPDATE (org)
+4. `project_history` (id, project_id, action, old_values, new_values, changed_by, created_at) — RLS: SELECT (org), INSERT (any) — append-only
+5. `recurring_task_templates` (id, organization_id, project_id, template_code, title, description, expected_result, priority, target_quantity, target_unit, estimated_hours, task_cost, assigned_employee_id, created_by, recurrence_type, selected_weekdays, start_date, end_date, assignment_trigger, is_active, is_paused, last_generated_date, next_generation_date, created_at, updated_at, deactivated_at) — RLS: SELECT (org), INSERT (org), UPDATE (org)
+
+### Storage
+- `voice-notes`: private bucket (public=false), SELECT (owner/recipient/director/hr_admin), INSERT (owner), DELETE (owner)
+
+### Permissions (18 new)
+- Director: all 18
+- HR Admin: 16 (no voice_note.send, voice_note.read_sent)
+- Manager: 12 (self_assign, voice_note.send/read_self/read_sent, project.create/read_self/read_team/update_team/assign_task, recurring_task.create/read_team/update/pause/deactivate)
+- Team Leader: 4 (self_assign, voice_note.read_self, project.read_self/read_team)
+- Employee: 3 (self_assign, voice_note.read_self, project.read_self)
+- Intern: 3 (same as employee)
+- System Admin: 0
+
+### Check-In Flow (Final)
+Employee clicks Check In → CheckInModal opens → explains Photo + Location requirement → request camera permission → capture live photo (front-facing preferred, camera switch supported) → show preview, allow retake → request geolocation (enableHighAccuracy, timeout 15000, maximumAge 0) → show photo + location status → employee confirms → upload photo to private storage → submit server-authoritative attendance action with evidence → server validates evidence → attendance record created → check-in evidence row created → recurring tasks generated (if applicable) → check-in confirmation shown with recurring task count → Manager/HR/Director notifications generated → dashboards update in realtime
+
+### Recurring Task Generation
+After successful check-in: queries recurring_task_templates where assigned_employee_id=employee.id, is_active=true, is_paused=false, start_date<=today, end_date IS NULL OR end_date>=today. Skips Sundays. For each template: generates task_code, creates task with recurring_template_id, recurrence_date, is_recurring_instance=true, status=IN_PROGRESS, assigned_employee_id. Creates task_assignments + status_history + audit. Catches unique violation (23505) from idx_recurring_task_instance to prevent duplicates. Notifies employee with RECURRING_TASK_ASSIGNED + manager/HR/directors. Failure does not roll back check-in.
+
+### Tests
+- New Phase 9 tests: 64 pass / 0 fail
+- Existing tests: 199 pass / 0 fail
+- Total: 263 pass / 0 fail
+- TypeScript: PASS
+- Production build: PASS (829.81 kB JS / 42.04 kB CSS)
+
+### Remaining Limitations
+- Browser/mobile smoke test NOT performed — no browser automation available
+- Voice note recording depends on MediaRecorder API support (not available on older browsers)
+- Voice note playback uses signed URLs (300s expiry)
+- Recurring task generation only supports DAILY recurrence type (selected_weekdays array exists but not yet used for weekday filtering)
+- Project management page does not show project details with linked tasks (basic table view only)
+- Management dashboard cards for new features not yet added (existing dashboard cards remain)
+- Email channel still a stub
+- The `get_effective_permissions` RPC is called by edge functions using `p_user_id` parameter — this is the existing pattern from Phase 5+
+
+
+

@@ -6,7 +6,8 @@ import { CheckoutModal } from '@/components/CheckoutModal'
 import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import { RealtimeIndicator } from '@/components/RealtimeIndicator'
 import { supabase } from '@/lib/supabase'
-import { checkIn, fetchTodayAttendance, formatTimeRemaining } from '@/lib/attendance'
+import { fetchTodayAttendance, formatTimeRemaining } from '@/lib/attendance'
+import { CheckInModal } from '@/components/CheckInModal'
 import '@/styles/shell.css'
 
 interface TopbarProps {
@@ -17,9 +18,7 @@ interface TopbarProps {
 export function Topbar({ title, soundEnabled }: TopbarProps) {
   const { profile, permissions } = useAuth()
   const [todayRec, setTodayRec] = useState<{ check_in_at: string; required_checkout_at: string; final_status: string } | null>(null)
-  const [checkingIn, setCheckingIn] = useState(false)
   const [showCheckout, setShowCheckout] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [remaining, setRemaining] = useState('00:00:00')
 
   const canCheckIn = permissions.includes('attendance.check_in_self')
@@ -59,16 +58,10 @@ export function Topbar({ title, soundEnabled }: TopbarProps) {
     }
   }, [todayRec])
 
+  const [showCheckIn, setShowCheckIn] = useState(false)
+
   async function handleCheckIn() {
-    setError(null)
-    setCheckingIn(true)
-    try {
-      await checkIn()
-      await loadAttendance()
-    } catch (e) {
-      setError((e as Error).message)
-    }
-    setCheckingIn(false)
+    setShowCheckIn(true)
   }
 
   function handleCheckoutSuccess(_result: { final_status: string }) {
@@ -87,10 +80,9 @@ export function Topbar({ title, soundEnabled }: TopbarProps) {
       <div className="topbar-right">
         {canCheckIn && (
           <div className="topbar-attendance">
-            {error && <span className="topbar-attendance-error" title={error}>!</span>}
             {!todayRec && (
-              <button className="topbar-checkin-btn" onClick={handleCheckIn} disabled={checkingIn}>
-                {checkingIn ? '…' : 'Check In'}
+              <button className="topbar-checkin-btn" onClick={handleCheckIn}>
+                Check In
               </button>
             )}
             {todayRec && todayRec.final_status === 'PENDING_CHECKOUT' && canCheckOut && (
@@ -121,6 +113,13 @@ export function Topbar({ title, soundEnabled }: TopbarProps) {
             userId={profile!.id}
             onClose={() => setShowCheckout(false)}
             onSuccess={handleCheckoutSuccess}
+          />
+        )}
+        {showCheckIn && profile?.id && (
+          <CheckInModal
+            userId={profile.id}
+            onClose={() => setShowCheckIn(false)}
+            onSuccess={() => { setShowCheckIn(false); loadAttendance() }}
           />
         )}
       </div>

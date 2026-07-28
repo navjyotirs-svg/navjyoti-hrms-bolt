@@ -45,6 +45,10 @@ export type QueryKey =
   | 'calendar-events'
   | 'holidays'
   | 'audit-trail'
+  | 'projects'
+  | 'recurring-tasks'
+  | 'voice-notes'
+  | 'my-voice-notes'
 
 const TABLE_TO_QUERIES: Record<string, QueryKey[]> = {
   employees: ['employees', 'employee-directory', 'employee-profile', 'organization-dashboard', 'activation-summary', 'director-dashboard', 'hr-dashboard'],
@@ -80,6 +84,12 @@ const TABLE_TO_QUERIES: Record<string, QueryKey[]> = {
   announcements: ['announcements'],
 
   management_follow_ups: ['follow-up-queue', 'management-dashboard'],
+
+  projects: ['projects', 'director-dashboard', 'hr-dashboard', 'management-dashboard'],
+  project_history: ['projects'],
+  recurring_task_templates: ['recurring-tasks', 'management-dashboard', 'my-tasks'],
+  voice_notes: ['voice-notes', 'my-voice-notes', 'management-dashboard'],
+  voice_note_recipients: ['my-voice-notes', 'voice-notes'],
 }
 
 export function getQueriesForTable(table: string): QueryKey[] {

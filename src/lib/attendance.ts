@@ -99,8 +99,15 @@ async function callEdgeFunction(slug: string, body: Record<string, unknown>) {
   return data
 }
 
-export async function checkIn() {
-  return callEdgeFunction('attendance-action', { action: 'check_in' })
+export async function checkIn(params: {
+  evidence_storage_path: string
+  evidence_mime_type: string
+  evidence_file_size: number
+  latitude: number
+  longitude: number
+  location_accuracy?: number
+}) {
+  return callEdgeFunction('attendance-action', { action: 'check_in', ...params })
 }
 
 export async function checkOut(params: {

@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAuth } from '@/auth/AuthContext'
 import { supabase } from '@/lib/supabase'
 import {
-  checkIn,
   fetchTodayAttendance,
   fetchAttendanceHistory,
   fetchAttendanceEvidence,
@@ -16,6 +15,7 @@ import {
 } from '@/lib/attendance'
 import { ATTENDANCE_STATUS_LABELS, CORRECTION_TYPE_LABELS, CHECKOUT_TYPE_LABELS, CHECKOUT_STATUS_LABELS, type AttendanceStatus, type CheckoutType, type CheckoutStatus } from '@/types/roles'
 import { CheckoutModal } from '@/components/CheckoutModal'
+import { CheckInModal } from '@/components/CheckInModal'
 import { AttendanceSkeleton } from '@/components/Skeleton'
 import '@/styles/attendance.css'
 
@@ -29,7 +29,7 @@ export function AttendancePage() {
   const [corrections, setCorrections] = useState<AttendanceCorrection[]>([])
   const [evidence, setEvidence] = useState<AttendanceEvidence[]>([])
   const [loading, setLoading] = useState(true)
-  const [checkingIn, setCheckingIn] = useState(false)
+  const [showCheckIn, setShowCheckIn] = useState(false)
   const [showCheckout, setShowCheckout] = useState(false)
   const [showCorrection, setShowCorrection] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -85,18 +85,20 @@ export function AttendancePage() {
     return (data as { id: string } | null)?.id ?? null
   }
 
-  async function handleCheckIn() {
-    setError(null)
-    setSuccess(null)
-    setCheckingIn(true)
-    try {
-      await checkIn()
-      setSuccess('Checked in successfully!')
-      await loadToday()
-    } catch (e) {
-      setError((e as Error).message)
-    }
-    setCheckingIn(false)
+  function handleCheckInSuccess(result: {
+    record_id: string
+    check_in_at: string
+    required_checkout_at: string
+    recurring_tasks_generated?: number
+  }) {
+    setShowCheckIn(false)
+    const tasks = result.recurring_tasks_generated ?? 0
+    setSuccess(
+      tasks > 0
+        ? `Checked in! ${tasks} recurring task(s) assigned for today.`
+        : 'Checked in successfully!'
+    )
+    loadToday()
   }
 
   function handleCheckoutSuccess(result: { final_status: string; elapsed_minutes: number }) {
@@ -178,8 +180,8 @@ export function AttendancePage() {
             <div className="attendance-action-card">
               <p className="attendance-no-record">You have not checked in yet.</p>
               {canCheckIn && (
-                <button className="btn btn-checkin" onClick={handleCheckIn} disabled={checkingIn}>
-                  {checkingIn ? 'Checking in…' : 'Check In'}
+                <button className="btn btn-checkin" onClick={() => setShowCheckIn(true)}>
+                  Check In
                 </button>
               )}
             </div>
@@ -338,6 +340,14 @@ export function AttendancePage() {
             </div>
           )}
         </div>
+      )}
+
+      {showCheckIn && profile?.id && (
+        <CheckInModal
+          userId={profile.id}
+          onClose={() => setShowCheckIn(false)}
+          onSuccess={handleCheckInSuccess}
+        />
       )}
 
       {showCheckout && todayRecord && (

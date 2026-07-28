@@ -165,6 +165,7 @@ export async function fetchPendingSubmissions() {
 // ============================================================
 
 export async function createTask(payload: {
+  project_id?: string
   title: string
   description: string
   assignee_id: string
@@ -185,6 +186,23 @@ export async function createTask(payload: {
   task_cost?: number | null
 }) {
   return callTaskAction('create', payload)
+}
+
+export async function selfAssignTask(payload: {
+  project_id: string
+  title: string
+  description?: string
+  priority: TaskPriority
+  start_date: string
+  deadline: string
+  reason: string
+  expected_result?: string
+  target_quantity?: number | null
+  target_unit?: string | null
+  estimated_hours?: number | null
+  task_cost?: number | null
+}) {
+  return callTaskAction('self_assign', payload)
 }
 
 export async function updateTaskCost(payload: {

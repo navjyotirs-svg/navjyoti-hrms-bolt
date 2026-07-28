@@ -51,6 +51,11 @@ import { FollowUpQueuePage } from '@/pages/FollowUpQueuePage'
 import { AnnouncementManagementPage } from '@/pages/AnnouncementManagementPage'
 import { ExportCenterPage } from '@/pages/ExportCenterPage'
 import { NotificationInboxPage } from '@/pages/NotificationInboxPage'
+import { ProjectsPage } from '@/pages/ProjectsPage'
+import { VoiceNotesPage } from '@/pages/VoiceNotesPage'
+import { MyVoiceNotesPage } from '@/pages/MyVoiceNotesPage'
+import { RecurringTasksPage } from '@/pages/RecurringTasksPage'
+import { SelfAssignTaskPage } from '@/pages/SelfAssignTaskPage'
 import type { ReactNode } from 'react'
 import type { Permission } from '@/types/roles'
 
@@ -254,6 +259,21 @@ function AppRoutes() {
           <PermissionRoute permissions={['export.organization', 'export.team', 'export.self', 'export.audit_read']}><ExportCenterPage /></PermissionRoute>
         } />
         <Route path="/notification-inbox" element={<NotificationInboxPage />} />
+        <Route path="/projects" element={
+          <PermissionRoute permissions={['project.read_self', 'project.read_team', 'project.read_all', 'project.create']}><ProjectsPage /></PermissionRoute>
+        } />
+        <Route path="/voice-notes" element={
+          <PermissionRoute permissions={['voice_note.send', 'voice_note.read_sent']}><VoiceNotesPage /></PermissionRoute>
+        } />
+        <Route path="/my-voice-notes" element={
+          <PermissionRoute permissions={['voice_note.read_self']}><MyVoiceNotesPage /></PermissionRoute>
+        } />
+        <Route path="/recurring-tasks" element={
+          <PermissionRoute permissions={['recurring_task.create', 'recurring_task.read_all', 'recurring_task.read_team']}><RecurringTasksPage /></PermissionRoute>
+        } />
+        <Route path="/self-assign-task" element={
+          <PermissionRoute permissions={['task.self_assign']}><SelfAssignTaskPage /></PermissionRoute>
+        } />
         <Route path="/settings" element={<AccountSettingsPage />} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />

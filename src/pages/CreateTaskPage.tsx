@@ -4,17 +4,36 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from '@/types/roles'
 import { createTask, formatTaskCost } from '@/lib/tasks'
+import { fetchProjects, createProject, type ProjectRow } from '@/lib/projects'
 import { FormSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
+
+const PROJECT_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
+type ProjectPriority = (typeof PROJECT_PRIORITIES)[number]
 
 export function CreateTaskPage() {
   const { profile } = useAuth()
   const navigate = useNavigate()
   const [employees, setEmployees] = useState<any[]>([])
+  const [projects, setProjects] = useState<ProjectRow[]>([])
+  const [projectsLoading, setProjectsLoading] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [showProjectModal, setShowProjectModal] = useState(false)
+  const [projectSubmitting, setProjectSubmitting] = useState(false)
+  const [projectError, setProjectError] = useState<string | null>(null)
+
+  const [projectForm, setProjectForm] = useState({
+    project_name: '',
+    description: '',
+    priority: 'MEDIUM' as ProjectPriority,
+    start_date: new Date().toISOString().slice(0, 10),
+    expected_end_date: '',
+  })
+
   const [form, setForm] = useState({
+    project_id: '',
     title: '',
     description: '',
     assignee_id: '',
@@ -34,6 +53,7 @@ export function CreateTaskPage() {
 
   useEffect(() => {
     loadEmployees()
+    loadProjects()
   }, [profile?.organization_id])
 
   async function loadEmployees() {
@@ -47,10 +67,62 @@ export function CreateTaskPage() {
     setEmployees(data || [])
   }
 
+  async function loadProjects() {
+    setProjectsLoading(true)
+    try {
+      const data = await fetchProjects()
+      setProjects(data)
+    } catch (e) {
+      // Non-fatal: project dropdown will be empty with an option to create
+      console.error('Failed to load projects:', (e as Error).message)
+    }
+    setProjectsLoading(false)
+  }
+
+  async function handleCreateProject(e: React.FormEvent) {
+    e.preventDefault()
+    setProjectError(null)
+    if (!projectForm.project_name.trim()) {
+      setProjectError('Project name is required')
+      return
+    }
+    setProjectSubmitting(true)
+    try {
+      const result = await createProject({
+        project_name: projectForm.project_name.trim(),
+        description: projectForm.description.trim() || undefined,
+        priority: projectForm.priority,
+        start_date: projectForm.start_date || undefined,
+        expected_end_date: projectForm.expected_end_date || undefined,
+      })
+      await loadProjects()
+      // Auto-select the newly created project. The edge function returns the new project id.
+      const newId = result?.project_id || result?.id
+      if (newId) {
+        setForm((prev) => ({ ...prev, project_id: newId }))
+      }
+      setShowProjectModal(false)
+      setProjectForm({
+        project_name: '',
+        description: '',
+        priority: 'MEDIUM' as ProjectPriority,
+        start_date: new Date().toISOString().slice(0, 10),
+        expected_end_date: '',
+      })
+    } catch (e) {
+      setProjectError((e as Error).message)
+    }
+    setProjectSubmitting(false)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!form.project_id) {
+      setError('Project is required')
+      return
+    }
     if (!form.title.trim() || !form.description.trim() || !form.assignee_id || !form.deadline) {
-      setError('Title, description, assignee, and deadline are required')
+      setError('Project, title, description, assignee, and deadline are required')
       return
     }
     if (new Date(form.deadline) < new Date(form.start_date)) {
@@ -72,6 +144,7 @@ export function CreateTaskPage() {
     try {
       const assignee = employees.find((e) => e.id === form.assignee_id)
       await createTask({
+        project_id: form.project_id,
         title: form.title.trim(),
         description: form.description.trim(),
         assignee_id: assignee.user_id,
@@ -112,6 +185,32 @@ export function CreateTaskPage() {
 
       <div className="card">
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <div className="form-field">
+            <label htmlFor="t-project">Project *</label>
+            <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+              <select
+                id="t-project"
+                value={form.project_id}
+                onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                required
+                style={{ flex: 1 }}
+                disabled={projectsLoading}
+              >
+                <option value="">{projectsLoading ? 'Loading projects…' : 'Select project'}</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.project_name} ({p.project_code})</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowProjectModal(true)}
+              >
+                + Create New Project
+              </button>
+            </div>
+          </div>
+
           <div className="form-field">
             <label htmlFor="t-title">Title *</label>
             <input id="t-title" type="text" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
@@ -210,6 +309,74 @@ export function CreateTaskPage() {
           </div>
         </form>
       </div>
+
+      {showProjectModal && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowProjectModal(false) }}>
+          <div className="modal">
+            <div className="modal-header">
+              Create New Project
+              <button className="modal-close" onClick={() => setShowProjectModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={handleCreateProject}>
+                <div className="form-grid">
+                  <div className="form-field form-field-full">
+                    <label htmlFor="np-name">Project Name *</label>
+                    <input
+                      id="np-name"
+                      value={projectForm.project_name}
+                      onChange={(e) => setProjectForm({ ...projectForm, project_name: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="form-field form-field-full">
+                    <label htmlFor="np-desc">Description</label>
+                    <textarea
+                      id="np-desc"
+                      rows={3}
+                      value={projectForm.description}
+                      onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="np-priority">Priority</label>
+                    <select
+                      id="np-priority"
+                      value={projectForm.priority}
+                      onChange={(e) => setProjectForm({ ...projectForm, priority: e.target.value as ProjectPriority })}
+                    >
+                      {PROJECT_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="np-start">Start Date</label>
+                    <input
+                      id="np-start"
+                      type="date"
+                      value={projectForm.start_date}
+                      onChange={(e) => setProjectForm({ ...projectForm, start_date: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-field form-field-full">
+                    <label htmlFor="np-end">Expected End Date</label>
+                    <input
+                      id="np-end"
+                      type="date"
+                      value={projectForm.expected_end_date}
+                      onChange={(e) => setProjectForm({ ...projectForm, expected_end_date: e.target.value })}
+                    />
+                  </div>
+                </div>
+                {projectError && <div className="form-error" style={{ marginTop: 'var(--space-3)' }}>{projectError}</div>}
+                <div className="form-actions">
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowProjectModal(false)} disabled={projectSubmitting}>Cancel</button>
+                  <button type="submit" className="btn" disabled={projectSubmitting}>{projectSubmitting ? 'Creating…' : 'Create'}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

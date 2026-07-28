@@ -55,6 +55,11 @@ const SUBSCRIBED_TABLES = [
   'notifications',
   'announcements',
   'management_follow_ups',
+  'projects',
+  'project_history',
+  'recurring_task_templates',
+  'voice_notes',
+  'voice_note_recipients',
 ]
 
 const REFETCH_INTERVAL_MS = 30_000

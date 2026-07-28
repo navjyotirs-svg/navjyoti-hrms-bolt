@@ -38,6 +38,11 @@ const PAGE_TITLES: Record<string, string> = {
   '/task-review': 'Task Review',
   '/my-tickets': 'My Tickets',
   '/ticket-management': 'Ticket Management',
+  '/projects': 'Projects',
+  '/voice-notes': 'Voice Notes',
+  '/my-voice-notes': 'My Voice Notes',
+  '/recurring-tasks': 'Recurring Tasks',
+  '/self-assign-task': 'Self Assign Task',
 }
 
 function getPageTitle(pathname: string): string {

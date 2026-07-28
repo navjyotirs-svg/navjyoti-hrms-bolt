@@ -9,9 +9,17 @@ const corsHeaders = {
 
 const REQUIRED_TOTAL_MINUTES = 540;
 const ATTENDANCE_POLICY_VERSION = "POLICY_540_FULL_DAY";
+const APPROVED_EVIDENCE_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+const MAX_EVIDENCE_BYTES = 10 * 1024 * 1024; // 10MB
 
 interface CheckInRequest {
   action: "check_in";
+  evidence_storage_path: string;
+  evidence_mime_type: string;
+  evidence_file_size: number;
+  latitude: number;
+  longitude: number;
+  location_accuracy?: number;
 }
 
 interface CheckOutRequest {
@@ -98,7 +106,7 @@ Deno.serve(async (req: Request) => {
     const body: AttendanceRequest = await req.json();
 
     if (body.action === "check_in") {
-      return handleCheckIn(admin, callerId, employee, totalMinutes);
+      return handleCheckIn(admin, callerId, employee, totalMinutes, body as CheckInRequest);
     } else if (body.action === "check_out") {
       return handleCheckOut(admin, callerId, employee, body as CheckOutRequest);
     } else {
@@ -241,16 +249,60 @@ async function notifyBusinessEvent(
   } catch { /* best-effort */ }
 }
 
+/**
+ * Validate the photo + location evidence payload submitted with a check-in.
+ * Returns an error string on failure, or null when the payload is valid.
+ */
+function validateEvidencePayload(
+  body: CheckInRequest,
+  callerId: string
+): string | null {
+  if (
+    !body.evidence_storage_path ||
+    !body.evidence_mime_type ||
+    body.evidence_file_size === undefined ||
+    body.evidence_file_size === null
+  ) {
+    return "Evidence storage path, MIME type, and file size are required";
+  }
+
+  if (typeof body.latitude !== "number" || typeof body.longitude !== "number") {
+    return "Latitude and longitude are required";
+  }
+
+  if (!APPROVED_EVIDENCE_MIMES.includes(body.evidence_mime_type)) {
+    return "Invalid image format. Approved formats: JPG, JPEG, PNG, WebP";
+  }
+
+  if (body.evidence_file_size > MAX_EVIDENCE_BYTES) {
+    return "Image size exceeds 10MB limit";
+  }
+
+  const expectedPrefix = `${callerId}/`;
+  if (!body.evidence_storage_path.startsWith(expectedPrefix)) {
+    return "Evidence does not belong to the authenticated user";
+  }
+
+  return null;
+}
+
 async function handleCheckIn(
   admin: ReturnType<typeof createClient>,
   callerId: string,
   employee: Record<string, unknown>,
-  totalMinutes: number
+  totalMinutes: number,
+  body: CheckInRequest
 ): Promise<Response> {
   // Check permission
   const hasPerm = await checkPermission(admin, callerId, "attendance.check_in_self");
   if (!hasPerm) {
     return jsonError(403, "You do not have permission to check in");
+  }
+
+  // Validate mandatory photo + location evidence
+  const evidenceError = validateEvidencePayload(body, callerId);
+  if (evidenceError) {
+    return jsonError(400, evidenceError);
   }
 
   const now = new Date();
@@ -283,6 +335,7 @@ async function handleCheckIn(
       required_total_minutes: totalMinutes,
       attendance_policy_version: ATTENDANCE_POLICY_VERSION,
       final_status: "PENDING_CHECKOUT",
+      check_in_evidence_status: "VERIFIED",
       created_by: callerId,
     })
     .select("id, check_in_at, required_checkout_at, required_total_minutes, final_status")
@@ -290,6 +343,26 @@ async function handleCheckIn(
 
   if (insertError || !record) {
     return jsonError(500, `Failed to create attendance record: ${insertError?.message ?? "Unknown"}`);
+  }
+
+  // Create check-in evidence record
+  const { error: evidenceError } = await admin.from("attendance_evidence").insert({
+    attendance_record_id: record.id,
+    employee_id: employee.id as string,
+    evidence_type: "CHECK_IN_PHOTO",
+    storage_path: body.evidence_storage_path,
+    mime_type: body.evidence_mime_type,
+    file_size_bytes: body.evidence_file_size,
+    latitude: body.latitude,
+    longitude: body.longitude,
+    location_accuracy: body.location_accuracy ?? null,
+    captured_at: now.toISOString(),
+    uploaded_at: now.toISOString(),
+    created_by: callerId,
+  });
+
+  if (evidenceError) {
+    return jsonError(500, `Failed to store check-in evidence: ${evidenceError.message}`);
   }
 
   // Create history entry
@@ -301,6 +374,10 @@ async function handleCheckIn(
       check_in_at: record.check_in_at,
       required_checkout_at: record.required_checkout_at,
       required_total_minutes: record.required_total_minutes,
+      evidence_type: "CHECK_IN_PHOTO",
+      storage_path: body.evidence_storage_path,
+      latitude: body.latitude,
+      longitude: body.longitude,
     },
     performed_by: callerId,
   });
@@ -315,6 +392,8 @@ async function handleCheckIn(
       employee_id: employee.id,
       check_in_at: record.check_in_at,
       required_checkout_at: record.required_checkout_at,
+      check_in_evidence_status: "VERIFIED",
+      evidence_type: "CHECK_IN_PHOTO",
     },
   });
 
@@ -330,6 +409,20 @@ async function handleCheckIn(
     dedup_key: `att:check_in:${record.id}`,
   });
 
+  // Generate recurring task instances for today (best-effort — never fails the check-in)
+  let recurringTasksGenerated = 0;
+  try {
+    recurringTasksGenerated = await generateRecurringTasksForCheckIn(
+      admin,
+      callerId,
+      employee,
+      record.id,
+      attendanceDate
+    );
+  } catch (err) {
+    console.error("Recurring task generation failed:", err instanceof Error ? err.message : String(err));
+  }
+
   return jsonResponse(200, {
     message: "Checked in successfully",
     record_id: record.id,
@@ -337,7 +430,176 @@ async function handleCheckIn(
     required_checkout_at: record.required_checkout_at,
     required_total_minutes: record.required_total_minutes,
     final_status: record.final_status,
+    recurring_tasks_generated: recurringTasksGenerated,
   });
+}
+
+/**
+ * Generate recurring task instances for the employee on the check-in date.
+ *
+ * - Queries active, non-paused recurring_task_templates assigned to the employee
+ *   whose start_date <= today and (end_date IS NULL OR end_date >= today).
+ * - Skips Sundays (day 0).
+ * - Creates a task instance + assignment + status history + audit log per template.
+ * - Relies on the unique partial index idx_recurring_task_instance to prevent duplicates;
+ *   unique-violation errors are caught and the duplicate is silently skipped.
+ * - Notifies the employee, reporting manager, HR, and directors for each generated task.
+ *
+ * Returns the number of tasks actually created in this invocation.
+ */
+async function generateRecurringTasksForCheckIn(
+  admin: ReturnType<typeof createClient>,
+  callerId: string,
+  employee: Record<string, unknown>,
+  attendanceRecordId: string,
+  attendanceDate: string
+): Promise<number> {
+  const employeeId = employee.id as string;
+  const organizationId = employee.organization_id as string;
+
+  // Sunday = day 0 — recurring tasks are not generated on Sundays.
+  const todayDate = new Date(attendanceDate + "T00:00:00Z");
+  if (todayDate.getUTCDay() === 0) {
+    return 0;
+  }
+
+  // Fetch applicable recurring task templates
+  const { data: templates, error: templatesError } = await admin
+    .from("recurring_task_templates")
+    .select("id, title, description, project_id, priority, estimated_minutes")
+    .eq("assigned_employee_id", employeeId)
+    .eq("is_active", true)
+    .eq("is_paused", false)
+    .lte("start_date", attendanceDate)
+    .or(`end_date.is.null,end_date.gte.${attendanceDate}`);
+
+  if (templatesError) {
+    throw templatesError;
+  }
+
+  if (!templates || templates.length === 0) {
+    return 0;
+  }
+
+  let generated = 0;
+
+  for (const template of templates as Array<Record<string, unknown>>) {
+    try {
+      // Generate task_code via the existing RPC
+      const { data: taskCode, error: codeError } = await admin.rpc("generate_task_code");
+      if (codeError || !taskCode) {
+        console.error("Failed to generate task_code:", codeError?.message ?? "Unknown");
+        continue;
+      }
+
+      const now = new Date();
+
+      // Insert the task instance
+      const { data: task, error: taskError } = await admin
+        .from("tasks")
+        .insert({
+          recurring_template_id: template.id,
+          recurrence_date: attendanceDate,
+          is_recurring_instance: true,
+          assigned_employee_id: employeeId,
+          project_id: template.project_id ?? null,
+          task_code: taskCode,
+          title: template.title,
+          description: template.description ?? null,
+          priority: template.priority ?? "normal",
+          estimated_minutes: template.estimated_minutes ?? null,
+          status: "IN_PROGRESS",
+          is_self_assigned: false,
+          organization_id: organizationId,
+          created_by: callerId,
+        })
+        .select("id, task_code, title")
+        .maybeSingle();
+
+      if (taskError) {
+        // Unique partial index idx_recurring_task_instance prevents duplicates for the
+        // same (recurring_template_id, recurrence_date). A 23505 (unique_violation) here
+        // means a task already exists for today — skip silently.
+        if (taskError.code === "23505" || /unique/i.test(taskError.message)) {
+          continue;
+        }
+        console.error("Failed to insert recurring task instance:", taskError.message);
+        continue;
+      }
+
+      if (!task) {
+        continue;
+      }
+
+      // Create task_assignments row
+      await admin.from("task_assignments").insert({
+        task_id: task.id,
+        assigned_to: employeeId,
+        assignment_type: "PRIMARY",
+        is_current: true,
+        organization_id: organizationId,
+        created_by: callerId,
+      });
+
+      // Create task_status_history row
+      await admin.from("task_status_history").insert({
+        task_id: task.id,
+        new_status: "IN_PROGRESS",
+        changed_by: callerId,
+        change_reason: "Auto-generated from recurring task template on check-in",
+        organization_id: organizationId,
+      });
+
+      // Create audit log
+      await admin.from("audit_logs").insert({
+        actor_id: callerId,
+        action: "recurring_task.instance_generated",
+        entity_type: "task",
+        entity_id: task.id,
+        new_values: {
+          recurring_template_id: template.id,
+          recurrence_date: attendanceDate,
+          assigned_employee_id: employeeId,
+          status: "IN_PROGRESS",
+          task_code: task.task_code,
+          attendance_record_id: attendanceRecordId,
+        },
+      });
+
+      generated++;
+
+      // Notify the employee + reporting manager + HR + directors
+      await notifyBusinessEvent(admin, {
+        eventCode: "RECURRING_TASK_ASSIGNED",
+        actorUserId: callerId,
+        employeeId: employeeId,
+        organizationId: organizationId,
+        entityType: "task",
+        entityId: task.id,
+        title: "Recurring Task Assigned",
+        message: `A recurring task "${task.title}" (${task.task_code}) has been assigned to you for today.`,
+        priority: "normal",
+        category: "tasks",
+        actionUrl: `/tasks/${task.id}`,
+        recipientRoles: ["hr_admin", "director"],
+        includeEmployee: true,
+        metadata: {
+          recurring_template_id: template.id,
+          recurrence_date: attendanceDate,
+          task_code: task.task_code,
+          attendance_record_id: attendanceRecordId,
+        },
+      });
+    } catch (err) {
+      // Per-template failure should not abort the whole loop.
+      console.error(
+        `Recurring task generation failed for template ${template.id}:`,
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+
+  return generated;
 }
 
 async function handleCheckOut(
