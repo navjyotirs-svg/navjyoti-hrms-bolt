@@ -3,6 +3,7 @@ import {
   validateEvidenceFile,
   blobToBase64,
   checkOut,
+  isEdgeFunctionError,
 } from '@/lib/attendance'
 import '@/styles/attendance.css'
 
@@ -21,6 +22,7 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
   const [photoBlob, setPhotoBlob] = useState<Blob | null>(null)
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -61,7 +63,6 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
       })
       setCameraStream(stream)
       setStep('camera')
-      // Attach stream to video element
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream
@@ -130,8 +131,9 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
   }
 
   async function handleCheckout() {
-    if (!photoBlob || !coords) return
+    if (!photoBlob || !coords || isSubmitting) return
     setError(null)
+    setIsSubmitting(true)
     setStep('uploading')
 
     try {
@@ -140,6 +142,7 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
       if (validationError) {
         setError(validationError)
         setStep('captured')
+        setIsSubmitting(false)
         return
       }
 
@@ -154,12 +157,17 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
 
       setStep('done')
       setTimeout(() => {
-        onSuccess(result)
+        onSuccess(result as { final_status: string; elapsed_minutes: number })
       }, 1500)
     } catch (err) {
       const e = err as Error
-      setError(e.message)
+      if (isEdgeFunctionError(e)) {
+        setError(e.message)
+      } else {
+        setError(e.message || 'Checkout failed. Please try again.')
+      }
       setStep('captured')
+      setIsSubmitting(false)
     }
   }
 
@@ -213,15 +221,20 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
                 <div className="checkout-status-row">
                   <span>Location</span>
                   {coords ? (
-                    <span className="checkout-check">✓ {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}</span>
+                    <span className="checkout-check">✓ Location captured{coords.accuracy ? ` (Accuracy: ${Math.round(coords.accuracy)} metres)` : ''}</span>
                   ) : (
                     <button className="btn btn-sm" onClick={captureLocation}>Get Location</button>
                   )}
                 </div>
               </div>
               {coords && (
-                <button className="btn" onClick={handleCheckout} style={{ marginTop: '12px', width: '100%' }}>
-                  Confirm Checkout
+                <button className="btn" onClick={handleCheckout} disabled={isSubmitting} style={{ marginTop: '12px', width: '100%' }}>
+                  {isSubmitting ? 'Completing checkout…' : 'Confirm Checkout'}
+                </button>
+              )}
+              {error && isSubmitting === false && (
+                <button className="btn btn-sm" onClick={handleCheckout} style={{ marginTop: '8px', width: '100%' }}>
+                  Retry Checkout
                 </button>
               )}
             </div>
@@ -237,7 +250,7 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
           {step === 'uploading' && (
             <div className="checkout-loading">
               <div className="spinner" />
-              <p>Uploading evidence and checking out…</p>
+              <p>Uploading evidence and completing checkout…</p>
             </div>
           )}
 

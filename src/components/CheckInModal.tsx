@@ -3,34 +3,26 @@ import {
   validateEvidenceFile,
   blobToBase64,
   checkIn,
+  isEdgeFunctionError,
 } from '@/lib/attendance'
 import '@/styles/attendance.css'
 
 interface Props {
   userId: string
   onClose: () => void
-  onSuccess: (result: {
-    record_id: string
-    check_in_at: string
-    required_checkout_at: string
-    recurring_tasks_generated?: number
-  }) => void
+  onSuccess: (result: { record_id: string; check_in_at: string; required_checkout_at: string; recurring_tasks_generated?: number }) => void
 }
 
 type Step = 'intro' | 'camera' | 'captured' | 'location' | 'uploading' | 'done'
-
-const MAX_DIMENSION = 1920
-const JPEG_QUALITY = 0.85
 
 export function CheckInModal({ userId: _userId, onClose, onSuccess }: Props) {
   const [step, setStep] = useState<Step>('intro')
   const [error, setError] = useState<string | null>(null)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user')
   const [photoBlob, setPhotoBlob] = useState<Blob | null>(null)
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null)
-  const [canSwitchCamera, setCanSwitchCamera] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -48,62 +40,6 @@ export function CheckInModal({ userId: _userId, onClose, onSuccess }: Props) {
     }
   }, [stopCamera, photoUrl])
 
-  // Detect whether the device has multiple cameras (so we can offer a switch button)
-  useEffect(() => {
-    let cancelled = false
-    async function detect() {
-      try {
-        if (!navigator.mediaDevices?.enumerateDevices) return
-        const devices = await navigator.mediaDevices.enumerateDevices()
-        if (cancelled) return
-        const cams = devices.filter((d) => d.kind === 'videoinput')
-        setCanSwitchCamera(cams.length > 1)
-      } catch {
-        // ignore — switch button simply won't be shown
-      }
-    }
-    detect()
-    return () => { cancelled = true }
-  }, [])
-
-  async function startCamera(mode: 'user' | 'environment') {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setError('Camera API not available in this browser.')
-      return false
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: mode } },
-        audio: false,
-      })
-      setCameraStream(stream)
-      setStep('camera')
-      // Attach stream to video element
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-        }
-      }, 100)
-      return true
-    } catch (err) {
-      const e = err as DOMException
-      if (e.name === 'NotAllowedError') {
-        setError('Camera permission denied. Please allow Camera access from browser Site Settings.')
-      } else if (e.name === 'NotFoundError') {
-        setError('No camera device found. Please connect a camera.')
-      } else if (e.name === 'NotReadableError') {
-        setError('Camera is in use by another application. Please close it and try again.')
-      } else if (e.name === 'OverconstrainedError') {
-        setError('Requested camera facing mode is not available on this device.')
-      } else if (e.name === 'SecurityError') {
-        setError('Camera access blocked by browser security policy.')
-      } else {
-        setError(`Camera error: ${e.message}`)
-      }
-      return false
-    }
-  }
-
   async function handleEnableCameraAndLocation() {
     setError(null)
 
@@ -120,66 +56,50 @@ export function CheckInModal({ userId: _userId, onClose, onSuccess }: Props) {
       return
     }
 
-    await startCamera(facingMode)
-  }
-
-  async function handleSwitchCamera() {
-    const next: 'user' | 'environment' = facingMode === 'user' ? 'environment' : 'user'
-    setFacingMode(next)
-    stopCamera()
-    await startCamera(next)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: false,
+      })
+      setCameraStream(stream)
+      setStep('camera')
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+        }
+      }, 100)
+    } catch (err) {
+      const e = err as DOMException
+      if (e.name === 'NotAllowedError') {
+        setError('Camera permission denied. Please allow Camera access from browser Site Settings.')
+      } else if (e.name === 'NotFoundError') {
+        setError('No camera device found. Please connect a camera.')
+      } else if (e.name === 'NotReadableError') {
+        setError('Camera is in use by another application. Please close it and try again.')
+      } else if (e.name === 'SecurityError') {
+        setError('Camera access blocked by browser security policy.')
+      } else {
+        setError(`Camera error: ${e.message}`)
+      }
+    }
   }
 
   function capturePhoto() {
     if (!videoRef.current || !canvasRef.current) return
     const video = videoRef.current
     const canvas = canvasRef.current
-    const sourceWidth = video.videoWidth || 640
-    const sourceHeight = video.videoHeight || 480
-
-    // Downscale to max 1920px on the longest edge, preserving aspect ratio
-    let targetWidth = sourceWidth
-    let targetHeight = sourceHeight
-    if (Math.max(sourceWidth, sourceHeight) > MAX_DIMENSION) {
-      const scale = MAX_DIMENSION / Math.max(sourceWidth, sourceHeight)
-      targetWidth = Math.round(sourceWidth * scale)
-      targetHeight = Math.round(sourceHeight * scale)
-    }
-
-    canvas.width = targetWidth
-    canvas.height = targetHeight
+    canvas.width = video.videoWidth || 640
+    canvas.height = video.videoHeight || 480
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-
-    // Mirror the preview for front-facing camera so the captured image matches what the user sees
-    if (facingMode === 'user') {
-      ctx.translate(targetWidth, 0)
-      ctx.scale(-1, 1)
-    }
-
-    ctx.drawImage(video, 0, 0, targetWidth, targetHeight)
-    // Reset transform before exporting
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) return
-        setPhotoBlob(blob)
-        setPhotoUrl(URL.createObjectURL(blob))
-        stopCamera()
-        setStep('captured')
-      },
-      'image/jpeg',
-      JPEG_QUALITY
-    )
-  }
-
-  function handleRetake() {
-    if (photoUrl) URL.revokeObjectURL(photoUrl)
-    setPhotoBlob(null)
-    setPhotoUrl(null)
-    setError(null)
-    startCamera(facingMode)
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      setPhotoBlob(blob)
+      setPhotoUrl(URL.createObjectURL(blob))
+      stopCamera()
+      setStep('captured')
+    }, 'image/jpeg', 0.85)
   }
 
   async function captureLocation() {
@@ -210,63 +130,23 @@ export function CheckInModal({ userId: _userId, onClose, onSuccess }: Props) {
     )
   }
 
-  // Correct image orientation using createImageBitmap when available, then re-compress via canvas.
-  async function normalizePhoto(blob: Blob): Promise<Blob> {
-    try {
-      if (typeof createImageBitmap === 'function') {
-        // imageOrientation: 'from-image' honors EXIF orientation metadata
-        const bitmap = await createImageBitmap(blob, {
-          imageOrientation: 'from-image' as ImageOrientation,
-        })
-
-        let targetWidth = bitmap.width
-        let targetHeight = bitmap.height
-        if (Math.max(targetWidth, targetHeight) > MAX_DIMENSION) {
-          const scale = MAX_DIMENSION / Math.max(targetWidth, targetHeight)
-          targetWidth = Math.round(targetWidth * scale)
-          targetHeight = Math.round(targetHeight * scale)
-        }
-
-        const canvas = document.createElement('canvas')
-        canvas.width = targetWidth
-        canvas.height = targetHeight
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return blob
-        ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight)
-        bitmap.close?.()
-
-        return await new Promise<Blob>((resolve, reject) => {
-          canvas.toBlob(
-            (b) => (b ? resolve(b) : reject(new Error('Failed to compress image'))),
-            'image/jpeg',
-            JPEG_QUALITY
-          )
-        })
-      }
-    } catch {
-      // Fall through to original blob if orientation correction fails
-    }
-    return blob
-  }
-
   async function handleCheckIn() {
-    if (!photoBlob || !coords) return
+    if (!photoBlob || !coords || isSubmitting) return
     setError(null)
+    setIsSubmitting(true)
     setStep('uploading')
 
     try {
       const mimeType = 'image/jpeg'
-      const normalized = await normalizePhoto(photoBlob)
-      const validationError = validateEvidenceFile(
-        new File([normalized], 'checkin.jpg', { type: mimeType })
-      )
+      const validationError = validateEvidenceFile(new File([photoBlob], 'checkin.jpg', { type: mimeType }))
       if (validationError) {
         setError(validationError)
         setStep('captured')
+        setIsSubmitting(false)
         return
       }
 
-      const photoBase64 = await blobToBase64(normalized)
+      const photoBase64 = await blobToBase64(photoBlob)
       const result = await checkIn({
         photo_base64: photoBase64,
         evidence_mime_type: mimeType,
@@ -277,17 +157,17 @@ export function CheckInModal({ userId: _userId, onClose, onSuccess }: Props) {
 
       setStep('done')
       setTimeout(() => {
-        onSuccess(result as {
-          record_id: string
-          check_in_at: string
-          required_checkout_at: string
-          recurring_tasks_generated?: number
-        })
+        onSuccess(result as { record_id: string; check_in_at: string; required_checkout_at: string; recurring_tasks_generated?: number })
       }, 1500)
     } catch (err) {
       const e = err as Error
-      setError(e.message)
+      if (isEdgeFunctionError(e)) {
+        setError(e.message)
+      } else {
+        setError(e.message || 'Check-in failed. Please try again.')
+      }
       setStep('captured')
+      setIsSubmitting(false)
     }
   }
 
@@ -310,7 +190,7 @@ export function CheckInModal({ userId: _userId, onClose, onSuccess }: Props) {
             <div className="checkout-intro">
               <p className="checkout-warning">
                 Photo and location are mandatory for check-in.
-                A live photo and your GPS coordinates will be securely uploaded as evidence.
+                Your photo and GPS coordinates will be securely uploaded as evidence.
               </p>
               <button className="btn btn-checkout-enable" onClick={handleEnableCameraAndLocation}>
                 Enable Camera and Location
@@ -322,14 +202,7 @@ export function CheckInModal({ userId: _userId, onClose, onSuccess }: Props) {
             <div className="checkout-camera">
               <video ref={videoRef} autoPlay playsInline muted className="checkout-video" />
               <canvas ref={canvasRef} style={{ display: 'none' }} />
-              <div className="checkout-camera-actions">
-                {canSwitchCamera && (
-                  <button className="btn btn-sm btn-secondary" onClick={handleSwitchCamera}>
-                    Switch Camera
-                  </button>
-                )}
-                <button className="btn btn-capture" onClick={capturePhoto}>Capture Photo</button>
-              </div>
+              <button className="btn btn-capture" onClick={capturePhoto}>Capture Photo</button>
             </div>
           )}
 
@@ -348,22 +221,22 @@ export function CheckInModal({ userId: _userId, onClose, onSuccess }: Props) {
                 <div className="checkout-status-row">
                   <span>Location</span>
                   {coords ? (
-                    <span className="checkout-check">✓ {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}</span>
+                    <span className="checkout-check">✓ Location captured{coords.accuracy ? ` (Accuracy: ${Math.round(coords.accuracy)} metres)` : ''}</span>
                   ) : (
                     <button className="btn btn-sm" onClick={captureLocation}>Get Location</button>
                   )}
                 </div>
               </div>
-              <div className="checkout-captured-actions">
-                <button className="btn btn-secondary" onClick={handleRetake}>
-                  Retake Photo
+              {coords && (
+                <button className="btn" onClick={handleCheckIn} disabled={isSubmitting} style={{ marginTop: '12px', width: '100%' }}>
+                  {isSubmitting ? 'Completing check-in…' : 'Confirm Check-In'}
                 </button>
-                {coords && (
-                  <button className="btn" onClick={handleCheckIn}>
-                    Confirm Check-In
-                  </button>
-                )}
-              </div>
+              )}
+              {error && isSubmitting === false && (
+                <button className="btn btn-sm" onClick={handleCheckIn} style={{ marginTop: '8px', width: '100%' }}>
+                  Retry Check-In
+                </button>
+              )}
             </div>
           )}
 
@@ -377,7 +250,7 @@ export function CheckInModal({ userId: _userId, onClose, onSuccess }: Props) {
           {step === 'uploading' && (
             <div className="checkout-loading">
               <div className="spinner" />
-              <p>Uploading evidence and checking in…</p>
+              <p>Uploading evidence and completing check-in…</p>
             </div>
           )}
 

@@ -78,24 +78,88 @@ export interface AttendanceCorrection {
   updated_at: string
 }
 
-const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
+export interface EdgeFunctionError {
+  success: false
+  errorCode: string
+  message: string
+  correlationId: string
+  retryable: boolean
+}
+
+export function isEdgeFunctionError(e: unknown): e is EdgeFunctionError {
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    'success' in e &&
+    (e as Record<string, unknown>).success === false &&
+    'errorCode' in e
+  )
+}
 
 async function callEdgeFunction(slug: string, body: Record<string, unknown>) {
-  const { data: session } = await supabase.auth.getSession()
-  const token = session.session?.access_token
-  if (!token) throw new Error('Not authenticated')
+  let { data: sessionData, error: sessionError } = await supabase.auth.getSession()
 
-  const res = await fetch(`${FUNCTION_URL}/${slug}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  })
+  if (sessionError || !sessionData.session) {
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
+    if (refreshError || !refreshed.session) {
+      throw {
+        success: false,
+        errorCode: 'SESSION_EXPIRED',
+        message: 'Your session has expired. Please sign in again.',
+        correlationId: crypto.randomUUID(),
+        retryable: false,
+      } as EdgeFunctionError
+    }
+    sessionData = refreshed
+  }
 
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error ?? 'Request failed')
+  let data: unknown
+  let invokeError: unknown = null
+
+  try {
+    const result = await supabase.functions.invoke(slug, { body })
+    data = result.data
+    invokeError = result.error
+  } catch (err) {
+    throw {
+      success: false,
+      errorCode: 'FUNCTION_NOT_REACHABLE',
+      message: 'The server could not be reached. Please check your connection and try again.',
+      correlationId: crypto.randomUUID(),
+      retryable: true,
+    } as EdgeFunctionError
+  }
+
+  if (invokeError) {
+    const errObj = invokeError as { message?: string; context?: Response }
+    let serverMessage: string | undefined
+    try {
+      if (errObj.context) {
+        const json = await errObj.context.json() as { error?: string; message?: string }
+        serverMessage = json?.error ?? json?.message
+      }
+    } catch { /* ignore parse failure */ }
+
+    throw {
+      success: false,
+      errorCode: 'UNKNOWN_CHECKOUT_ERROR',
+      message: serverMessage ?? errObj.message ?? 'Request failed',
+      correlationId: crypto.randomUUID(),
+      retryable: true,
+    } as EdgeFunctionError
+  }
+
+  const resultObj = data as { error?: string; success?: boolean } | null
+  if (resultObj && resultObj.error) {
+    throw {
+      success: false,
+      errorCode: 'UNKNOWN_CHECKOUT_ERROR',
+      message: resultObj.error,
+      correlationId: crypto.randomUUID(),
+      retryable: true,
+    } as EdgeFunctionError
+  }
+
   return data
 }
 
@@ -106,7 +170,11 @@ export async function checkIn(params: {
   longitude: number
   location_accuracy?: number
 }) {
-  return callEdgeFunction('attendance-action', { action: 'check_in', ...params })
+  return callEdgeFunction('attendance-action', {
+    action: 'check_in',
+    ...params,
+    requestId: crypto.randomUUID(),
+  })
 }
 
 export async function checkOut(params: {
@@ -116,7 +184,11 @@ export async function checkOut(params: {
   longitude: number
   location_accuracy?: number
 }) {
-  return callEdgeFunction('attendance-action', { action: 'check_out', ...params })
+  return callEdgeFunction('attendance-action', {
+    action: 'check_out',
+    ...params,
+    requestId: crypto.randomUUID(),
+  })
 }
 
 export async function requestCorrection(params: {

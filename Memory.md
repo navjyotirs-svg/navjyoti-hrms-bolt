@@ -2746,5 +2746,35 @@ After successful check-in: queries recurring_task_templates where assigned_emplo
 - Email channel still a stub
 - The `get_effective_permissions` RPC is called by edge functions using `p_user_id` parameter — this is the existing pattern from Phase 5+
 
+## 2026-07-28 — Checkout "Failed to fetch" fix (checkout-evidence-v2)
+
+### Root cause
+The checkout (and check-in) edge function call used raw `fetch()` with only an `Authorization` header. Supabase Edge Functions require an `apikey` header (the project anon key) in addition to the Authorization header. Without it, the Supabase gateway rejected the request before it reached the function. The browser interpreted this as a network failure and reported "Failed to fetch". The `supabase.functions.invoke()` SDK method automatically includes both headers.
+
+### Fix
+1. **Frontend (`src/lib/attendance.ts`)**: Replaced raw `fetch()` with `supabase.functions.invoke()`. Added session refresh before invocation — if the session is expired and refresh fails, a structured `SESSION_EXPIRED` error is thrown. Added `blobToBase64()` helper. Added `isEdgeFunctionError()` type guard. Added `requestId` (idempotency UUID) to both `checkIn()` and `checkOut()` payloads.
+2. **Edge function (`supabase/functions/attendance-action/index.ts`)**: Redeployed as `checkout-evidence-v2`. Added structured error responses (`{ success, errorCode, message, correlationId, retryable }`). Added idempotency table `attendance_idempotency` — repeated requests with the same `requestId` return the cached result. Photo upload happens BEFORE attendance finalization — if upload fails, attendance is NOT modified. Notifications are best-effort (wrapped in try/catch) and never block checkout. Returns `function_version: "checkout-evidence-v2"` in every response.
+3. **CheckoutModal/CheckInModal**: Rewritten with distinct UI stages (intro → camera → captured → location → uploading → done). Location privacy: shows "Location captured successfully" + accuracy only, no raw coordinates. Retry button on failure preserves captured photo and location. Submit button disabled while request is in flight ("Completing checkout…"). Camera stream stopped on modal close/success.
+
+### Migration
+- `create_attendance_idempotency_table` — new table `attendance_idempotency(request_id, action, response_data, created_at)` with RLS enabled (no policies = service-role only).
+
+### Tests
+- 25 new tests in `src/lib/__tests__/checkout_flow.test.ts` (payload validation, attendance classification, structured errors, idempotency, CORS headers, function version, notification non-blocking, upload order)
+- All 288 tests pass (263 existing + 25 new)
+- Build passes
+
+### Attendance policy (unchanged)
+- 540 elapsed minutes = FULL_DAY
+- < 540 = HALF_DAY
+- No checkout = PENDING_CHECKOUT
+- Server timestamp used for all calculations
+
+### Remaining risks
+- Manual production acceptance test on https://hrms.ngspl.com not performed (no browser automation available)
+- The `attendance_idempotency` table grows unbounded — may need a cleanup cron job in the future
+- `uploadAttendanceEvidence()` is now deprecated and throws — any remaining callers must switch to `checkIn()`/`checkOut()` with `photo_base64`
+
+
 
 
