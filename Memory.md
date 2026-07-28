@@ -2809,7 +2809,58 @@ No unauthenticated request can create or modify attendance records.
 - Manual production acceptance test on https://hrms.ngspl.com not performed (no browser automation available)
 - The `attendance_idempotency` table grows unbounded — may need a cleanup cron job
 
+## 2026-07-28 — Emergency attendance restoration: two-path architecture (attendance-evidence-v5)
 
+### Root cause of ongoing failure
+The edge function remained unreachable in production even after v4. The "Failed to send a request to the Edge Function" error persisted across all users, clean URLs, and fresh logins. The edge function was deployed and ACTIVE but could not be reached from the browser — likely a persistent gateway/CORS issue at the Supabase project level.
 
+### Fix: Two-path attendance architecture
+Instead of depending solely on the edge function, the system now has a **database RPC fallback** that runs entirely inside Postgres, bypassing the edge function gateway entirely.
 
+**PRIMARY PATH**: `attendance-action` Edge Function (v5, verify_jwt: false)
+**EMERGENCY FALLBACK**: `process_attendance_action()` SECURITY DEFINER RPC
+
+### Migration: `create_attendance_rpc_fallback`
+- Added `user_id` column to `attendance_idempotency` table, changed PK to `(user_id, request_id, action)`
+- Created `process_attendance_action(text, text, text, double precision, double precision, double precision)` function:
+  - SECURITY DEFINER, SET search_path = public, auth
+  - Resolves employee from `auth.uid()` — never accepts client-supplied IDs
+  - Handles both `check_in` and `check_out` atomically
+  - Validates evidence storage path belongs to authenticated user
+  - Uses server timestamps (IST = UTC+5:30)
+  - 540-minute policy: >= 540 = FULL_DAY, < 540 = HALF_DAY
+  - Creates attendance record, evidence, audit log, attendance history
+  - Idempotent via (user_id, request_id, action) key
+  - Returns structured JSON with `processingPath: 'DATABASE_RPC_FALLBACK'`
+- Revoked execution from anon, PUBLIC; granted only to authenticated
+
+### Frontend changes (`src/lib/attendance.ts`)
+- `checkIn()` and `checkOut()` now try edge function first
+- If error is in fallback-trigger set (FUNCTION_NOT_REACHABLE, FUNCTION_BOOT_FAILED, CORS_PREFLIGHT_FAILED, FUNCTION_NOT_DEPLOYED, NETWORK_TIMEOUT), automatically:
+  1. Uploads photo to Supabase Storage `attendance-evidence` bucket (private, user-scoped)
+  2. Calls `process_attendance_action` RPC with the storage path
+- If error is a business/validation error (EVIDENCE_INVALID, SESSION_EXPIRED, ATTENDANCE_ALREADY_EXISTS, etc.), does NOT fall back — shows the error directly
+- New helpers: `uploadEvidenceToStorage()`, `callAttendanceRpc()`, `isFallbackTriggeredError()`
+
+### Modal changes
+- Shows "Check-In/Out completed using recovery mode." when fallback was used
+- Shows "Check-In/Out completed" when edge function was used
+- Exact stage labels: Processing photo…, Uploading evidence…, Verifying attendance…, Completing Check-In/Out…, completed
+- Retry button shows correlation ID reference
+- Confirm button disabled while submitting
+
+### Edge function v5
+- Redeployed as `attendance-evidence-v5`, verify_jwt: false
+- Same canonical structured responses, CORS on all paths
+
+### Tests
+- 49 tests in `src/lib/__tests__/checkout_flow.test.ts` covering: two-path architecture, fallback triggers, non-fallback conditions, RPC security (no client-supplied IDs), idempotency, attendance classification, structured responses, secondary feature non-blocking, evidence storage security, CORS, UX stages, RPC function attributes
+- All 312 tests pass (263 existing + 49 new)
+- Build passes
+
+### Remaining risks
+- Manual production acceptance test on https://hrms.ngspl.com not performed (no browser automation available)
+- Recurring task generation does not run in the RPC fallback path (only in edge function path) — tasks can be generated on next successful edge function check-in
+- The `attendance_idempotency` table grows unbounded — may need cleanup
+- The admin incident recovery tool was not implemented (not needed for the immediate outage fix)
 

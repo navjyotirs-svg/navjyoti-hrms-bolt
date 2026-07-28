@@ -205,6 +205,84 @@ async function callEdgeFunction(slug: string, body: Record<string, unknown>) {
   return data
 }
 
+const FALLBACK_ERROR_CODES = new Set([
+  'FUNCTION_NOT_REACHABLE',
+  'FUNCTION_BOOT_FAILED',
+  'CORS_PREFLIGHT_FAILED',
+  'FUNCTION_NOT_DEPLOYED',
+  'NETWORK_TIMEOUT',
+])
+
+function isFallbackTriggeredError(e: unknown): boolean {
+  if (!isEdgeFunctionError(e)) return false
+  return FALLBACK_ERROR_CODES.has(e.errorCode)
+}
+
+async function uploadEvidenceToStorage(
+  photoBase64: string,
+  mimeType: string
+): Promise<string> {
+  const { data: userData } = await supabase.auth.getUser()
+  if (!userData.user) throw new Error('Not authenticated')
+
+  const ext = mimeType.split('/')[1] ?? 'jpg'
+  const path = `${userData.user.id}/${crypto.randomUUID()}.${ext}`
+
+  const binaryString = atob(photoBase64)
+  const bytes = new Uint8Array(binaryString.length)
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i)
+  }
+
+  const { error } = await supabase.storage
+    .from('attendance-evidence')
+    .upload(path, bytes, { contentType: mimeType, upsert: false })
+
+  if (error) throw new Error(`Evidence upload failed: ${error.message}`)
+  return path
+}
+
+async function callAttendanceRpc(
+  action: 'check_in' | 'check_out',
+  requestId: string,
+  photoStoragePath: string,
+  latitude: number,
+  longitude: number,
+  locationAccuracy?: number
+): Promise<unknown> {
+  const { data, error } = await supabase.rpc('process_attendance_action', {
+    p_action: action,
+    p_request_id: requestId,
+    p_photo_storage_path: photoStoragePath,
+    p_latitude: latitude,
+    p_longitude: longitude,
+    p_accuracy_meters: locationAccuracy ?? null,
+  })
+
+  if (error) {
+    throw {
+      success: false,
+      errorCode: 'DATABASE_UPDATE_FAILED',
+      message: error.message,
+      correlationId: crypto.randomUUID(),
+      retryable: true,
+    } as EdgeFunctionError
+  }
+
+  const result = data as { success?: boolean; errorCode?: string; message?: string } | null
+  if (result && result.success === false) {
+    throw {
+      success: false,
+      errorCode: result.errorCode ?? 'UNKNOWN_ATTENDANCE_ERROR',
+      message: result.message ?? 'Attendance processing failed',
+      correlationId: crypto.randomUUID(),
+      retryable: false,
+    } as EdgeFunctionError
+  }
+
+  return data
+}
+
 export async function checkIn(params: {
   photo_base64: string
   evidence_mime_type: string
@@ -212,11 +290,20 @@ export async function checkIn(params: {
   longitude: number
   location_accuracy?: number
 }) {
-  return callEdgeFunction('attendance-action', {
-    action: 'check_in',
-    ...params,
-    requestId: crypto.randomUUID(),
-  })
+  const requestId = crypto.randomUUID()
+
+  try {
+    return await callEdgeFunction('attendance-action', {
+      action: 'check_in',
+      ...params,
+      requestId,
+    })
+  } catch (err) {
+    if (!isFallbackTriggeredError(err)) throw err
+
+    const storagePath = await uploadEvidenceToStorage(params.photo_base64, params.evidence_mime_type)
+    return callAttendanceRpc('check_in', requestId, storagePath, params.latitude, params.longitude, params.location_accuracy)
+  }
 }
 
 export async function checkOut(params: {
@@ -226,11 +313,20 @@ export async function checkOut(params: {
   longitude: number
   location_accuracy?: number
 }) {
-  return callEdgeFunction('attendance-action', {
-    action: 'check_out',
-    ...params,
-    requestId: crypto.randomUUID(),
-  })
+  const requestId = crypto.randomUUID()
+
+  try {
+    return await callEdgeFunction('attendance-action', {
+      action: 'check_out',
+      ...params,
+      requestId,
+    })
+  } catch (err) {
+    if (!isFallbackTriggeredError(err)) throw err
+
+    const storagePath = await uploadEvidenceToStorage(params.photo_base64, params.evidence_mime_type)
+    return callAttendanceRpc('check_out', requestId, storagePath, params.latitude, params.longitude, params.location_accuracy)
+  }
 }
 
 export async function requestCorrection(params: {

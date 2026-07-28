@@ -7,7 +7,7 @@ const corsHeaders = {
     "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const FUNCTION_VERSION = "attendance-evidence-v4";
+const FUNCTION_VERSION = "attendance-evidence-v5";
 const REQUIRED_TOTAL_MINUTES = 540;
 const ATTENDANCE_POLICY_VERSION = "POLICY_540_FULL_DAY";
 const APPROVED_EVIDENCE_MIMES = [
