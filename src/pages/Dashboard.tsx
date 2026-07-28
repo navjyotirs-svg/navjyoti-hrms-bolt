@@ -382,40 +382,6 @@ export function Dashboard() {
         </div>
       )}
 
-      {canReadAll && (
-        <div className="dashboard-section">
-          <h3 className="dashboard-section-title">Attendance Today</h3>
-          <div className="dashboard-grid">
-            <MetricCard label="Checked In" value={metrics.checkedInToday} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=checked_in`)} ariaLabel="View checked-in employees" />
-            <MetricCard label="Pending Checkout" value={metrics.pendingCheckout} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=PENDING_CHECKOUT`)} ariaLabel="View employees pending checkout" />
-            <MetricCard label="Full Day" value={metrics.fullDay} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=FULL_DAY`)} ariaLabel="View full day employees" />
-            <MetricCard label="Half Day" value={metrics.halfDay} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=HALF_DAY`)} ariaLabel="View half day employees" />
-            <MetricCard label="Pending Corrections" value={metrics.pendingCorrections} onClick={() => navigate('/attendance-corrections?status=pending')} ariaLabel="View pending corrections" />
-          </div>
-        </div>
-      )}
-
-      {canReadEmployees && (
-        <div className="dashboard-section">
-          <h3 className="dashboard-section-title">Organization Overview</h3>
-          <div className="dashboard-grid">
-            <MetricCard label="Active Employees" value={metrics.activeEmployees} onClick={() => navigate('/employees?access_status=Active')} ariaLabel="View active employees" />
-            {canReadOrg && <MetricCard label="Branches" value={metrics.branches} onClick={() => navigate('/branches')} ariaLabel="View branches" />}
-            {canReadOrg && <MetricCard label="Departments" value={metrics.departments} onClick={() => navigate('/departments')} ariaLabel="View departments" />}
-            <MetricCard label="Pending Activation" value={metrics.pendingActivation} onClick={() => navigate('/employees?access_status=Activation Pending')} ariaLabel="View pending activation employees" />
-            <MetricCard label="Onboarding Pending" value={metrics.onboardingPending} onClick={() => navigate('/employees?access_status=Activation Pending')} ariaLabel="View onboarding pending" />
-            <MetricCard label="Documents Pending Verification" value={metrics.documentsPendingVerification} onClick={() => navigate('/employees?access_status=Active')} ariaLabel="View documents pending verification" />
-          </div>
-        </div>
-      )}
-
-      <div className="dashboard-section">
-        <h3 className="dashboard-section-title">Notifications</h3>
-        <div className="dashboard-grid">
-          <MetricCard label="Unread" value={metrics.unreadNotifications} onClick={() => navigate('/notification-inbox?read=false')} ariaLabel="View unread notifications" />
-        </div>
-      </div>
-
       {hasManagementTools && (
         <div className="dashboard-section">
           <h3 className="dashboard-section-title">Management Tools</h3>
@@ -487,6 +453,40 @@ export function Dashboard() {
           </div>
         </div>
       )}
+
+      {canReadAll && (
+        <div className="dashboard-section">
+          <h3 className="dashboard-section-title">Attendance Today</h3>
+          <div className="dashboard-grid">
+            <MetricCard label="Checked In" value={metrics.checkedInToday} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=checked_in`)} ariaLabel="View checked-in employees" />
+            <MetricCard label="Pending Checkout" value={metrics.pendingCheckout} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=PENDING_CHECKOUT`)} ariaLabel="View employees pending checkout" />
+            <MetricCard label="Full Day" value={metrics.fullDay} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=FULL_DAY`)} ariaLabel="View full day employees" />
+            <MetricCard label="Half Day" value={metrics.halfDay} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=HALF_DAY`)} ariaLabel="View half day employees" />
+            <MetricCard label="Pending Corrections" value={metrics.pendingCorrections} onClick={() => navigate('/attendance-corrections?status=pending')} ariaLabel="View pending corrections" />
+          </div>
+        </div>
+      )}
+
+      {canReadEmployees && (
+        <div className="dashboard-section">
+          <h3 className="dashboard-section-title">Organization Overview</h3>
+          <div className="dashboard-grid">
+            <MetricCard label="Active Employees" value={metrics.activeEmployees} onClick={() => navigate('/employees?access_status=Active')} ariaLabel="View active employees" />
+            {canReadOrg && <MetricCard label="Branches" value={metrics.branches} onClick={() => navigate('/branches')} ariaLabel="View branches" />}
+            {canReadOrg && <MetricCard label="Departments" value={metrics.departments} onClick={() => navigate('/departments')} ariaLabel="View departments" />}
+            <MetricCard label="Pending Activation" value={metrics.pendingActivation} onClick={() => navigate('/employees?access_status=Activation Pending')} ariaLabel="View pending activation employees" />
+            <MetricCard label="Onboarding Pending" value={metrics.onboardingPending} onClick={() => navigate('/employees?access_status=Activation Pending')} ariaLabel="View onboarding pending" />
+            <MetricCard label="Documents Pending Verification" value={metrics.documentsPendingVerification} onClick={() => navigate('/employees?access_status=Active')} ariaLabel="View documents pending verification" />
+          </div>
+        </div>
+      )}
+
+      <div className="dashboard-section">
+        <h3 className="dashboard-section-title">Notifications</h3>
+        <div className="dashboard-grid">
+          <MetricCard label="Unread" value={metrics.unreadNotifications} onClick={() => navigate('/notification-inbox?read=false')} ariaLabel="View unread notifications" />
+        </div>
+      </div>
 
       {(metrics.pendingReviews !== null || metrics.openFollowUps !== null || metrics.todayReports !== null) && (
         <div className="dashboard-section">
