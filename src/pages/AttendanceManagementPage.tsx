@@ -365,13 +365,13 @@ function EvidenceModal({
                   <div style={{
                     borderRadius: 'var(--radius-md)', overflow: 'hidden',
                     border: '1px solid var(--border)', background: 'var(--surface-2)',
-                    aspectRatio: '4/3', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    maxHeight: '320px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>
                     {activeItem.imageUrl ? (
                       <img
                         src={activeItem.imageUrl}
                         alt={activeTab === 'CHECK_IN_PHOTO' ? 'Check-in photo' : 'Check-out photo'}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        style={{ maxWidth: '100%', maxHeight: '320px', objectFit: 'contain', display: 'block' }}
                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
                       />
                     ) : (

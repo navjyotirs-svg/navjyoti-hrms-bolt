@@ -379,6 +379,19 @@ async function handleCheckIn(
     secondaryWarnings.push(`Notification failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  try {
+    await notifyBusinessEvent(admin, {
+      eventCode: "ATTENDANCE_CHECK_IN", actorUserId: callerId,
+      employeeId: employee.id as string, organizationId: employee.organization_id as string,
+      entityType: "attendance_record", entityId: record.id,
+      title: "Employee Checked In", message: `Check-in recorded for ${employee.id as string}.`,
+      priority: "normal", category: "attendance", actionUrl: "/attendance-management",
+      recipientRoles: ["hr_admin", "director"],
+    });
+  } catch (err) {
+    secondaryWarnings.push(`Supervisory notification failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   let recurringTasksGenerated = 0;
   try {
     recurringTasksGenerated = await generateRecurringTasksForCheckIn(
@@ -693,19 +706,19 @@ async function handleCheckOut(
     secondaryWarnings.push(`Notification failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  if (finalStatus === "HALF_DAY") {
-    try {
-      await notifyBusinessEvent(admin, {
-        eventCode: "ATTENDANCE_HALF_DAY", actorUserId: callerId,
-        employeeId: employee.id as string, organizationId: employee.organization_id as string,
-        entityType: "attendance_record", entityId: record.id,
-        title: "Half-Day Attendance Recorded", message: "A half-day attendance has been recorded.",
-        priority: "high", category: "attendance", actionUrl: "/attendance-management",
-        recipientRoles: ["hr_admin", "director"],
-      });
-    } catch (err) {
-      secondaryWarnings.push(`Supervisory notification failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  try {
+    const statusLabel = finalStatus === "HALF_DAY" ? "Half-day" : "Full-day";
+    await notifyBusinessEvent(admin, {
+      eventCode: finalStatus === "HALF_DAY" ? "ATTENDANCE_HALF_DAY" : "ATTENDANCE_CHECK_OUT",
+      actorUserId: callerId,
+      employeeId: employee.id as string, organizationId: employee.organization_id as string,
+      entityType: "attendance_record", entityId: record.id,
+      title: `${statusLabel} Check-out Recorded`, message: `A ${statusLabel.toLowerCase()} check-out has been recorded.`,
+      priority: finalStatus === "HALF_DAY" ? "high" : "normal", category: "attendance", actionUrl: "/attendance-management",
+      recipientRoles: ["hr_admin", "director"],
+    });
+  } catch (err) {
+    secondaryWarnings.push(`Supervisory notification failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const responseData: StructuredSuccess = {
