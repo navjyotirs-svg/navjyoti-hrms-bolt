@@ -316,12 +316,12 @@ function EvidenceModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="card" style={{ maxWidth: '500px', width: '100%' }} onClick={(e) => e.stopPropagation()}>
-        <div className="card-header">
-          <h3 className="card-title">Attendance Evidence — {employeeName}</h3>
+      <div className="card" style={{ maxWidth: '460px', width: 'calc(100vw - 32px)', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+        <div className="card-header" style={{ flexShrink: 0 }}>
+          <h3 className="card-title" style={{ fontSize: '15px' }}>Attendance Evidence — {employeeName}</h3>
           <button className="btn btn-sm btn-secondary" onClick={onClose} type="button">Close</button>
         </div>
-        <div className="card-body">
+        <div className="card-body" style={{ overflowY: 'auto', minHeight: 0, padding: 'var(--space-3)' }}>
           {loading ? (
             <div className="loading-state">Loading evidence…</div>
           ) : items.length === 0 ? (
@@ -365,13 +365,13 @@ function EvidenceModal({
                   <div style={{
                     borderRadius: 'var(--radius-md)', overflow: 'hidden',
                     border: '1px solid var(--border)', background: 'var(--surface-2)',
-                    maxHeight: '320px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    maxHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>
                     {activeItem.imageUrl ? (
                       <img
                         src={activeItem.imageUrl}
                         alt={activeTab === 'CHECK_IN_PHOTO' ? 'Check-in photo' : 'Check-out photo'}
-                        style={{ maxWidth: '100%', maxHeight: '320px', objectFit: 'contain', display: 'block' }}
+                        style={{ maxWidth: '100%', maxHeight: '200px', objectFit: 'contain', display: 'block' }}
                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
                       />
                     ) : (
