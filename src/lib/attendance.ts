@@ -648,10 +648,13 @@ export function blobToBase64(blob: Blob): Promise<string> {
 export async function createEvidenceSignedUrl(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage
     .from('attendance-evidence')
-    .createSignedUrl(path, 60)
+    .createSignedUrl(path, 3600)
 
-  if (error || !data?.signedUrl) return null
-  return data.signedUrl
+  if (error) {
+    console.error('Evidence signed URL error:', error.message, 'path:', path)
+    return null
+  }
+  return data?.signedUrl ?? null
 }
 
 export function formatTimeRemaining(requiredCheckoutAt: string): string {

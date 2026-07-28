@@ -287,11 +287,6 @@ export function AttendanceManagementPage() {
   )
 }
 
-const EVIDENCE_TYPE_LABELS: Record<string, string> = {
-  CHECK_IN_PHOTO: 'Check-In Photo',
-  CHECK_OUT_PHOTO: 'Check-Out Photo',
-}
-
 function EvidenceModal({
   employeeName,
   date,
@@ -305,9 +300,23 @@ function EvidenceModal({
   loading: boolean
   onClose: () => void
 }) {
+  const checkIn = items.find((i) => i.evidence_type === 'CHECK_IN_PHOTO') ?? null
+  const checkOut = items.find((i) => i.evidence_type === 'CHECK_OUT_PHOTO') ?? null
+
+  // Default to whichever tab has data; prefer check-in
+  const defaultTab = checkIn ? 'CHECK_IN_PHOTO' : 'CHECK_OUT_PHOTO'
+  const [activeTab, setActiveTab] = useState<'CHECK_IN_PHOTO' | 'CHECK_OUT_PHOTO'>(defaultTab)
+
+  // Keep tab in sync when items load
+  useEffect(() => {
+    if (!loading) setActiveTab(checkIn ? 'CHECK_IN_PHOTO' : 'CHECK_OUT_PHOTO')
+  }, [loading, !!checkIn])
+
+  const activeItem = activeTab === 'CHECK_IN_PHOTO' ? checkIn : checkOut
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="card" style={{ maxWidth: '640px', width: '100%' }} onClick={(e) => e.stopPropagation()}>
+      <div className="card" style={{ maxWidth: '500px', width: '100%' }} onClick={(e) => e.stopPropagation()}>
         <div className="card-header">
           <h3 className="card-title">Attendance Evidence — {employeeName}</h3>
           <button className="btn btn-sm btn-secondary" onClick={onClose} type="button">Close</button>
@@ -318,71 +327,101 @@ function EvidenceModal({
           ) : items.length === 0 ? (
             <div className="empty-state"><div className="empty-state-text">No evidence found for this record.</div></div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-              <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-                {items.map((ev) => (
-                  <div
-                    key={ev.evidence_type + ev.captured_at}
-                    style={{ flex: '1 1 240px', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
-                  >
-                    <div style={{
-                      fontSize: '12px', fontWeight: 600, textTransform: 'uppercase',
-                      letterSpacing: '0.05em', color: 'var(--slate)',
-                    }}>
-                      {EVIDENCE_TYPE_LABELS[ev.evidence_type] ?? ev.evidence_type}
-                    </div>
-                    <div style={{ borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border)', background: 'var(--surface-2)', aspectRatio: '4/3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {ev.imageUrl ? (
-                        <img
-                          src={ev.imageUrl}
-                          alt={EVIDENCE_TYPE_LABELS[ev.evidence_type] ?? 'Evidence photo'}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                        />
-                      ) : (
-                        <span style={{ color: 'var(--slate)', fontSize: '12px' }}>Photo unavailable</span>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--slate)' }}>Date</span>
-                        <span className="mono">{formatDate(date)}</span>
-                      </div>
-                      {ev.captured_at && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: 'var(--slate)' }}>Time</span>
-                          <span className="mono">{formatTimestamp(ev.captured_at)}</span>
-                        </div>
-                      )}
-                      {ev.latitude !== null && ev.longitude !== null && (
-                        <>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ color: 'var(--slate)' }}>Latitude</span>
-                            <span className="mono">{ev.latitude.toFixed(6)}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ color: 'var(--slate)' }}>Longitude</span>
-                            <span className="mono">{ev.longitude.toFixed(6)}</span>
-                          </div>
-                          {ev.location_accuracy !== null && (
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <span style={{ color: 'var(--slate)' }}>Accuracy</span>
-                              <span className="mono">±{ev.location_accuracy.toFixed(1)}m</span>
-                            </div>
-                          )}
-                          <a
-                            href={`https://www.openstreetmap.org/?mlat=${ev.latitude}&mlon=${ev.longitude}&zoom=16`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ fontSize: '12px', color: 'var(--teal)', textDecoration: 'none' }}
-                          >
-                            View on Map ↗
-                          </a>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              {/* Tab buttons */}
+              <div style={{ display: 'flex', gap: 'var(--space-2)', borderBottom: '1px solid var(--border)', paddingBottom: 'var(--space-3)' }}>
+                {(['CHECK_IN_PHOTO', 'CHECK_OUT_PHOTO'] as const).map((tab) => {
+                  const label = tab === 'CHECK_IN_PHOTO' ? 'Check-In' : 'Check-Out'
+                  const hasData = tab === 'CHECK_IN_PHOTO' ? !!checkIn : !!checkOut
+                  const isActive = activeTab === tab
+                  return (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setActiveTab(tab)}
+                      style={{
+                        padding: '6px 16px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: isActive ? '2px solid var(--teal)' : '2px solid var(--border)',
+                        background: isActive ? 'var(--teal)' : 'var(--surface-2)',
+                        color: isActive ? '#fff' : hasData ? 'var(--text)' : 'var(--slate)',
+                        fontWeight: isActive ? 600 : 400,
+                        fontSize: '13px',
+                        cursor: hasData ? 'pointer' : 'default',
+                        opacity: hasData ? 1 : 0.45,
+                      }}
+                      disabled={!hasData}
+                    >
+                      {label}
+                      {!hasData && <span style={{ marginLeft: '4px', fontSize: '11px' }}>(none)</span>}
+                    </button>
+                  )
+                })}
               </div>
+
+              {/* Photo */}
+              {activeItem ? (
+                <>
+                  <div style={{
+                    borderRadius: 'var(--radius-md)', overflow: 'hidden',
+                    border: '1px solid var(--border)', background: 'var(--surface-2)',
+                    aspectRatio: '4/3', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {activeItem.imageUrl ? (
+                      <img
+                        src={activeItem.imageUrl}
+                        alt={activeTab === 'CHECK_IN_PHOTO' ? 'Check-in photo' : 'Check-out photo'}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                      />
+                    ) : (
+                      <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Photo could not be loaded</span>
+                    )}
+                  </div>
+
+                  {/* Metadata */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--slate)' }}>Date</span>
+                      <span className="mono">{formatDate(date)}</span>
+                    </div>
+                    {activeItem.captured_at && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--slate)' }}>Time</span>
+                        <span className="mono">{formatTimestamp(activeItem.captured_at)}</span>
+                      </div>
+                    )}
+                    {activeItem.latitude !== null && activeItem.longitude !== null && (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--slate)' }}>Latitude</span>
+                          <span className="mono">{activeItem.latitude.toFixed(6)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--slate)' }}>Longitude</span>
+                          <span className="mono">{activeItem.longitude.toFixed(6)}</span>
+                        </div>
+                        {activeItem.location_accuracy !== null && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--slate)' }}>Accuracy</span>
+                            <span className="mono">±{activeItem.location_accuracy.toFixed(1)}m</span>
+                          </div>
+                        )}
+                        <a
+                          href={`https://www.openstreetmap.org/?mlat=${activeItem.latitude}&mlon=${activeItem.longitude}&zoom=16`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ fontSize: '12px', color: 'var(--teal)', textDecoration: 'none' }}
+                        >
+                          View on Map ↗
+                        </a>
+                      </>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state"><div className="empty-state-text">No photo for this type.</div></div>
+              )}
             </div>
           )}
         </div>
