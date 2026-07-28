@@ -48,6 +48,12 @@ export function Dashboard() {
   const canReadEmployees = permissions.includes('employee.read_all') || permissions.includes('employee.read_team')
   const canReadOrg = permissions.includes('organization.read')
 
+  const canManageProjects = permissions.includes('project.create') || permissions.includes('project.read_team') || permissions.includes('project.read_all')
+  const canManageRecurring = permissions.includes('recurring_task.create') || permissions.includes('recurring_task.read_all') || permissions.includes('recurring_task.read_team')
+  const canSendVoiceNotes = permissions.includes('voice_note.send')
+  const canSelfAssign = permissions.includes('task.self_assign')
+  const hasManagementTools = canManageProjects || canManageRecurring || canSendVoiceNotes || canSelfAssign
+
   useEffect(() => {
     if (!profile?.id) { setLoading(false); return }
     let cancelled = false
@@ -409,6 +415,78 @@ export function Dashboard() {
           <MetricCard label="Unread" value={metrics.unreadNotifications} onClick={() => navigate('/notification-inbox?read=false')} ariaLabel="View unread notifications" />
         </div>
       </div>
+
+      {hasManagementTools && (
+        <div className="dashboard-section">
+          <h3 className="dashboard-section-title">Management Tools</h3>
+          <div className="dashboard-grid">
+            {canManageProjects && (
+              <div
+                className="dashboard-card dashboard-card-interactive"
+                onClick={() => navigate('/projects')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/projects') } }}
+                role="button"
+                tabIndex={0}
+                aria-label="Manage projects"
+              >
+                <div className="dashboard-card-lbl" style={{ fontSize: '1.1rem', fontWeight: 600 }}>Projects</div>
+                <div className="dashboard-card-details">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                  Manage
+                </div>
+              </div>
+            )}
+            {canManageRecurring && (
+              <div
+                className="dashboard-card dashboard-card-interactive"
+                onClick={() => navigate('/recurring-tasks')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/recurring-tasks') } }}
+                role="button"
+                tabIndex={0}
+                aria-label="Manage recurring task templates"
+              >
+                <div className="dashboard-card-lbl" style={{ fontSize: '1.1rem', fontWeight: 600 }}>Recurring Tasks</div>
+                <div className="dashboard-card-details">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 4v5h.582m9.69-5L12 12m-8 0a8 8 0 1116 0 8 8 0 01-16 0z" /></svg>
+                  Manage
+                </div>
+              </div>
+            )}
+            {canSendVoiceNotes && (
+              <div
+                className="dashboard-card dashboard-card-interactive"
+                onClick={() => navigate('/voice-notes')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/voice-notes') } }}
+                role="button"
+                tabIndex={0}
+                aria-label="Record and send voice notes"
+              >
+                <div className="dashboard-card-lbl" style={{ fontSize: '1.1rem', fontWeight: 600 }}>Voice Notes</div>
+                <div className="dashboard-card-details">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4a2 2 0 002 2h2a2 2 0 002-2v-4M12 2a3 3 0 013 3v6a3 3 0 01-6 0V5a3 3 0 013-3z" /></svg>
+                  Record & Send
+                </div>
+              </div>
+            )}
+            {canSelfAssign && (
+              <div
+                className="dashboard-card dashboard-card-interactive"
+                onClick={() => navigate('/self-assign-task')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/self-assign-task') } }}
+                role="button"
+                tabIndex={0}
+                aria-label="Create a task for yourself"
+              >
+                <div className="dashboard-card-lbl" style={{ fontSize: '1.1rem', fontWeight: 600 }}>Self-Assign Task</div>
+                <div className="dashboard-card-details">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v6a2 2 0 002 2h6a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5V3a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2" /></svg>
+                  Create
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {(metrics.pendingReviews !== null || metrics.openFollowUps !== null || metrics.todayReports !== null) && (
         <div className="dashboard-section">
