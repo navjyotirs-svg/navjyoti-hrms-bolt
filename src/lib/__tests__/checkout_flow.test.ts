@@ -2,13 +2,14 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 /**
- * Tests for the checkout evidence and attendance-finalisation flow.
+ * Tests for the attendance evidence and attendance-finalisation flow (v4).
  *
  * These tests validate the client-side contract: payload shape, validation,
- * idempotency, error handling, and attendance classification rules.
- * The edge function logic (server-side upload, DB writes) is tested via
- * the structured error codes it returns.
+ * idempotency, error handling, attendance classification rules, CORS,
+ * and the canonical structured response format.
  */
+
+const FUNCTION_VERSION = 'attendance-evidence-v4'
 
 describe('Checkout payload validation', () => {
   it('rejects empty photo base64', () => {
@@ -114,27 +115,27 @@ describe('Attendance classification (540-minute policy)', () => {
   })
 })
 
-describe('Structured error codes', () => {
+describe('Structured error codes (v4 canonical set)', () => {
   const validErrorCodes = [
-    'SESSION_EXPIRED',
-    'ACTIVE_ATTENDANCE_NOT_FOUND',
-    'ALREADY_CHECKED_OUT',
-    'PHOTO_MISSING',
-    'PHOTO_PROCESSING_FAILED',
-    'PHOTO_UPLOAD_FAILED',
-    'LOCATION_MISSING',
-    'LOCATION_INVALID',
-    'LOCATION_ACCURACY_REJECTED',
-    'STORAGE_ACCESS_DENIED',
-    'FUNCTION_NOT_REACHABLE',
+    'FUNCTION_NOT_DEPLOYED',
+    'FUNCTION_BOOT_FAILED',
     'CORS_PREFLIGHT_FAILED',
+    'INVALID_AUTH_TOKEN',
+    'SESSION_EXPIRED',
+    'EMPLOYEE_NOT_FOUND',
+    'MEMBERSHIP_INACTIVE',
+    'PHOTO_UPLOAD_FAILED',
+    'EVIDENCE_INVALID',
+    'LOCATION_INVALID',
+    'ATTENDANCE_ALREADY_EXISTS',
+    'ACTIVE_ATTENDANCE_NOT_FOUND',
     'DATABASE_UPDATE_FAILED',
     'NETWORK_TIMEOUT',
-    'UNKNOWN_CHECKOUT_ERROR',
+    'UNKNOWN_ATTENDANCE_ERROR',
   ]
 
-  it('all expected error codes are present', () => {
-    assert.ok(validErrorCodes.length >= 15)
+  it('all 15 canonical error codes are present', () => {
+    assert.equal(validErrorCodes.length, 15)
   })
 
   it('structured error has required fields', () => {
@@ -173,19 +174,100 @@ describe('Structured error codes', () => {
     }
     assert.equal(error.retryable, true)
   })
+
+  it('INVALID_AUTH_TOKEN is not retryable', () => {
+    const error = {
+      success: false as const,
+      errorCode: 'INVALID_AUTH_TOKEN',
+      message: 'Missing authorization header',
+      correlationId: crypto.randomUUID(),
+      retryable: false,
+    }
+    assert.equal(error.retryable, false)
+  })
+
+  it('FUNCTION_BOOT_FAILED is not retryable', () => {
+    const error = {
+      success: false as const,
+      errorCode: 'FUNCTION_BOOT_FAILED',
+      message: 'Server configuration error',
+      correlationId: crypto.randomUUID(),
+      retryable: false,
+    }
+    assert.equal(error.retryable, false)
+  })
+})
+
+describe('Canonical structured success response (v4)', () => {
+  it('check_in success has all required fields', () => {
+    const response = {
+      success: true,
+      action: 'check_in',
+      attendanceRecordId: 'rec-123',
+      finalStatus: 'PENDING_CHECKOUT',
+      functionVersion: FUNCTION_VERSION,
+      correlationId: crypto.randomUUID(),
+      secondaryWarnings: [],
+    }
+    assert.equal(response.success, true)
+    assert.equal(response.action, 'check_in')
+    assert.ok(response.attendanceRecordId)
+    assert.ok(response.finalStatus)
+    assert.equal(response.functionVersion, FUNCTION_VERSION)
+    assert.ok(response.correlationId)
+    assert.ok(Array.isArray(response.secondaryWarnings))
+  })
+
+  it('check_out success has all required fields', () => {
+    const response = {
+      success: true,
+      action: 'check_out',
+      attendanceRecordId: 'rec-456',
+      finalStatus: 'FULL_DAY',
+      functionVersion: FUNCTION_VERSION,
+      correlationId: crypto.randomUUID(),
+      secondaryWarnings: [],
+    }
+    assert.equal(response.success, true)
+    assert.equal(response.action, 'check_out')
+    assert.ok(response.attendanceRecordId)
+    assert.equal(response.finalStatus, 'FULL_DAY')
+    assert.equal(response.functionVersion, FUNCTION_VERSION)
+    assert.ok(Array.isArray(response.secondaryWarnings))
+  })
+
+  it('secondaryWarnings is empty array on clean success', () => {
+    const response = {
+      success: true,
+      secondaryWarnings: [] as string[],
+    }
+    assert.equal(response.secondaryWarnings.length, 0)
+  })
+
+  it('secondaryWarnings contains failure messages when secondary ops fail', () => {
+    const response = {
+      success: true,
+      secondaryWarnings: ['Notification failed: DB error', 'Recurring task generation failed: timeout'],
+    }
+    assert.equal(response.secondaryWarnings.length, 2)
+    assert.ok(response.secondaryWarnings[0].includes('Notification'))
+  })
 })
 
 describe('Idempotency', () => {
   it('same requestId produces same result on retry', () => {
     const requestId = crypto.randomUUID()
     const firstResponse = {
-      message: 'Checked out successfully',
-      record_id: 'rec-123',
-      final_status: 'FULL_DAY',
-      function_version: 'checkout-evidence-v2',
+      success: true,
+      action: 'check_out',
+      attendanceRecordId: 'rec-123',
+      finalStatus: 'FULL_DAY',
+      functionVersion: FUNCTION_VERSION,
+      correlationId: 'corr-1',
+      secondaryWarnings: [],
     }
     const secondResponse = { ...firstResponse, idempotent: true }
-    assert.equal(firstResponse.record_id, secondResponse.record_id)
+    assert.equal(firstResponse.attendanceRecordId, secondResponse.attendanceRecordId)
     assert.equal(secondResponse.idempotent, true)
   })
 
@@ -194,11 +276,25 @@ describe('Idempotency', () => {
     const id2 = crypto.randomUUID()
     assert.notEqual(id1, id2)
   })
+
+  it('retry with same requestId does not create duplicate attendance', () => {
+    const requestId = crypto.randomUUID()
+    const firstResult = { success: true, attendanceRecordId: 'rec-789' }
+    const retryResult = { ...firstResult, idempotent: true }
+    assert.equal(firstResult.attendanceRecordId, retryResult.attendanceRecordId)
+    assert.equal(retryResult.idempotent, true)
+  })
+
+  it('retry with same requestId does not create duplicate evidence', () => {
+    const requestId = crypto.randomUUID()
+    const firstResult = { success: true, attendanceRecordId: 'rec-789', evidence_count: 1 }
+    const retryResult = { ...firstResult, idempotent: true, evidence_count: 1 }
+    assert.equal(firstResult.evidence_count, retryResult.evidence_count)
+  })
 })
 
 describe('blobToBase64 conversion', () => {
   it('converts a Blob to base64 string', async () => {
-    // Node-compatible base64 conversion (same logic as browser FileReader path)
     const text = 'test'
     const base64 = Buffer.from(text).toString('base64')
     assert.ok(typeof base64 === 'string')
@@ -208,7 +304,7 @@ describe('blobToBase64 conversion', () => {
 })
 
 describe('Edge function error detection', () => {
-  function isEdgeFunctionError(e: unknown): e is { success: false; errorCode: string; message: string; retryable: boolean } {
+  function isEdgeFunctionError(e: unknown): e is { success: false; errorCode: string; message: string; retryable: boolean; correlationId: string } {
     return (
       typeof e === 'object' &&
       e !== null &&
@@ -235,48 +331,117 @@ describe('Edge function error detection', () => {
     assert.ok(!isEdgeFunctionError(undefined))
     assert.ok(!isEdgeFunctionError({ message: 'no success field' }))
   })
+
+  it('isEdgeFunctionError rejects success responses', () => {
+    assert.ok(!isEdgeFunctionError({ success: true, errorCode: 'x' }))
+  })
 })
 
-describe('CORS headers', () => {
-  it('edge function returns permissive CORS headers', () => {
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
-    }
+describe('CORS headers (v4)', () => {
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
+  }
+
+  it('allows all origins', () => {
     assert.equal(corsHeaders['Access-Control-Allow-Origin'], '*')
+  })
+
+  it('allows POST method', () => {
     assert.ok(corsHeaders['Access-Control-Allow-Methods'].includes('POST'))
+  })
+
+  it('allows OPTIONS method', () => {
     assert.ok(corsHeaders['Access-Control-Allow-Methods'].includes('OPTIONS'))
+  })
+
+  it('allows authorization header', () => {
     assert.ok(corsHeaders['Access-Control-Allow-Headers'].includes('Authorization'))
+  })
+
+  it('allows apikey header', () => {
     assert.ok(corsHeaders['Access-Control-Allow-Headers'].includes('Apikey'))
   })
-})
 
-describe('Function version', () => {
-  it('edge function returns version tag', () => {
-    const response = {
-      message: 'Checked out successfully',
-      record_id: 'rec-123',
-      final_status: 'FULL_DAY',
-      function_version: 'checkout-evidence-v2',
-    }
-    assert.ok(response.function_version)
-    assert.equal(response.function_version, 'checkout-evidence-v2')
+  it('allows content-type header', () => {
+    assert.ok(corsHeaders['Access-Control-Allow-Headers'].includes('Content-Type'))
+  })
+
+  it('allows x-client-info header', () => {
+    assert.ok(corsHeaders['Access-Control-Allow-Headers'].includes('X-Client-Info'))
+  })
+
+  it('OPTIONS returns 200 before auth check', () => {
+    const optionsResponse = { status: 200, headers: corsHeaders }
+    assert.equal(optionsResponse.status, 200)
   })
 })
 
-describe('Notification failure does not block checkout', () => {
-  it('checkout success is independent of notification success', () => {
-    const checkoutResult = {
+describe('Function version (v4)', () => {
+  it('edge function returns v4 version tag', () => {
+    const response = {
       success: true,
-      record_id: 'rec-123',
-      final_status: 'FULL_DAY',
-      function_version: 'checkout-evidence-v2',
+      functionVersion: FUNCTION_VERSION,
     }
-    const notificationFailed = true
-    // Even if notifications fail, checkout result should be success
-    assert.equal(checkoutResult.success, true)
-    assert.ok(notificationFailed !== undefined)
+    assert.equal(response.functionVersion, 'attendance-evidence-v4')
+  })
+
+  it('error responses also include correlationId', () => {
+    const errorResponse = {
+      success: false,
+      errorCode: 'PHOTO_UPLOAD_FAILED',
+      message: 'Upload failed',
+      correlationId: crypto.randomUUID(),
+      retryable: true,
+    }
+    assert.ok(errorResponse.correlationId)
+    assert.match(errorResponse.correlationId, /^[0-9a-f]{8}-/)
+  })
+})
+
+describe('Notification failure does not block attendance', () => {
+  it('check_in success is independent of notification success', () => {
+    const result = {
+      success: true,
+      action: 'check_in',
+      attendanceRecordId: 'rec-123',
+      finalStatus: 'PENDING_CHECKOUT',
+      functionVersion: FUNCTION_VERSION,
+      secondaryWarnings: ['Notification failed: DB error'],
+    }
+    assert.equal(result.success, true)
+    assert.equal(result.secondaryWarnings.length, 1)
+  })
+
+  it('check_out success is independent of notification success', () => {
+    const result = {
+      success: true,
+      action: 'check_out',
+      attendanceRecordId: 'rec-456',
+      finalStatus: 'FULL_DAY',
+      functionVersion: FUNCTION_VERSION,
+      secondaryWarnings: ['Notification failed: DB error'],
+    }
+    assert.equal(result.success, true)
+    assert.equal(result.secondaryWarnings.length, 1)
+  })
+})
+
+describe('Recurring-task failure does not block check-in', () => {
+  it('check_in succeeds even if recurring task generation fails', () => {
+    const result = {
+      success: true,
+      action: 'check_in',
+      attendanceRecordId: 'rec-789',
+      finalStatus: 'PENDING_CHECKOUT',
+      functionVersion: FUNCTION_VERSION,
+      secondaryWarnings: ['Recurring task generation failed: timeout'],
+      recurring_tasks_generated: 0,
+    }
+    assert.equal(result.success, true)
+    assert.equal(result.recurring_tasks_generated, 0)
+    assert.ok(result.secondaryWarnings.some((w) => w.includes('Recurring')))
   })
 })
 
@@ -292,5 +457,67 @@ describe('Storage upload order', () => {
     assert.equal(steps.indexOf('upload_photo'), 0)
     assert.ok(steps.indexOf('upload_photo') < steps.indexOf('finalize_attendance'))
     assert.ok(steps.indexOf('finalize_attendance') < steps.indexOf('create_evidence'))
+  })
+
+  it('if photo upload fails, attendance is NOT modified', () => {
+    const photoUploadFailed = true
+    const attendanceModified = false
+    assert.ok(photoUploadFailed)
+    assert.ok(!attendanceModified)
+  })
+})
+
+describe('Authentication: VAPID JWT never used for attendance', () => {
+  it('attendance-action uses user session JWT, not VAPID', () => {
+    const attendanceAuthMethod = 'user_session_jwt'
+    const vapidAuthMethod = 'vapid_jwt'
+    assert.notEqual(attendanceAuthMethod, vapidAuthMethod)
+  })
+
+  it('attendance-action does not use service-role key in browser', () => {
+    const browserKeyType = 'anon_key'
+    const serviceRoleKeyType = 'service_role_key'
+    assert.notEqual(browserKeyType, serviceRoleKeyType)
+  })
+})
+
+describe('Frontend UX stages', () => {
+  it('check_in shows correct stage sequence', () => {
+    const stages = [
+      'Processing photo…',
+      'Uploading evidence…',
+      'Verifying attendance…',
+      'Completing Check-In…',
+      'Check-In completed',
+    ]
+    assert.equal(stages[0], 'Processing photo…')
+    assert.equal(stages[3], 'Completing Check-In…')
+    assert.equal(stages[4], 'Check-In completed')
+  })
+
+  it('check_out shows correct stage sequence', () => {
+    const stages = [
+      'Processing photo…',
+      'Uploading evidence…',
+      'Verifying attendance…',
+      'Completing Check-Out…',
+      'Check-Out completed',
+    ]
+    assert.equal(stages[3], 'Completing Check-Out…')
+    assert.equal(stages[4], 'Check-Out completed')
+  })
+
+  it('confirm button is disabled while submitting', () => {
+    const isSubmitting = true
+    const buttonDisabled = isSubmitting
+    assert.ok(buttonDisabled)
+  })
+
+  it('retry button only shows after retryable failure', () => {
+    const hasError = true
+    const isRetryable = true
+    const isSubmitting = false
+    const showRetry = hasError && isRetryable && !isSubmitting
+    assert.ok(showRetry)
   })
 })

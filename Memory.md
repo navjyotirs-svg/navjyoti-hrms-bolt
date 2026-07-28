@@ -2775,6 +2775,41 @@ The checkout (and check-in) edge function call used raw `fetch()` with only an `
 - The `attendance_idempotency` table grows unbounded — may need a cleanup cron job in the future
 - `uploadAttendanceEvidence()` is now deprecated and throws — any remaining callers must switch to `checkIn()`/`checkOut()` with `photo_base64`
 
+## 2026-07-28 — Attendance "Failed to send a request to the Edge Function" fix (attendance-evidence-v4)
+
+### Root cause
+The `attendance-action` edge function was deployed with `verify_jwt: true`. When the Supabase gateway received a request with an expired or about-to-expire JWT, it rejected the request with a 403 **before** the function executed. The 403 response from the gateway does **not** include the function's CORS headers, so the browser blocked it as a CORS error. The Supabase JS SDK's `functions.invoke()` saw the `fetch()` reject and reported "Failed to send a request to the Edge Function" — a generic relay error with no server-side detail.
+
+The function already verifies the JWT manually via `callerClient.auth.getUser(authHeader)`, so gateway-level JWT verification was redundant and actively harmful: it prevented the function from returning its own CORS headers on auth failures.
+
+### Fix
+1. **Edge function redeployed with `verify_jwt: false`** — the function now always runs and always returns CORS headers on every response (success, error, OPTIONS preflight). JWT verification is done manually inside the function body, returning a structured `SESSION_EXPIRED` or `INVALID_AUTH_TOKEN` error with proper CORS headers if the token is invalid.
+2. **Function version bumped to `attendance-evidence-v4`** — returned in every response as `functionVersion`.
+3. **Canonical structured responses** — success: `{ success, action, attendanceRecordId, finalStatus, functionVersion, correlationId, secondaryWarnings }`. Error: `{ success: false, errorCode, message, correlationId, retryable }` with 15 canonical error codes.
+4. **CORS headers** — `Access-Control-Allow-Methods: POST, OPTIONS`, `Access-Control-Allow-Headers: Content-Type, Authorization, X-Client-Info, Apikey`. OPTIONS handled before any auth/body parsing.
+5. **Frontend `callEdgeFunction`** — now extracts the actual server error message from the SDK's `FunctionsHttpError` context (`.context.json()`), parses `errorCode`, `message`, `correlationId`, `retryable` from the structured response, and surfaces them to the user instead of the generic "Failed to send a request" message.
+6. **Modals** — show exact stages: "Processing photo…", "Uploading evidence…", "Verifying attendance…", "Completing Check-In/Out…", "Check-In/Out completed". Retry button shows correlation ID reference. Confirm button disabled while submitting.
+
+### Why verify_jwt: false is safe
+The function manually authenticates every request:
+- Extracts the Bearer token from the Authorization header
+- Calls `callerClient.auth.getUser(token)` to validate the JWT
+- Returns `SESSION_EXPIRED` (401) if the token is invalid or missing
+- Returns `EMPLOYEE_NOT_FOUND` (403) if no profile/employee record exists
+- Returns `MEMBERSHIP_INACTIVE` (403) if the employee is not active
+
+No unauthenticated request can create or modify attendance records.
+
+### Tests
+- 51 tests in `src/lib/__tests__/checkout_flow.test.ts` (payload validation, attendance classification, 15 canonical error codes, canonical success response, idempotency, CORS headers, function version, notification non-blocking, recurring-task non-blocking, upload order, VAPID-not-used, UX stages)
+- All 314 tests pass (263 existing + 51 new)
+- Build passes
+
+### Remaining risks
+- Manual production acceptance test on https://hrms.ngspl.com not performed (no browser automation available)
+- The `attendance_idempotency` table grows unbounded — may need a cleanup cron job
+
+
 
 
 

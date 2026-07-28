@@ -14,6 +14,7 @@ interface Props {
 }
 
 type Step = 'intro' | 'camera' | 'captured' | 'location' | 'uploading' | 'done'
+type UploadStage = 'idle' | 'processing' | 'uploading' | 'verifying' | 'completing' | 'done'
 
 export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
   const [step, setStep] = useState<Step>('intro')
@@ -23,6 +24,8 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [uploadStage, setUploadStage] = useState<UploadStage>('idle')
+  const [correlationId, setCorrelationId] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -135,6 +138,7 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
     setError(null)
     setIsSubmitting(true)
     setStep('uploading')
+    setUploadStage('processing')
 
     try {
       const mimeType = 'image/jpeg'
@@ -142,11 +146,14 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
       if (validationError) {
         setError(validationError)
         setStep('captured')
+        setUploadStage('idle')
         setIsSubmitting(false)
         return
       }
 
+      setUploadStage('uploading')
       const photoBase64 = await blobToBase64(photoBlob)
+      setUploadStage('verifying')
       const result = await checkOut({
         photo_base64: photoBase64,
         evidence_mime_type: mimeType,
@@ -155,7 +162,9 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
         location_accuracy: coords.accuracy,
       })
 
+      setUploadStage('completing')
       setStep('done')
+      setUploadStage('done')
       setTimeout(() => {
         onSuccess(result as { final_status: string; elapsed_minutes: number })
       }, 1500)
@@ -163,10 +172,12 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
       const e = err as Error
       if (isEdgeFunctionError(e)) {
         setError(e.message)
+        setCorrelationId(e.correlationId)
       } else {
         setError(e.message || 'Checkout failed. Please try again.')
       }
       setStep('captured')
+      setUploadStage('idle')
       setIsSubmitting(false)
     }
   }
@@ -233,9 +244,16 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
                 </button>
               )}
               {error && isSubmitting === false && (
-                <button className="btn btn-sm" onClick={handleCheckout} style={{ marginTop: '8px', width: '100%' }}>
-                  Retry Checkout
-                </button>
+                <>
+                  <button className="btn btn-sm" onClick={handleCheckout} style={{ marginTop: '8px', width: '100%' }}>
+                    Retry Checkout
+                  </button>
+                  {correlationId && (
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '4px', textAlign: 'center' }}>
+                      Reference: {correlationId.slice(0, 8)}
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -250,14 +268,19 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
           {step === 'uploading' && (
             <div className="checkout-loading">
               <div className="spinner" />
-              <p>Uploading evidence and completing checkout…</p>
+              <p>
+                {uploadStage === 'processing' && 'Processing photo…'}
+                {uploadStage === 'uploading' && 'Uploading evidence…'}
+                {uploadStage === 'verifying' && 'Verifying attendance…'}
+                {uploadStage === 'completing' && 'Completing Check-Out…'}
+              </p>
             </div>
           )}
 
           {step === 'done' && (
             <div className="checkout-done">
               <div className="checkout-done-icon">✓</div>
-              <p>Checked out successfully!</p>
+              <p>Check-Out completed</p>
             </div>
           )}
         </div>

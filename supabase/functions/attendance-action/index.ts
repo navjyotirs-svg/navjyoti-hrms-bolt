@@ -2,16 +2,21 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
     "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const FUNCTION_VERSION = "checkout-evidence-v2";
+const FUNCTION_VERSION = "attendance-evidence-v4";
 const REQUIRED_TOTAL_MINUTES = 540;
 const ATTENDANCE_POLICY_VERSION = "POLICY_540_FULL_DAY";
-const APPROVED_EVIDENCE_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-const MAX_EVIDENCE_BYTES = 10 * 1024 * 1024; // 10MB
+const APPROVED_EVIDENCE_MIMES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+];
+const MAX_EVIDENCE_BYTES = 10 * 1024 * 1024;
 
 interface CheckInRequest {
   action: "check_in";
@@ -43,22 +48,45 @@ interface StructuredError {
   retryable: boolean;
 }
 
+interface StructuredSuccess {
+  success: true;
+  action: string;
+  attendanceRecordId: string;
+  finalStatus: string;
+  functionVersion: string;
+  correlationId: string;
+  secondaryWarnings: string[];
+  [key: string]: unknown;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
+
+  if (req.method !== "POST") {
+    return structuredError(405, "UNKNOWN_ATTENDANCE_ERROR", "Method not allowed", false);
+  }
+
+  const correlationId = crypto.randomUUID();
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
+    if (!supabaseUrl || !serviceKey || !anonKey) {
+      return structuredError(500, "FUNCTION_BOOT_FAILED", "Server configuration error", false, correlationId);
+    }
+
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return structuredError(401, "SESSION_EXPIRED", "Missing authorization header", false);
+    if (!authHeader) {
+      return structuredError(401, "INVALID_AUTH_TOKEN", "Missing authorization header", false, correlationId);
+    }
 
     const callerClient = createClient(supabaseUrl, anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
@@ -68,7 +96,7 @@ Deno.serve(async (req: Request) => {
       await callerClient.auth.getUser(authHeader.replace("Bearer ", ""));
 
     if (callerError || !callerData.user) {
-      return structuredError(401, "SESSION_EXPIRED", "Invalid session", false);
+      return structuredError(401, "SESSION_EXPIRED", "Your session has expired. Please sign in again.", false, correlationId);
     }
 
     const callerId = callerData.user.id;
@@ -80,11 +108,11 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (profileError || !profile) {
-      return structuredError(403, "SESSION_EXPIRED", "Profile not found", false);
+      return structuredError(403, "EMPLOYEE_NOT_FOUND", "Profile not found", false, correlationId);
     }
 
     if (profile.status === "disabled") {
-      return structuredError(403, "SESSION_EXPIRED", "Account disabled", false);
+      return structuredError(403, "SESSION_EXPIRED", "Account disabled", false, correlationId);
     }
 
     const { data: employee, error: empError } = await admin
@@ -94,51 +122,27 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (empError || !employee) {
-      return structuredError(403, "ACTIVE_ATTENDANCE_NOT_FOUND", "Employee record not found", false);
+      return structuredError(403, "EMPLOYEE_NOT_FOUND", "Employee record not found", false, correlationId);
     }
 
     if (!employee.is_active || !["active", "on_probation", "confirmed", "notice_period"].includes(employee.employment_status)) {
-      return structuredError(403, "ACTIVE_ATTENDANCE_NOT_FOUND", "Employee is not active", false);
+      return structuredError(403, "MEMBERSHIP_INACTIVE", "Employee is not active", false, correlationId);
     }
-
-    const config = await loadAttendanceConfig(admin);
-    const testMode = config.testMode && !config.isProduction;
-    const totalMinutes = testMode ? config.totalMinutes : REQUIRED_TOTAL_MINUTES;
 
     const body: AttendanceRequest = await req.json();
 
     if (body.action === "check_in") {
-      return handleCheckIn(admin, supabaseUrl, serviceKey, callerId, employee, totalMinutes, body as CheckInRequest);
+      return await handleCheckIn(admin, supabaseUrl, serviceKey, callerId, employee, body as CheckInRequest, correlationId);
     } else if (body.action === "check_out") {
-      return handleCheckOut(admin, supabaseUrl, serviceKey, callerId, employee, body as CheckOutRequest);
+      return await handleCheckOut(admin, supabaseUrl, serviceKey, callerId, employee, body as CheckOutRequest, correlationId);
     } else {
-      return structuredError(400, "UNKNOWN_CHECKOUT_ERROR", "Invalid action", false);
+      return structuredError(400, "UNKNOWN_ATTENDANCE_ERROR", "Invalid action", false, correlationId);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return structuredError(500, "UNKNOWN_CHECKOUT_ERROR", message, true);
+    return structuredError(500, "UNKNOWN_ATTENDANCE_ERROR", message, true, correlationId);
   }
 });
-
-async function loadAttendanceConfig(admin: ReturnType<typeof createClient>): Promise<{
-  testMode: boolean;
-  isProduction: boolean;
-  totalMinutes: number;
-  preAlertMinutes: number;
-}> {
-  const { data, error } = await admin.rpc("get_attendance_config");
-  if (error || !data) {
-    return { testMode: false, isProduction: false, totalMinutes: 540, preAlertMinutes: 2 };
-  }
-
-  const cfg = data as Record<string, string>;
-  const testMode = cfg["ATTENDANCE_TEST_MODE"] === "true";
-  const isProduction = cfg["SUPABASE_ENV"] === "production";
-  const totalMinutes = parseInt(cfg["ATTENDANCE_TOTAL_MINUTES"] ?? "540", 10);
-  const preAlertMinutes = parseInt(cfg["ATTENDANCE_PRE_ALERT_MINUTES"] ?? "2", 10);
-
-  return { testMode, isProduction, totalMinutes, preAlertMinutes };
-}
 
 async function uploadEvidencePhoto(
   supabaseUrl: string,
@@ -161,7 +165,7 @@ async function uploadEvidencePhoto(
   const resp = await fetch(uploadUrl, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${serviceKey}`,
+      Authorization: `Bearer ${serviceKey}`,
       "Content-Type": mimeType,
       "x-upsert": "false",
     },
@@ -192,18 +196,13 @@ function validateEvidencePayload(body: CheckInRequest | CheckOutRequest): string
   if (!APPROVED_EVIDENCE_MIMES.includes(body.evidence_mime_type)) {
     return "Invalid image format. Approved formats: JPG, JPEG, PNG, WebP";
   }
-  const estimatedBytes = Math.ceil(body.photo_base64.length * 3 / 4);
+  const estimatedBytes = Math.ceil((body.photo_base64.length * 3) / 4);
   if (estimatedBytes > MAX_EVIDENCE_BYTES) {
     return "Image size exceeds 10MB limit";
   }
   return null;
 }
 
-/**
- * Idempotency check: if we've already processed this requestId for this action,
- * return the cached result. Uses a dedicated table to prevent duplicate
- * checkouts/evidence on retry.
- */
 async function checkIdempotency(
   admin: ReturnType<typeof createClient>,
   requestId: string,
@@ -226,11 +225,16 @@ async function storeIdempotency(
   responseData: Record<string, unknown>
 ): Promise<void> {
   if (!requestId) return;
-  await admin.from("attendance_idempotency").upsert({
-    request_id: requestId,
-    action,
-    response_data: responseData,
-  }, { onConflict: "request_id,action" });
+  try {
+    await admin.from("attendance_idempotency").upsert(
+      {
+        request_id: requestId,
+        action,
+        response_data: responseData,
+      },
+      { onConflict: "request_id,action" }
+    );
+  } catch { /* best-effort */ }
 }
 
 async function handleCheckIn(
@@ -239,20 +243,19 @@ async function handleCheckIn(
   serviceKey: string,
   callerId: string,
   employee: Record<string, unknown>,
-  totalMinutes: number,
-  body: CheckInRequest
+  body: CheckInRequest,
+  correlationId: string
 ): Promise<Response> {
   const hasPerm = await checkPermission(admin, callerId, "attendance.check_in_self");
   if (!hasPerm) {
-    return structuredError(403, "SESSION_EXPIRED", "You do not have permission to check in", false);
+    return structuredError(403, "SESSION_EXPIRED", "You do not have permission to check in", false, correlationId);
   }
 
   const evidenceError = validateEvidencePayload(body);
   if (evidenceError) {
-    return structuredError(400, "PHOTO_MISSING", evidenceError, false);
+    return structuredError(400, "EVIDENCE_INVALID", evidenceError, false, correlationId);
   }
 
-  // Idempotency check
   const cached = await checkIdempotency(admin, body.requestId ?? "", "check_in");
   if (cached) {
     return jsonResponse(200, { ...cached, idempotent: true });
@@ -260,7 +263,7 @@ async function handleCheckIn(
 
   const now = new Date();
   const attendanceDate = now.toISOString().slice(0, 10);
-  const requiredCheckoutAt = new Date(now.getTime() + totalMinutes * 60 * 1000);
+  const requiredCheckoutAt = new Date(now.getTime() + REQUIRED_TOTAL_MINUTES * 60 * 1000);
 
   const { data: existing } = await admin
     .from("attendance_records")
@@ -271,7 +274,7 @@ async function handleCheckIn(
     .maybeSingle();
 
   if (existing) {
-    return structuredError(409, "ALREADY_CHECKED_OUT", "You have already checked in today. Please check out first.", false);
+    return structuredError(409, "ATTENDANCE_ALREADY_EXISTS", "You have already checked in today. Please check out first.", false, correlationId);
   }
 
   let storagePath: string;
@@ -281,7 +284,7 @@ async function handleCheckIn(
     storagePath = upload.path;
     fileSizeBytes = upload.size;
   } catch (err) {
-    return structuredError(500, "PHOTO_UPLOAD_FAILED", `Failed to upload evidence photo: ${err instanceof Error ? err.message : String(err)}`, true);
+    return structuredError(500, "PHOTO_UPLOAD_FAILED", `Failed to upload evidence photo: ${err instanceof Error ? err.message : String(err)}`, true, correlationId);
   }
 
   const { data: record, error: insertError } = await admin
@@ -293,7 +296,7 @@ async function handleCheckIn(
       attendance_date: attendanceDate,
       check_in_at: now.toISOString(),
       required_checkout_at: requiredCheckoutAt.toISOString(),
-      required_total_minutes: totalMinutes,
+      required_total_minutes: REQUIRED_TOTAL_MINUTES,
       attendance_policy_version: ATTENDANCE_POLICY_VERSION,
       final_status: "PENDING_CHECKOUT",
       check_in_evidence_status: "VERIFIED",
@@ -303,7 +306,7 @@ async function handleCheckIn(
     .maybeSingle();
 
   if (insertError || !record) {
-    return structuredError(500, "DATABASE_UPDATE_FAILED", `Failed to create attendance record: ${insertError?.message ?? "Unknown"}`, true);
+    return structuredError(500, "DATABASE_UPDATE_FAILED", `Failed to create attendance record: ${insertError?.message ?? "Unknown"}`, true, correlationId);
   }
 
   const { error: evidenceError } = await admin.from("attendance_evidence").insert({
@@ -322,40 +325,45 @@ async function handleCheckIn(
   });
 
   if (evidenceError) {
-    return structuredError(500, "DATABASE_UPDATE_FAILED", `Failed to store check-in evidence: ${evidenceError.message}`, true);
+    return structuredError(500, "DATABASE_UPDATE_FAILED", `Failed to store check-in evidence: ${evidenceError.message}`, true, correlationId);
   }
 
-  await admin.from("attendance_history").insert({
-    attendance_record_id: record.id,
-    employee_id: employee.id as string,
-    event_type: "check_in",
-    event_data: {
-      check_in_at: record.check_in_at,
-      required_checkout_at: record.required_checkout_at,
-      required_total_minutes: record.required_total_minutes,
-      evidence_type: "CHECK_IN_PHOTO",
-      storage_path: storagePath,
-      latitude: body.latitude,
-      longitude: body.longitude,
-    },
-    performed_by: callerId,
-  });
+  try {
+    await admin.from("attendance_history").insert({
+      attendance_record_id: record.id,
+      employee_id: employee.id as string,
+      event_type: "check_in",
+      event_data: {
+        check_in_at: record.check_in_at,
+        required_checkout_at: record.required_checkout_at,
+        required_total_minutes: record.required_total_minutes,
+        evidence_type: "CHECK_IN_PHOTO",
+        storage_path: storagePath,
+        latitude: body.latitude,
+        longitude: body.longitude,
+      },
+      performed_by: callerId,
+    });
+  } catch { /* best-effort */ }
 
-  await admin.from("audit_logs").insert({
-    actor_id: callerId,
-    action: "attendance.check_in",
-    entity_type: "attendance_record",
-    entity_id: record.id,
-    new_values: {
-      employee_id: employee.id,
-      check_in_at: record.check_in_at,
-      required_checkout_at: record.required_checkout_at,
-      check_in_evidence_status: "VERIFIED",
-      evidence_type: "CHECK_IN_PHOTO",
-    },
-  });
+  try {
+    await admin.from("audit_logs").insert({
+      actor_id: callerId,
+      action: "attendance.check_in",
+      entity_type: "attendance_record",
+      entity_id: record.id,
+      new_values: {
+        employee_id: employee.id,
+        check_in_at: record.check_in_at,
+        required_checkout_at: record.required_checkout_at,
+        check_in_evidence_status: "VERIFIED",
+        evidence_type: "CHECK_IN_PHOTO",
+      },
+    });
+  } catch { /* best-effort */ }
 
-  // Notifications are best-effort — never fail the check-in
+  const secondaryWarnings: string[] = [];
+
   try {
     await admin.from("notifications").insert({
       recipient_id: callerId,
@@ -367,7 +375,9 @@ async function handleCheckIn(
       action_url: "/attendance",
       dedup_key: `att:check_in:${record.id}`,
     });
-  } catch { /* best-effort */ }
+  } catch (err) {
+    secondaryWarnings.push(`Notification failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   let recurringTasksGenerated = 0;
   try {
@@ -375,18 +385,25 @@ async function handleCheckIn(
       admin, callerId, employee, record.id, attendanceDate
     );
   } catch (err) {
-    console.error("Recurring task generation failed:", err instanceof Error ? err.message : String(err));
+    const msg = err instanceof Error ? err.message : String(err);
+    secondaryWarnings.push(`Recurring task generation failed: ${msg}`);
+    console.error("Recurring task generation failed:", msg);
   }
 
-  const responseData = {
+  const responseData: StructuredSuccess = {
+    success: true,
+    action: "check_in",
+    attendanceRecordId: record.id,
+    finalStatus: record.final_status,
+    functionVersion: FUNCTION_VERSION,
+    correlationId,
+    secondaryWarnings,
     message: "Checked in successfully",
     record_id: record.id,
     check_in_at: record.check_in_at,
     required_checkout_at: record.required_checkout_at,
     required_total_minutes: record.required_total_minutes,
-    final_status: record.final_status,
     recurring_tasks_generated: recurringTasksGenerated,
-    function_version: FUNCTION_VERSION,
   };
 
   await storeIdempotency(admin, body.requestId ?? "", "check_in", responseData);
@@ -426,7 +443,6 @@ async function generateRecurringTasksForCheckIn(
       const { data: taskCode, error: codeError } = await admin.rpc("generate_task_code");
       if (codeError || !taskCode) continue;
 
-      const now = new Date();
       const { data: task, error: taskError } = await admin
         .from("tasks")
         .insert({
@@ -448,11 +464,7 @@ async function generateRecurringTasksForCheckIn(
         .select("id, task_code, title")
         .maybeSingle();
 
-      if (taskError) {
-        if (taskError.code === "23505" || /unique/i.test(taskError.message)) continue;
-        continue;
-      }
-      if (!task) continue;
+      if (taskError || !task) continue;
 
       await admin.from("task_assignments").insert({
         task_id: task.id, assigned_to: employeeId, assignment_type: "PRIMARY",
@@ -502,19 +514,19 @@ async function handleCheckOut(
   serviceKey: string,
   callerId: string,
   employee: Record<string, unknown>,
-  body: CheckOutRequest
+  body: CheckOutRequest,
+  correlationId: string
 ): Promise<Response> {
   const hasPerm = await checkPermission(admin, callerId, "attendance.check_out_self");
   if (!hasPerm) {
-    return structuredError(403, "SESSION_EXPIRED", "You do not have permission to check out", false);
+    return structuredError(403, "SESSION_EXPIRED", "You do not have permission to check out", false, correlationId);
   }
 
   const evidenceError = validateEvidencePayload(body);
   if (evidenceError) {
-    return structuredError(400, "PHOTO_MISSING", evidenceError, false);
+    return structuredError(400, "EVIDENCE_INVALID", evidenceError, false, correlationId);
   }
 
-  // Idempotency check
   const cached = await checkIdempotency(admin, body.requestId ?? "", "check_out");
   if (cached) {
     return jsonResponse(200, { ...cached, idempotent: true });
@@ -532,10 +544,9 @@ async function handleCheckOut(
     .maybeSingle();
 
   if (recordError || !record) {
-    return structuredError(404, "ACTIVE_ATTENDANCE_NOT_FOUND", "No active check-in found for today. Please check in first.", false);
+    return structuredError(404, "ACTIVE_ATTENDANCE_NOT_FOUND", "No active check-in found for today. Please check in first.", false, correlationId);
   }
 
-  // Upload evidence photo FIRST — if this fails, attendance is NOT modified
   let storagePath: string;
   let fileSizeBytes: number;
   try {
@@ -543,10 +554,9 @@ async function handleCheckOut(
     storagePath = upload.path;
     fileSizeBytes = upload.size;
   } catch (err) {
-    return structuredError(500, "PHOTO_UPLOAD_FAILED", `Checkout photo could not be uploaded: ${err instanceof Error ? err.message : String(err)}`, true);
+    return structuredError(500, "PHOTO_UPLOAD_FAILED", `Checkout photo could not be uploaded: ${err instanceof Error ? err.message : String(err)}`, true, correlationId);
   }
 
-  // Calculate elapsed minutes using server timestamp
   const checkInTime = new Date(record.check_in_at);
   const elapsedMs = now.getTime() - checkInTime.getTime();
   const elapsedMinutes = Math.floor(elapsedMs / (1000 * 60));
@@ -557,7 +567,6 @@ async function handleCheckOut(
     ? `Checked out at ${elapsedMinutes} minutes (full-day threshold: ${requiredTotal})`
     : `Checked out early at ${elapsedMinutes} minutes (full-day threshold: ${requiredTotal})`;
 
-  // Finalize attendance record
   const { error: updateError, count: updatedCount } = await admin
     .from("attendance_records")
     .update({
@@ -573,25 +582,30 @@ async function handleCheckOut(
     .eq("final_status", "PENDING_CHECKOUT");
 
   if (updateError) {
-    return structuredError(500, "DATABASE_UPDATE_FAILED", `Failed to update attendance record: ${updateError.message}`, true);
+    return structuredError(500, "DATABASE_UPDATE_FAILED", `Failed to update attendance record: ${updateError.message}`, true, correlationId);
   }
 
-  // If no rows were updated, another request already checked out — return success (idempotent)
   if (updatedCount === 0) {
-    const responseData = {
+    const responseData: StructuredSuccess = {
+      success: true,
+      action: "check_out",
+      attendanceRecordId: record.id,
+      finalStatus,
+      functionVersion: FUNCTION_VERSION,
+      correlationId,
+      secondaryWarnings: [],
       message: "Checked out successfully",
       record_id: record.id,
       check_out_at: now.toISOString(),
       elapsed_minutes: elapsedMinutes,
       required_total_minutes: requiredTotal,
-      final_status: finalStatus,
-      function_version: FUNCTION_VERSION,
       idempotent: true,
     };
     return jsonResponse(200, responseData);
   }
 
-  // Create evidence record — only after attendance is finalized
+  const secondaryWarnings: string[] = [];
+
   const { error: evidenceInsertError } = await admin.from("attendance_evidence").insert({
     attendance_record_id: record.id,
     employee_id: employee.id as string,
@@ -608,11 +622,10 @@ async function handleCheckOut(
   });
 
   if (evidenceInsertError) {
+    secondaryWarnings.push(`Evidence insert failed: ${evidenceInsertError.message}`);
     console.error("Evidence insert failed after checkout:", evidenceInsertError.message);
-    // Attendance is already finalized — don't undo it. Log for cleanup.
   }
 
-  // Create history entries
   try {
     await admin.from("attendance_history").insert([
       {
@@ -635,10 +648,9 @@ async function handleCheckOut(
       },
     ]);
   } catch (err) {
-    console.error("History insert failed:", err instanceof Error ? err.message : String(err));
+    secondaryWarnings.push(`History insert failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Create audit log
   try {
     await admin.from("audit_logs").insert({
       actor_id: callerId, action: "attendance.check_out",
@@ -647,10 +659,9 @@ async function handleCheckOut(
       new_values: { check_out_at: now.toISOString(), elapsed_minutes: elapsedMinutes, final_status: finalStatus },
     });
   } catch (err) {
-    console.error("Audit log failed:", err instanceof Error ? err.message : String(err));
+    secondaryWarnings.push(`Audit log failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Notifications are best-effort — never fail the checkout
   const notificationsToInsert: Record<string, unknown>[] = [
     {
       recipient_id: callerId, notification_type: "ATTENDANCE_CHECKOUT_CONFIRMED",
@@ -679,10 +690,9 @@ async function handleCheckOut(
   try {
     await admin.from("notifications").insert(notificationsToInsert);
   } catch (err) {
-    console.error("Notification insert failed:", err instanceof Error ? err.message : String(err));
+    secondaryWarnings.push(`Notification failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Supervisory notification for HALF_DAY — best-effort
   if (finalStatus === "HALF_DAY") {
     try {
       await notifyBusinessEvent(admin, {
@@ -694,18 +704,23 @@ async function handleCheckOut(
         recipientRoles: ["hr_admin", "director"],
       });
     } catch (err) {
-      console.error("Supervisory notification failed:", err instanceof Error ? err.message : String(err));
+      secondaryWarnings.push(`Supervisory notification failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  const responseData = {
+  const responseData: StructuredSuccess = {
+    success: true,
+    action: "check_out",
+    attendanceRecordId: record.id,
+    finalStatus,
+    functionVersion: FUNCTION_VERSION,
+    correlationId,
+    secondaryWarnings,
     message: "Checked out successfully",
     record_id: record.id,
     check_out_at: now.toISOString(),
     elapsed_minutes: elapsedMinutes,
     required_total_minutes: requiredTotal,
-    final_status: finalStatus,
-    function_version: FUNCTION_VERSION,
   };
 
   await storeIdempotency(admin, body.requestId ?? "", "check_out", responseData);
@@ -842,13 +857,14 @@ function structuredError(
   status: number,
   errorCode: string,
   message: string,
-  retryable: boolean
+  retryable: boolean,
+  correlationId?: string
 ): Response {
   const body: StructuredError = {
     success: false,
     errorCode,
     message,
-    correlationId: crypto.randomUUID(),
+    correlationId: correlationId ?? crypto.randomUUID(),
     retryable,
   };
   return new Response(JSON.stringify(body), {

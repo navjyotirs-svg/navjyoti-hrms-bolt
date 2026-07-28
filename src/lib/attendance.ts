@@ -133,27 +133,69 @@ async function callEdgeFunction(slug: string, body: Record<string, unknown>) {
   if (invokeError) {
     const errObj = invokeError as { message?: string; context?: Response }
     let serverMessage: string | undefined
+    let serverErrorCode: string | undefined
+    let serverRetryable = true
+    let serverCorrelationId: string | undefined
     try {
       if (errObj.context) {
-        const json = await errObj.context.json() as { error?: string; message?: string }
-        serverMessage = json?.error ?? json?.message
+        const json = await errObj.context.json() as {
+          error?: string
+          message?: string
+          errorCode?: string
+          retryable?: boolean
+          correlationId?: string
+          success?: boolean
+        }
+        serverMessage = json?.message ?? json?.error
+        serverErrorCode = json?.errorCode
+        serverRetryable = json?.retryable ?? true
+        serverCorrelationId = json?.correlationId
       }
     } catch { /* ignore parse failure */ }
 
+    const isRelayError = errObj.message?.includes('Edge Function') || errObj.message?.includes('Failed to fetch')
+    if (isRelayError && !serverMessage) {
+      throw {
+        success: false,
+        errorCode: 'FUNCTION_NOT_REACHABLE',
+        message: 'The attendance service could not be reached. This may be a temporary network issue. Please try again.',
+        correlationId: crypto.randomUUID(),
+        retryable: true,
+      } as EdgeFunctionError
+    }
+
     throw {
       success: false,
-      errorCode: 'UNKNOWN_CHECKOUT_ERROR',
+      errorCode: serverErrorCode ?? 'UNKNOWN_ATTENDANCE_ERROR',
       message: serverMessage ?? errObj.message ?? 'Request failed',
-      correlationId: crypto.randomUUID(),
-      retryable: true,
+      correlationId: serverCorrelationId ?? crypto.randomUUID(),
+      retryable: serverRetryable,
     } as EdgeFunctionError
   }
 
-  const resultObj = data as { error?: string; success?: boolean } | null
-  if (resultObj && resultObj.error) {
+  const resultObj = data as {
+    error?: string
+    message?: string
+    success?: boolean
+    errorCode?: string
+    retryable?: boolean
+    correlationId?: string
+  } | null
+
+  if (resultObj && resultObj.success === false) {
     throw {
       success: false,
-      errorCode: 'UNKNOWN_CHECKOUT_ERROR',
+      errorCode: resultObj.errorCode ?? 'UNKNOWN_ATTENDANCE_ERROR',
+      message: resultObj.message ?? resultObj.error ?? 'Request failed',
+      correlationId: resultObj.correlationId ?? crypto.randomUUID(),
+      retryable: resultObj.retryable ?? true,
+    } as EdgeFunctionError
+  }
+
+  if (resultObj && resultObj.error && resultObj.success !== true) {
+    throw {
+      success: false,
+      errorCode: 'UNKNOWN_ATTENDANCE_ERROR',
       message: resultObj.error,
       correlationId: crypto.randomUUID(),
       retryable: true,
