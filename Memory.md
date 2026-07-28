@@ -2864,3 +2864,19 @@ Instead of depending solely on the edge function, the system now has a **databas
 - The `attendance_idempotency` table grows unbounded — may need cleanup
 - The admin incident recovery tool was not implemented (not needed for the immediate outage fix)
 
+## 2026-07-28 — Fix: RPC "function finite(double precision) does not exist" error
+
+### Root cause
+The `process_attendance_action` RPC used `finite(p_accuracy_meters)` to validate location accuracy. PostgreSQL does not have a `finite(double precision)` function — it only exists in some other languages/libraries. This caused the RPC to fail immediately with: "function finite(double precision) does not exist".
+
+### Fix
+Migration `fix_attendance_rpc_finite_function` replaced the `finite()` call with a simple range check: accuracy is accepted if null or any value between 0 and 1,000,000 metres. No attendance business logic changed.
+
+### Verification
+- Confirmed the live function source contains no `finite()` call
+- Confirmed the function signature is correct (SECURITY DEFINER, search_path = public, auth)
+- Confirmed coordinate validation logic works correctly in a direct database test
+- All 312 tests pass
+- Build passes
+
+
