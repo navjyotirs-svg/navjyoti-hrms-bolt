@@ -646,15 +646,29 @@ export function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export async function createEvidenceSignedUrl(path: string): Promise<string | null> {
-  const { data, error } = await supabase.storage
-    .from('attendance-evidence')
-    .createSignedUrl(path, 3600)
+  try {
+    const { data: session } = await supabase.auth.getSession()
+    if (!session.session) {
+      const { data: refreshed } = await supabase.auth.refreshSession()
+      if (!refreshed.session) return null
+    }
 
-  if (error) {
-    console.error('Evidence signed URL error:', error.message, 'path:', path)
+    const result = await supabase.functions.invoke('evidence-url', {
+      body: { path },
+    })
+
+    if (result.error) {
+      console.error('Evidence URL function error:', result.error.message)
+      return null
+    }
+
+    const data = result.data as { urls?: Array<{ path: string; url: string | null }> } | null
+    const entry = data?.urls?.[0]
+    return entry?.url ?? null
+  } catch (err) {
+    console.error('Evidence signed URL error:', err)
     return null
   }
-  return data?.signedUrl ?? null
 }
 
 export function formatTimeRemaining(requiredCheckoutAt: string): string {

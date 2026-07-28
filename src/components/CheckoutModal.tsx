@@ -26,7 +26,6 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [uploadStage, setUploadStage] = useState<UploadStage>('idle')
   const [correlationId, setCorrelationId] = useState<string | null>(null)
-  const [usedFallback, setUsedFallback] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -164,8 +163,6 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
       })
 
       setUploadStage('completing')
-      const resultObj = result as { processingPath?: string }
-      setUsedFallback(resultObj?.processingPath === 'DATABASE_RPC_FALLBACK')
       setStep('done')
       setUploadStage('done')
       setTimeout(() => {
@@ -283,7 +280,7 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
           {step === 'done' && (
             <div className="checkout-done">
               <div className="checkout-done-icon">✓</div>
-              <p>{usedFallback ? 'Check-Out completed using recovery mode.' : 'Check-Out completed'}</p>
+              <p>Check-Out completed</p>
             </div>
           )}
         </div>
