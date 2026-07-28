@@ -50,8 +50,7 @@ export function AttendanceManagementPage() {
   const [evidenceModal, setEvidenceModal] = useState<{
     employeeName: string
     date: string
-    evidence: EvidenceDetail | null
-    imageUrl: string | null
+    items: Array<EvidenceDetail & { imageUrl: string | null }>
     loading: boolean
   } | null>(null)
   const [checkoutTypeFilter, setCheckoutTypeFilter] = useState('all')
@@ -122,37 +121,30 @@ export function AttendanceManagementPage() {
 
   async function viewEvidence(recordId: string, employeeName: string, date: string) {
     setEvidenceLoading(true)
-    setEvidenceModal({ employeeName, date, evidence: null, imageUrl: null, loading: true })
+    setEvidenceModal({ employeeName, date, items: [], loading: true })
     try {
       const { data } = await supabase
         .from('attendance_evidence')
         .select('storage_path, mime_type, latitude, longitude, location_accuracy, captured_at, evidence_type')
         .eq('attendance_record_id', recordId)
-        .order('captured_at', { ascending: false })
+        .order('captured_at', { ascending: true })
         .limit(2)
 
       const evidenceData = (data ?? []) as EvidenceDetail[]
       if (evidenceData.length === 0) {
-        setEvidenceModal({ employeeName, date, evidence: null, imageUrl: null, loading: false })
+        setEvidenceModal({ employeeName, date, items: [], loading: false })
         setEvidenceLoading(false)
         return
       }
 
-      // Get signed URLs for all evidence items
-      const evidenceWithUrls = await Promise.all(
-        evidenceData.map(async (ev) => {
-          const url = await createEvidenceSignedUrl(ev.storage_path)
-          return { ...ev, imageUrl: url }
-        })
+      const items = await Promise.all(
+        evidenceData.map(async (ev) => ({
+          ...ev,
+          imageUrl: await createEvidenceSignedUrl(ev.storage_path),
+        }))
       )
 
-      setEvidenceModal({
-        employeeName,
-        date,
-        evidence: evidenceWithUrls[0] ?? null,
-        imageUrl: evidenceWithUrls[0]?.imageUrl ?? null,
-        loading: false,
-      })
+      setEvidenceModal({ employeeName, date, items, loading: false })
     } catch (e) {
       setError((e as Error).message)
       setEvidenceModal(null)
@@ -286,8 +278,7 @@ export function AttendanceManagementPage() {
         <EvidenceModal
           employeeName={evidenceModal.employeeName}
           date={evidenceModal.date}
-          evidence={evidenceModal.evidence}
-          imageUrl={evidenceModal.imageUrl}
+          items={evidenceModal.items}
           loading={evidenceModal.loading}
           onClose={() => setEvidenceModal(null)}
         />
@@ -296,24 +287,27 @@ export function AttendanceManagementPage() {
   )
 }
 
+const EVIDENCE_TYPE_LABELS: Record<string, string> = {
+  CHECK_IN_PHOTO: 'Check-In Photo',
+  CHECK_OUT_PHOTO: 'Check-Out Photo',
+}
+
 function EvidenceModal({
   employeeName,
   date,
-  evidence,
-  imageUrl,
+  items,
   loading,
   onClose,
 }: {
   employeeName: string
   date: string
-  evidence: EvidenceDetail | null
-  imageUrl: string | null
+  items: Array<EvidenceDetail & { imageUrl: string | null }>
   loading: boolean
   onClose: () => void
 }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="card" style={{ maxWidth: '520px', width: '100%' }} onClick={(e) => e.stopPropagation()}>
+      <div className="card" style={{ maxWidth: '640px', width: '100%' }} onClick={(e) => e.stopPropagation()}>
         <div className="card-header">
           <h3 className="card-title">Attendance Evidence — {employeeName}</h3>
           <button className="btn btn-sm btn-secondary" onClick={onClose} type="button">Close</button>
@@ -321,65 +315,73 @@ function EvidenceModal({
         <div className="card-body">
           {loading ? (
             <div className="loading-state">Loading evidence…</div>
-          ) : !evidence ? (
+          ) : items.length === 0 ? (
             <div className="empty-state"><div className="empty-state-text">No evidence found for this record.</div></div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-              {imageUrl && (
-                <div style={{ borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border)' }}>
-                  <img
-                    src={imageUrl}
-                    alt="Attendance evidence"
-                    style={{ width: '100%', display: 'block', maxHeight: '300px', objectFit: 'cover' }}
-                  />
-                </div>
-              )}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Date</span>
-                  <span className="mono" style={{ fontSize: '13px' }}>{formatDate(date)}</span>
-                </div>
-                {evidence.captured_at && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Captured At</span>
-                    <span className="mono" style={{ fontSize: '13px' }}>{formatTimestamp(evidence.captured_at)}</span>
-                  </div>
-                )}
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Type</span>
-                  <span style={{ fontSize: '13px' }}>{evidence.evidence_type || 'photo'}</span>
-                </div>
-                {evidence.latitude !== null && evidence.longitude !== null && (
-                  <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Latitude</span>
-                      <span className="mono" style={{ fontSize: '13px' }}>{evidence.latitude.toFixed(6)}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                {items.map((ev) => (
+                  <div
+                    key={ev.evidence_type + ev.captured_at}
+                    style={{ flex: '1 1 240px', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
+                  >
+                    <div style={{
+                      fontSize: '12px', fontWeight: 600, textTransform: 'uppercase',
+                      letterSpacing: '0.05em', color: 'var(--slate)',
+                    }}>
+                      {EVIDENCE_TYPE_LABELS[ev.evidence_type] ?? ev.evidence_type}
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Longitude</span>
-                      <span className="mono" style={{ fontSize: '13px' }}>{evidence.longitude.toFixed(6)}</span>
+                    <div style={{ borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border)', background: 'var(--surface-2)', aspectRatio: '4/3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {ev.imageUrl ? (
+                        <img
+                          src={ev.imageUrl}
+                          alt={EVIDENCE_TYPE_LABELS[ev.evidence_type] ?? 'Evidence photo'}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                      ) : (
+                        <span style={{ color: 'var(--slate)', fontSize: '12px' }}>Photo unavailable</span>
+                      )}
                     </div>
-                    {evidence.location_accuracy !== null && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Accuracy</span>
-                        <span className="mono" style={{ fontSize: '13px' }}>±{evidence.location_accuracy.toFixed(1)}m</span>
+                        <span style={{ color: 'var(--slate)' }}>Date</span>
+                        <span className="mono">{formatDate(date)}</span>
                       </div>
-                    )}
-                    <a
-                      href={`https://www.openstreetmap.org/?mlat=${evidence.latitude}&mlon=${evidence.longitude}&zoom=16`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: '12px', color: 'var(--teal)', textDecoration: 'none' }}
-                    >
-                      View on Map ↗
-                    </a>
-                  </>
-                )}
-                {evidence.latitude === null && (
-                  <div style={{ color: 'var(--slate)', fontSize: '13px', fontStyle: 'italic' }}>
-                    No location data captured
+                      {ev.captured_at && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--slate)' }}>Time</span>
+                          <span className="mono">{formatTimestamp(ev.captured_at)}</span>
+                        </div>
+                      )}
+                      {ev.latitude !== null && ev.longitude !== null && (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--slate)' }}>Latitude</span>
+                            <span className="mono">{ev.latitude.toFixed(6)}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--slate)' }}>Longitude</span>
+                            <span className="mono">{ev.longitude.toFixed(6)}</span>
+                          </div>
+                          {ev.location_accuracy !== null && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--slate)' }}>Accuracy</span>
+                              <span className="mono">±{ev.location_accuracy.toFixed(1)}m</span>
+                            </div>
+                          )}
+                          <a
+                            href={`https://www.openstreetmap.org/?mlat=${ev.latitude}&mlon=${ev.longitude}&zoom=16`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: '12px', color: 'var(--teal)', textDecoration: 'none' }}
+                          >
+                            View on Map ↗
+                          </a>
+                        </>
+                      )}
+                    </div>
                   </div>
-                )}
+                ))}
               </div>
             </div>
           )}
