@@ -386,7 +386,7 @@ async function handleCheckIn(
       entityType: "attendance_record", entityId: record.id,
       title: "Employee Checked In", message: `Check-in recorded for ${employee.id as string}.`,
       priority: "normal", category: "attendance", actionUrl: "/attendance-management",
-      recipientRoles: ["hr_admin", "director"],
+      recipientRoles: ["hr_admin", "director", "manager"],
     });
   } catch (err) {
     secondaryWarnings.push(`Supervisory notification failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -509,7 +509,7 @@ async function generateRecurringTasksForCheckIn(
           title: "Recurring Task Assigned",
           message: `A recurring task "${task.title}" (${task.task_code}) has been assigned to you for today.`,
           priority: "normal", category: "tasks", actionUrl: `/tasks/${task.id}`,
-          recipientRoles: ["hr_admin", "director"], includeEmployee: true,
+          recipientRoles: ["hr_admin", "director", "manager"], includeEmployee: true,
           metadata: { recurring_template_id: template.id, recurrence_date: attendanceDate, task_code: task.task_code, attendance_record_id: attendanceRecordId },
         });
       } catch { /* best-effort */ }
@@ -715,7 +715,7 @@ async function handleCheckOut(
       entityType: "attendance_record", entityId: record.id,
       title: `${statusLabel} Check-out Recorded`, message: `A ${statusLabel.toLowerCase()} check-out has been recorded.`,
       priority: finalStatus === "HALF_DAY" ? "high" : "normal", category: "attendance", actionUrl: "/attendance-management",
-      recipientRoles: ["hr_admin", "director"],
+      recipientRoles: ["hr_admin", "director", "manager"],
     });
   } catch (err) {
     secondaryWarnings.push(`Supervisory notification failed: ${err instanceof Error ? err.message : String(err)}`);
