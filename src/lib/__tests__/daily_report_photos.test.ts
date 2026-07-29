@@ -137,7 +137,7 @@ describe('Daily Report Photos — Auto-Draft', () => {
 
   test('19. Draft creation failure shows error', () => {
     const src = readFile('src/pages/DailyReportPage.tsx')
-    assert.ok(src.includes('REPORT_DRAFT_CREATION_FAILED'), 'Draft creation error code')
+    assert.ok(src.includes('Could not create your daily report draft'), 'Draft creation error message')
   })
 
   test('19a. ensureDraft returns reportId, employeeId, orgId (not stale state)', () => {

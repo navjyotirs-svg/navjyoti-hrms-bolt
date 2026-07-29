@@ -49,7 +49,7 @@ Deno.serve(async (req: Request) => {
       .select("id, branch_id, department_id")
       .eq("user_id", user.id)
       .eq("is_active", true)
-      .single();
+      .maybeSingle();
 
     switch (action) {
       case "save_draft":
@@ -264,8 +264,10 @@ async function handleSaveDraft(
   body: any, userId: string, orgId: string,
   employee: any, perms: string[]
 ) {
-  if (!hasPerm(perms, "daily_report.submit"))
+  if (!hasPerm(perms, "daily_report.submit_self"))
     return errorResponse("No permission to submit reports", 403);
+  if (!employee)
+    return errorResponse("No employee record found for your account. Contact HR.", 403);
 
   const reportDate = body.report_date || await getKolkataDate();
   const {
@@ -337,8 +339,10 @@ async function handleSubmit(
   body: any, userId: string, orgId: string,
   employee: any, perms: string[]
 ) {
-  if (!hasPerm(perms, "daily_report.submit"))
+  if (!hasPerm(perms, "daily_report.submit_self"))
     return errorResponse("No permission to submit reports", 403);
+  if (!employee)
+    return errorResponse("No employee record found for your account. Contact HR.", 403);
 
   const reportDate = body.report_date || await getKolkataDate();
   const {

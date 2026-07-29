@@ -127,10 +127,11 @@ export function DailyReportPage() {
           orgId: (data as any).organization_id || profile?.organization_id || '',
         }
       }
-      setError('REPORT_DRAFT_CREATION_FAILED')
+      setError('Could not create your daily report draft. Please try again.')
       return null
     } catch (e) {
-      setError('REPORT_DRAFT_CREATION_FAILED')
+      const msg = e instanceof Error ? e.message : 'Could not create your daily report draft.'
+      setError(msg)
       return null
     } finally {
       setPreparingDraft(false)
@@ -174,7 +175,7 @@ export function DailyReportPage() {
     if (!draft) {
       setPhotos(prev => prev.map((p) => {
         if (newEntries.find(ne => ne.id === p.id)) {
-          return { ...p, status: 'FAILED', error: 'REPORT_DRAFT_CREATION_FAILED' }
+          return { ...p, status: 'FAILED', error: 'Could not create your daily report draft. Please try again.' }
         }
         return p
       }))
@@ -241,7 +242,7 @@ export function DailyReportPage() {
     setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'PROCESSING', progress: 10, error: null } : p))
 
     const reportId = existing?.id
-    if (!reportId) { setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'FAILED', error: 'REPORT_DRAFT_CREATION_FAILED' } : p)); return }
+    if (!reportId) { setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'FAILED', error: 'Could not create your daily report draft. Please try again.' } : p)); return }
 
     const orgId = (existing as any)?.organization_id || profile?.organization_id || ''
     const employeeId = (existing as any)?.employee_id || ''
