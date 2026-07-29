@@ -48,12 +48,12 @@ export function TeamTasksPage() {
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
         {current.slice(0, 3).map((a) => {
-          const name = a.employees?.full_name || '?'
-          const code = a.employees?.employee_code || ''
+          const name = a.assigned_employee?.full_name || '?'
+          const code = a.assigned_employee?.employee_code || ''
           return (
             <span
               key={a.id}
-              title={`${name} (${code})${a.employees?.designation ? ' — ' + a.employees.designation : ''}`}
+              title={`${name} (${code})${a.assigned_employee?.designation ? ' — ' + a.assigned_employee.designation : ''}`}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: '4px',
                 padding: '2px 8px', borderRadius: '12px',
@@ -107,6 +107,11 @@ export function TeamTasksPage() {
 
         {loading ? (
           <TaskSkeleton />
+        ) : error ? (
+          <div className="empty-state">
+            <div className="empty-state-text">Team Tasks could not be loaded.</div>
+            <button className="btn btn-secondary" onClick={loadTasks} style={{ marginTop: 'var(--space-3)' }}>Retry</button>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No tasks found.</div></div>
         ) : (

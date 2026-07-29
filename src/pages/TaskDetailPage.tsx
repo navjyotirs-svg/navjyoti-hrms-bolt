@@ -245,9 +245,9 @@ export function TaskDetailPage() {
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                           width: '24px', height: '24px', borderRadius: '50%',
                           background: 'var(--teal)', color: 'white', fontSize: '10px', fontWeight: 600,
-                        }}>{(a.employees?.full_name || '?').trim().split(/\s+/).map((p: string) => p[0]).slice(0, 2).join('').toUpperCase()}</span>
-                        <span>{a.employees?.full_name || 'Unknown'}</span>
-                        {a.employees?.employee_code && <span style={{ color: 'var(--slate)', fontSize: '12px' }}>({a.employees.employee_code})</span>}
+                        }}>{(a.assigned_employee?.full_name || '?').trim().split(/\s+/).map((p: string) => p[0]).slice(0, 2).join('').toUpperCase()}</span>
+                        <span>{a.assigned_employee?.full_name || 'Unknown'}</span>
+                        {a.assigned_employee?.employee_code && <span style={{ color: 'var(--slate)', fontSize: '12px' }}>({a.assigned_employee.employee_code})</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
                         <span className={`attendance-badge ${a.assignment_status?.toLowerCase() || 'acceptance_pending'}`} style={{ fontSize: '11px' }}>

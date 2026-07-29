@@ -20,8 +20,8 @@ describe('Feature 1 — Assignee Display', () => {
   test('1. Single assignee name displays in Team Tasks', () => {
     const src = readFile('src/pages/TeamTasksPage.tsx')
     assert.ok(src.includes('AssigneeBadges'), 'AssigneeBadges component exists')
-    assert.ok(src.includes('employees?.full_name'), 'Employee full_name is used')
-    assert.ok(src.includes('employees?.employee_code'), 'Employee code is used')
+    assert.ok(src.includes('assigned_employee?.full_name'), 'Employee full_name is used via assigned_employee')
+    assert.ok(src.includes('assigned_employee?.employee_code'), 'Employee code is used')
   })
 
   test('2. Multiple assignee names display correctly', () => {
@@ -33,7 +33,7 @@ describe('Feature 1 — Assignee Display', () => {
   test('3. Employee IDs are not shown as names', () => {
     const src = readFile('src/pages/TeamTasksPage.tsx')
     assert.ok(!src.includes('assigned_to.slice'), 'Does not slice assigned_to UUID')
-    assert.ok(src.includes('employees?.full_name'), 'Uses employee name from join')
+    assert.ok(src.includes('assigned_employee?.full_name'), 'Uses employee name from join')
   })
 
   test('4. Mobile task card shows assignees', () => {
@@ -56,8 +56,8 @@ describe('Feature 1 — Assignee Display', () => {
 
   test('7. Task Details shows employee names with initials', () => {
     const src = readFile('src/pages/TaskDetailPage.tsx')
-    assert.ok(src.includes('employees?.full_name'), 'Employee name shown in details')
-    assert.ok(src.includes('employees?.employee_code'), 'Employee code shown in details')
+    assert.ok(src.includes('assigned_employee?.full_name'), 'Employee name shown in details')
+    assert.ok(src.includes('assigned_employee?.employee_code'), 'Employee code shown in details')
   })
 })
 

@@ -73,6 +73,7 @@ export interface TaskRow {
 export interface TaskAssignmentWithEmployee {
   id: string
   assigned_to: string
+  assigned_employee_id: string
   assignment_type: string
   is_current: boolean
   accepted_at: string | null
@@ -80,7 +81,7 @@ export interface TaskAssignmentWithEmployee {
   progress_percent: number
   submitted_at: string | null
   individual_outcome: string | null
-  employees?: {
+  assigned_employee?: {
     id: string
     employee_code: string
     full_name: string
@@ -116,9 +117,11 @@ export async function fetchTeamTasks() {
     .select(`
       *,
       task_assignments (
-        id, assigned_to, assignment_type, is_current, accepted_at,
+        id, assigned_to, assigned_employee_id, assignment_type, is_current, accepted_at,
         assignment_status, progress_percent, submitted_at, individual_outcome,
-        employees ( id, employee_code, full_name, designation )
+        assigned_employee:employees!task_assignments_assigned_employee_id_fkey (
+          id, employee_code, full_name, designation
+        )
       ),
       projects ( id, project_name, project_code )
     `)
@@ -133,9 +136,11 @@ export async function fetchTaskById(taskId: string) {
     .select(`
       *,
       task_assignments (
-        id, assigned_to, assignment_type, is_current, accepted_at, assigned_by, assigned_at,
+        id, assigned_to, assigned_employee_id, assignment_type, is_current, accepted_at, assigned_by, assigned_at,
         assignment_status, progress_percent, submitted_at, reviewed_at, individual_outcome, rejection_reason,
-        employees ( id, employee_code, full_name, designation )
+        assigned_employee:employees!task_assignments_assigned_employee_id_fkey (
+          id, employee_code, full_name, designation
+        )
       ),
       task_status_history (id, old_status, new_status, changed_by, reason, created_at),
       task_deadline_history (id, old_deadline, new_deadline, changed_by, change_reason, created_at),
@@ -444,7 +449,7 @@ export function formatDeadlineShort(deadlineAt: string | null, deadlineDate?: st
 export function formatAssignees(assignments: TaskAssignmentWithEmployee[]): string {
   const current = assignments.filter((a) => a.is_current && a.assignment_type === 'PRIMARY')
   const names = current
-    .map((a) => a.employees?.full_name || 'Unknown')
+    .map((a) => a.assigned_employee?.full_name || 'Unknown')
     .filter((n) => n !== 'Unknown')
   if (names.length === 0) return '—'
   if (names.length <= 2) return names.join(', ')

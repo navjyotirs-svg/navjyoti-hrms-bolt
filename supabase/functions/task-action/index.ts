@@ -271,6 +271,16 @@ async function notifyBusinessEvent(
   } catch { /* best-effort */ }
 }
 
+async function getEmployeeId(supabase: ReturnType<typeof createClient>, userId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("employees")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .maybeSingle();
+  return data?.id || null;
+}
+
 async function getCreatorName(supabase: ReturnType<typeof createClient>, userId: string): Promise<string> {
   try {
     const { data: profile } = await supabase
@@ -727,6 +737,7 @@ async function handleCreate(
   const assignmentsToInsert = uniqueAssigneeIds.map((assigneeId: string) => ({
     task_id: task.id,
     assigned_to: assigneeId,
+    assigned_employee_id: assigneeEmployeeMap.get(assigneeId)!,
     assigned_by: userId,
     assignment_type: "PRIMARY",
     assignment_status: acceptance_required ? "ACCEPTANCE_PENDING" : "ACCEPTED",
@@ -742,9 +753,11 @@ async function handleCreate(
   // Create collaborator assignments
   for (const c of collaborators) {
     if (!uniqueAssigneeIds.includes(c)) {
+      const collabEmpId = await getEmployeeId(supabase, c);
       await supabase.from("task_assignments").insert({
         task_id: task.id,
         assigned_to: c,
+        assigned_employee_id: collabEmpId,
         assigned_by: userId,
         assignment_type: "COLLABORATOR",
       });
@@ -754,9 +767,11 @@ async function handleCreate(
   // Create reviewer assignments
   for (const r of reviewers) {
     if (!uniqueAssigneeIds.includes(r) && !collaborators.includes(r)) {
+      const reviewerEmpId = await getEmployeeId(supabase, r);
       await supabase.from("task_assignments").insert({
         task_id: task.id,
         assigned_to: r,
+        assigned_employee_id: reviewerEmpId,
         assigned_by: userId,
         assignment_type: "REVIEWER",
       });
@@ -973,6 +988,7 @@ async function handleSelfAssign(
   await supabase.from("task_assignments").insert({
     task_id: task.id,
     assigned_to: userId,
+    assigned_employee_id: employee.id,
     assigned_by: userId,
     assignment_type: "PRIMARY",
     is_current: true,

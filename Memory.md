@@ -2988,3 +2988,64 @@ NOT YET PERFORMED — requires browser testing. The user should:
 - Task exports not updated to include assignee names (exports module doesn't reference task_assignments)
 - Recurring-task generated instances use the old single-assignee `assigned_employee_id` field — multi-assignee recurring templates not yet supported
 - Dashboard task drill-downs not updated for assignee names (Dashboard doesn't directly query task_assignments)
+
+
+## Team Tasks Assignee Relationship Fix — completed 2026-07-29
+
+### Problem
+Production error: "Could not find a relationship between 'task_assignments' and 'employees' in the schema cache"
+Team Tasks screen showed no tasks because PostgREST could not resolve the embedded join.
+
+### Root Cause
+- `task_assignments.assigned_to` stores `auth.users.id` (confirmed: every value matches both `auth.users.id` and `employees.user_id`)
+- NO foreign key constraint existed on `assigned_to` to any table
+- PostgREST requires a real PostgreSQL FK to detect relationships for embedded joins
+- The query `task_assignments ( employees (...) )` failed because no FK path existed
+
+### Inspection Results
+1. **Assignment column found:** `task_assignments.assigned_to` (uuid, NOT NULL)
+2. **What it stores:** `auth.users.id` / `user_profiles.id` (same UUID space)
+3. **Existing FK on assigned_to:** NONE — no constraint existed
+4. **Multiple FKs to employees:** None on task_assignments (only `tasks.assigned_employee_id` had one)
+5. **employees.user_id FK:** references `user_profiles.id`, NOT unique-constrained
+
+### Fix Applied
+1. **Migration `fix_task_assignments_employee_fk`:**
+   - Added `assigned_employee_id uuid` column to `task_assignments`
+   - Backfilled from existing data: `UPDATE task_assignments SET assigned_employee_id = e.id FROM employees e WHERE e.user_id = assigned_to`
+   - All 19 rows matched (0 orphans, 0 duplicates)
+   - Made NOT NULL after backfill
+   - Added FK constraint `task_assignments_assigned_employee_id_fkey` → `employees(id)` ON DELETE RESTRICT
+   - Added index `idx_task_assignments_employee`
+   - Reloaded PostgREST schema cache: `NOTIFY pgrst, 'reload schema'`
+
+2. **Edge function `task-action` updated:**
+   - `handleCreate`: writes `assigned_employee_id` for primary, collaborator, and reviewer assignments
+   - Added `getEmployeeId()` helper to resolve `auth.users.id` → `employees.id`
+   - `handleSelfAssign`: writes `assigned_employee_id` from employee record
+
+3. **Frontend queries fixed:**
+   - `fetchTeamTasks`: uses `assigned_employee:employees!task_assignments_assigned_employee_id_fkey ( id, employee_code, full_name, designation )`
+   - `fetchTaskById`: same FK-hinted embed
+   - Type interface: `employees?` → `assigned_employee?` field
+   - TeamTasksPage: `a.employees?.full_name` → `a.assigned_employee?.full_name`
+   - TaskDetailPage: same rename
+   - `formatAssignees` in tasks.ts: same rename
+
+4. **Error vs empty state:**
+   - Query error: "Team Tasks could not be loaded." + Retry button
+   - Empty result: "No tasks found."
+   - Separate states, no false "no tasks" when query fails
+
+### Verification
+- FK constraint exists in database: confirmed
+- All 19 assignment rows have `assigned_employee_id` populated: confirmed
+- 54 tests pass (41 task_management + 13 fk_fix)
+- TypeScript: PASS
+- Production build: PASS
+- Browser testing on https://hrms.ngspl.com: NOT YET PERFORMED — user should verify
+
+### Old column preserved
+- `assigned_to` (auth.users.id) remains for backward compatibility
+- `assigned_employee_id` (employees.id) is the canonical FK for PostgREST joins
+- Both columns are populated on every new assignment
