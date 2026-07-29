@@ -196,7 +196,7 @@ export async function fetchPendingReviews() {
       *,
       employees!inner (id, employee_code, first_name, last_name, designation)
     `)
-    .eq('status', 'submitted')
+    .eq('status', 'SUBMITTED')
     .order('submitted_at', { ascending: true })
   if (error) throw error
   return data || []

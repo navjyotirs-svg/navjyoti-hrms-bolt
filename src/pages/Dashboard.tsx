@@ -191,7 +191,7 @@ export function Dashboard() {
           const { count: reviewCount } = await supabase
             .from('daily_reports')
             .select('*', { count: 'exact', head: true })
-            .eq('status', 'submitted')
+            .eq('status', 'SUBMITTED')
           updates.pendingReviews = reviewCount ?? 0
         }
 

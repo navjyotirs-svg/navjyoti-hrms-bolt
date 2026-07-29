@@ -105,7 +105,7 @@ export function DailyReportPage() {
     } catch { /* best-effort */ }
   }
 
-  const isReadOnly = !!(existing && !['draft', 'returned'].includes(existing.status))
+  const isReadOnly = !!(existing && !['DRAFT', 'RETURNED_FOR_CORRECTION'].includes(existing.status))
 
   async function ensureDraft(): Promise<{ reportId: string; employeeId: string; orgId: string } | null> {
     if (existing?.id) {

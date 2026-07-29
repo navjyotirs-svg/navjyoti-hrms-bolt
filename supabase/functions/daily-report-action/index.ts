@@ -283,7 +283,7 @@ async function handleSaveDraft(
     .eq("report_date", reportDate)
     .maybeSingle();
 
-  if (existing && !["draft", "returned"].includes(existing.status))
+  if (existing && !["DRAFT", "RETURNED_FOR_CORRECTION"].includes(existing.status))
     return errorResponse("Report already submitted", 400);
 
   let reportId: string;
@@ -307,11 +307,11 @@ async function handleSaveDraft(
         overall_result: overall_result || "", pending_work: pending_work || "",
         blockers: blockers || "", support_required: support_required || "",
         follow_up_required: follow_up_required || false, tomorrow_plan: tomorrow_plan || "",
-        status: "draft",
+        status: "DRAFT",
       }).select().single();
     if (error) return errorResponse(`Failed to create draft: ${error.message}`, 500);
     reportId = newReport.id;
-    await insertHistory(supabase, reportId, "created", null, "draft", userId);
+    await insertHistory(supabase, reportId, "CREATED", null, "DRAFT", userId);
   }
 
   if (task_items.length > 0) {
@@ -358,11 +358,11 @@ async function handleSubmit(
     .from("daily_reports").select("id, status, version")
     .eq("employee_id", employee.id).eq("report_date", reportDate).maybeSingle();
 
-  const newStatus = "submitted";
+  const newStatus = "SUBMITTED";
   let reportId: string;
 
   if (existing) {
-    if (!["draft", "returned"].includes(existing.status))
+    if (!["DRAFT", "RETURNED_FOR_CORRECTION"].includes(existing.status))
       return errorResponse("Report already submitted", 400);
     await supabase.from("daily_reports").update({
       overall_summary, work_planned: work_planned || "", work_completed: work_completed || "",
@@ -373,7 +373,7 @@ async function handleSubmit(
       version: existing.version + 1,
     }).eq("id", existing.id);
     reportId = existing.id;
-    await insertHistory(supabase, reportId, "submitted", existing.status, newStatus, userId);
+    await insertHistory(supabase, reportId, "SUBMITTED", existing.status, newStatus, userId);
   } else {
     const { data: newReport, error } = await supabase
       .from("daily_reports").insert({
@@ -388,8 +388,8 @@ async function handleSubmit(
       }).select().single();
     if (error) return errorResponse(`Failed to submit: ${error.message}`, 500);
     reportId = newReport.id;
-    await insertHistory(supabase, reportId, "created", null, newStatus, userId);
-    await insertHistory(supabase, reportId, "submitted", null, newStatus, userId);
+    await insertHistory(supabase, reportId, "CREATED", null, newStatus, userId);
+    await insertHistory(supabase, reportId, "SUBMITTED", null, newStatus, userId);
   }
 
   if (task_items.length > 0) {
@@ -482,10 +482,10 @@ async function handleReview(
     .from("daily_reports").select("id, status, employee_id, report_date")
     .eq("id", report_id).single();
   if (!report) return errorResponse("Report not found", 404);
-  if (report.status !== "submitted")
+  if (report.status !== "SUBMITTED")
     return errorResponse(`Cannot review report in status: ${report.status}`, 400);
 
-  const newStatus = decision === "approved" ? "approved" : "returned";
+  const newStatus = decision === "approved" ? "REVIEWED" : "RETURNED_FOR_CORRECTION";
   await supabase.from("daily_reports").update({
     status: newStatus, reviewed_at: new Date().toISOString(), reviewed_by: userId,
     manager_comments: manager_comments || null,
@@ -530,15 +530,15 @@ async function handleReopen(
     .from("daily_reports").select("id, status, employee_id, report_date")
     .eq("id", report_id).single();
   if (!report) return errorResponse("Report not found", 404);
-  if (!["approved", "submitted"].includes(report.status))
+  if (!["REVIEWED", "SUBMITTED"].includes(report.status))
     return errorResponse(`Cannot reopen report in status: ${report.status}`, 400);
 
   await supabase.from("daily_reports").update({
-    status: "returned", reopened_at: new Date().toISOString(), reopened_by: userId,
+    status: "REOPENED", reopened_at: new Date().toISOString(), reopened_by: userId,
     manager_comments: reason,
   }).eq("id", report_id);
 
-  await insertHistory(supabase, report_id, "reopened", report.status, "returned", userId, reason);
+  await insertHistory(supabase, report_id, "REOPENED", report.status, "REOPENED", userId, reason);
 
   const { data: emp } = await supabase
     .from("employees").select("user_id").eq("id", report.employee_id).single();
@@ -550,7 +550,7 @@ async function handleReopen(
   }
 
   await writeAudit(supabase, userId, "daily_report.reopen", "daily_report", report_id,
-    { status: report.status }, { status: "returned" });
+    { status: report.status }, { status: "REOPENED" });
 
   return successResponse({ message: "Report reopened" });
 }

@@ -46,11 +46,11 @@ export function TeamReportsPage() {
 
   const stats = {
     total: reports.length,
-    submitted: reports.filter(r => r.status === 'submitted').length,
-    approved: reports.filter(r => r.status === 'approved').length,
-    draft: reports.filter(r => r.status === 'draft').length,
-    late: reports.filter(r => r.status === 'late').length,
-    returned: reports.filter(r => r.status === 'returned').length,
+    submitted: reports.filter(r => r.status === 'SUBMITTED').length,
+    approved: reports.filter(r => r.status === 'REVIEWED').length,
+    draft: reports.filter(r => r.status === 'DRAFT').length,
+    late: reports.filter(r => r.status === 'LATE').length,
+    returned: reports.filter(r => r.status === 'RETURNED_FOR_CORRECTION').length,
   }
 
   return (
