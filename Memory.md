@@ -3159,14 +3159,106 @@ Exact recursive chain:
 - TypeScript: PASS
 - Production build: PASS
 
-### Manual Production Verification
-NOT YET PERFORMED — user should test on https://hrms.ngspl.com:
-1. Login as Director → Voice Notes → no recursion error
-2. Select employee → record → preview → send
-3. Sent Voice Notes shows the new note
-4. Login as employee → Voice Notes → no Access Denied
-5. Received Voice Notes shows the note with sender name
-6. Click notification → opens exact voice note
-7. Play audio → works
-8. Acknowledge → works
-9. Sender sees played/acknowledged status update
+### Manual Production Verification (RLS + Access)
+COMPLETED 2026-07-29 — RLS recursion eliminated, Access Denied resolved.
+
+## Voice Notes Playback Fix — completed 2026-07-29
+
+### Problem
+Voice notes were created and received successfully, but audio playback showed 0:00/0:00 and clicking Play did nothing. Affected both employee and Director/Manager views.
+
+### Root Causes (3 issues found)
+
+**1. Audio player chicken-and-egg (primary):**
+- The "Play" button called `setSelectedId` to show the audio element
+- The audio element had NO `src` attribute
+- `handlePlay` was only called via the `onPlay` event — which can't fire without a source
+- User clicked Play, saw an empty player with 0:00/0:00, nothing happened
+
+**2. Tiny Blob sizes (secondary):**
+- Existing notes: 1738 bytes for 7s, 1486 bytes for 6s — far too small for valid WebM audio (should be 10K+)
+- `MediaRecorder.start()` was called without `timeslice`, so chunks weren't collected properly
+- MIME type `audio/webm` used instead of `audio/webm;codecs=opus`
+
+**3. Sent/Received query overlap:**
+- `fetchReceivedVoiceNotes` queried `voice_note_recipients` without filtering by `recipient_user_id`
+- RLS policy allowed senders to see their own sent notes' recipient rows
+- This made sent notes appear in the Received list
+
+### Fixes Applied
+
+**Migration `add_playback_status_to_voice_notes`:**
+- Added `playback_status` column (DEFAULT 'READY')
+- Marked existing corrupt notes (< 500 bytes webm) as CORRUPT
+- Both existing notes correctly marked CORRUPT
+
+**voiceNotes.ts changes:**
+- MIME detection: `audio/webm;codecs=opus` → `audio/webm` → `audio/ogg;codecs=opus` → `audio/mp4`
+- `mimeToExtension()` mapping: webm→.webm, ogg→.ogg, mp4→.m4a
+- `uploadVoiceNote()`: uses `new File([blob], filename, { type: mimeType })` with `contentType` and `upsert: false`
+- `fetchReceivedVoiceNotes()`: filters by `.eq('recipient_user_id', userId)` — only actual recipients
+- `fetchSentVoiceNotes()`: filters by `.eq('sender_user_id', userId)` — only sender's notes
+- New `getPlaybackUrl(voiceNoteId)`: calls edge function `get_playback_url` action
+- New `PlaybackUrlResult` type: signedUrl, mimeType, fileSizeBytes, durationSeconds, expiresInSeconds, correlationId
+- Removed `createVoiceNoteSignedUrl` (replaced by server-side `getPlaybackUrl`)
+
+**VoiceNotesPage.tsx changes:**
+- Recording: `MediaRecorder.start(1000)` with 1s timeslice for proper chunk collection
+- Blob validation: checks `finalBlob.size === 0` → EMPTY_RECORDING, `> MAX_FILE_SIZE_BYTES` → AUDIO_TOO_LARGE
+- Local preview: `onLoadedMetadata` handler with WebM Infinity-duration fix (seek to 1e101)
+- Send disabled until `previewValid` is true
+- Audio player lifecycle: Play → `handleShowPlayer` → `getPlaybackUrl` → set src → `preload="metadata"`
+- Player states: idle → loading → ready / error
+- `onPlaying` event fires `handleAudioPlaying` → marks Heard + records play
+- `onError` handler: clears URL, shows "secure playback link expired", offers Retry
+- Hide Player: pauses audio and clears `src`
+- CORRUPT/MISSING notes: show "Audio recording is unavailable" / "file could not be found", no Play button
+- New/Heard/Acknowledged: New only when not played and not unavailable; Heard requires first_played_at; Acknowledged only via explicit button click
+
+**Edge function `voice-note-action` changes:**
+- New `get_playback_url` action → `handleGetPlaybackUrl`:
+  1. Authenticates caller
+  2. Validates sender or recipient
+  3. Validates org membership
+  4. Verifies storage object exists and size > 0
+  5. Marks CORRUPT if zero bytes
+  6. Generates 120-second signed URL
+  7. Returns: signedUrl, mimeType, fileSizeBytes, durationSeconds, expiresInSeconds, correlationId
+
+**Deleted:**
+- `src/pages/MyVoiceNotesPage.tsx` (merged into VoiceNotesPage, was causing import errors)
+
+### Tests
+- `src/lib/__tests__/voice_notes_playback.test.ts` — 46 tests covering:
+  - MIME type detection (4 tests)
+  - Blob validation (4 tests)
+  - Local preview validation (4 tests)
+  - Storage upload (3 tests)
+  - Playback URL function (7 tests)
+  - Audio player lifecycle (7 tests)
+  - Query corrections (3 tests)
+  - Playback status handling (4 tests)
+  - State consistency (4 tests)
+  - Error UX (4 tests)
+  - Production build (2 tests)
+- All 46 tests PASS
+- TypeScript: PASS
+- Production build: PASS
+
+### Manual Production Verification (Playback)
+NOT YET PERFORMED — user should test on https://hrms.ngspl.com with a NEWLY RECORDED voice note:
+1. Director → Voice Notes → Record & Send
+2. Select Jay Kumar → record 10+ seconds → stop
+3. Confirm local preview shows valid duration (not 0:00)
+4. Play local preview → audio should be audible
+5. Send voice note
+6. Sent Voice Notes shows valid duration
+7. Login as Jay Kumar → Voice Notes → Received
+8. Click Play → "Loading voice note…" appears
+9. Audio player loads with valid duration
+10. Audio is audible
+11. Status changes to Heard
+12. Click Acknowledge → Acknowledged status appears
+13. Sender sees first-played and acknowledged update without reload
+14. Old corrupt notes show "Audio recording is unavailable" instead of broken player
+

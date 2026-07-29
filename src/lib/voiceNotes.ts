@@ -33,6 +33,7 @@ export interface VoiceNoteRow {
   file_size_bytes: number
   duration_seconds: number | null
   status: string
+  playback_status: string | null
   created_at: string
   deleted_at: string | null
   sender_employee?: {
@@ -65,6 +66,10 @@ export type ReceivedNote = VoiceNoteRow & { voice_note_recipients: VoiceNoteReci
 export type SentNote = VoiceNoteRow & { voice_note_recipients: VoiceNoteRecipientRow[] }
 
 export async function fetchReceivedVoiceNotes(): Promise<ReceivedNote[]> {
+  const { data: session } = await supabase.auth.getSession()
+  const userId = session.session?.user?.id
+  if (!userId) throw new Error('DATABASE_POLICY_ERROR')
+
   const { data, error } = await supabase
     .from('voice_note_recipients')
     .select(`
@@ -76,6 +81,7 @@ export async function fetchReceivedVoiceNotes(): Promise<ReceivedNote[]> {
         )
       )
     `)
+    .eq('recipient_user_id', userId)
     .order('created_at', { ascending: false })
   if (error) throw new Error('DATABASE_POLICY_ERROR')
   return (data ?? []).map((r: any) => ({
@@ -85,6 +91,10 @@ export async function fetchReceivedVoiceNotes(): Promise<ReceivedNote[]> {
 }
 
 export async function fetchSentVoiceNotes(): Promise<SentNote[]> {
+  const { data: session } = await supabase.auth.getSession()
+  const userId = session.session?.user?.id
+  if (!userId) throw new Error('DATABASE_POLICY_ERROR')
+
   const { data, error } = await supabase
     .from('voice_notes')
     .select(`
@@ -96,6 +106,7 @@ export async function fetchSentVoiceNotes(): Promise<SentNote[]> {
         )
       )
     `)
+    .eq('sender_user_id', userId)
     .eq('status', 'SENT')
     .order('created_at', { ascending: false })
   if (error) throw new Error('DATABASE_POLICY_ERROR')
@@ -123,23 +134,56 @@ export async function fetchVoiceNoteById(voiceNoteId: string): Promise<ReceivedN
   return data as ReceivedNote | null
 }
 
+const MIME_TO_EXT: Record<string, string> = {
+  'audio/webm;codecs=opus': 'webm',
+  'audio/webm': 'webm',
+  'audio/ogg;codecs=opus': 'ogg',
+  'audio/ogg': 'ogg',
+  'audio/mp4': 'm4a',
+  'audio/mpeg': 'mp3',
+}
+
+export function getSupportedAudioMimeType(): string | null {
+  if (typeof MediaRecorder === 'undefined') return null
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/mp4',
+  ]
+  for (const t of candidates) {
+    if (MediaRecorder.isTypeSupported(t)) return t
+  }
+  return null
+}
+
+export function mimeToExtension(mimeType: string): string {
+  return MIME_TO_EXT[mimeType] ?? 'webm'
+}
+
 export async function uploadVoiceNote(userId: string, blob: Blob, mimeType: string): Promise<string> {
-  const ext = mimeType.split('/')[1] ?? 'webm'
-  const path = `${userId}/${crypto.randomUUID()}.${ext}`
+  const ext = mimeToExtension(mimeType)
+  const filename = `${crypto.randomUUID()}.${ext}`
+  const path = `${userId}/${filename}`
+  const file = new File([blob], filename, { type: mimeType })
   const { error } = await supabase.storage
     .from('voice-notes')
-    .upload(path, blob, { contentType: mimeType })
-
+    .upload(path, file, { contentType: mimeType, upsert: false })
   if (error) throw new Error('AUDIO_UPLOAD_FAILED')
   return path
 }
 
-export async function createVoiceNoteSignedUrl(path: string): Promise<string | null> {
-  const { data, error } = await supabase.storage
-    .from('voice-notes')
-    .createSignedUrl(path, 120)
-  if (error || !data?.signedUrl) return null
-  return data.signedUrl
+export interface PlaybackUrlResult {
+  signedUrl: string
+  mimeType: string
+  fileSizeBytes: number
+  durationSeconds: number | null
+  expiresInSeconds: number
+  correlationId: string
+}
+
+export async function getPlaybackUrl(voiceNoteId: string): Promise<PlaybackUrlResult> {
+  return callVoiceNoteAction('get_playback_url', { voice_note_id: voiceNoteId })
 }
 
 export async function sendVoiceNote(payload: {
@@ -165,13 +209,4 @@ export async function acknowledgeVoiceNote(voice_note_id: string) {
 
 export async function deleteVoiceNote(voice_note_id: string) {
   return callVoiceNoteAction('delete', { voice_note_id })
-}
-
-export function getSupportedAudioMimeType(): string | null {
-  const types = ['audio/webm', 'audio/ogg', 'audio/mp4']
-  if (typeof MediaRecorder === 'undefined') return null
-  for (const t of types) {
-    if (MediaRecorder.isTypeSupported(t)) return t
-  }
-  return null
 }

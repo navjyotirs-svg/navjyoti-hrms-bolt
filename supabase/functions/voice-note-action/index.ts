@@ -63,6 +63,8 @@ Deno.serve(async (req: Request) => {
         return await handleAcknowledge(admin, body, callerId);
       case "delete":
         return await handleDelete(admin, body, callerId, orgId);
+      case "get_playback_url":
+        return await handleGetPlaybackUrl(admin, body, callerId, orgId);
       default:
         return jsonError(400, `Unknown action: ${action}`);
     }
@@ -276,6 +278,64 @@ async function handleAcknowledge(
     .eq("id", recipient.id);
 
   return jsonResponse(200, { message: "Acknowledged" });
+}
+
+async function handleGetPlaybackUrl(
+  admin: ReturnType<typeof createClient>,
+  body: any,
+  callerId: string,
+  orgId: string
+) {
+  const { voice_note_id } = body;
+  if (!voice_note_id) return jsonError(400, "voice_note_id is required");
+
+  const { data: voiceNote } = await admin
+    .from("voice_notes")
+    .select("id, sender_user_id, storage_path, mime_type, file_size_bytes, duration_seconds, organization_id, status, deleted_at")
+    .eq("id", voice_note_id)
+    .maybeSingle();
+
+  if (!voiceNote || voiceNote.deleted_at) return jsonError(404, "VOICE_NOTE_NOT_FOUND");
+
+  if (voiceNote.organization_id !== orgId) return jsonError(403, "VOICE_NOTE_ACCESS_DENIED");
+
+  const isSender = voiceNote.sender_user_id === callerId;
+  let isRecipient = false;
+  if (!isSender) {
+    const { data: recipient } = await admin
+      .from("voice_note_recipients")
+      .select("id")
+      .eq("voice_note_id", voice_note_id)
+      .eq("recipient_user_id", callerId)
+      .maybeSingle();
+    isRecipient = !!recipient;
+  }
+  if (!isSender && !isRecipient) return jsonError(403, "VOICE_NOTE_ACCESS_DENIED");
+
+  const { data: fileData } = await admin.storage.from("voice-notes").list(voiceNote.storage_path.split("/")[0], { limit: 1000 });
+  const fileName = voiceNote.storage_path.split("/").slice(1).join("/");
+  const fileInfo = fileData?.find((f: any) => f.name === fileName);
+  if (!fileInfo || (fileInfo.metadata?.size ?? 0) === 0) {
+    await admin.from("voice_notes").update({ playback_status: "CORRUPT" }).eq("id", voice_note_id);
+    return jsonError(422, "CORRUPT");
+  }
+
+  const { data: signedUrlData, error: signedUrlError } = await admin.storage
+    .from("voice-notes")
+    .createSignedUrl(voiceNote.storage_path, 120);
+
+  if (signedUrlError || !signedUrlData?.signedUrl) {
+    return jsonError(500, "PLAYBACK_URL_FAILED");
+  }
+
+  return jsonResponse(200, {
+    signedUrl: signedUrlData.signedUrl,
+    mimeType: voiceNote.mime_type,
+    fileSizeBytes: voiceNote.file_size_bytes,
+    durationSeconds: voiceNote.duration_seconds,
+    expiresInSeconds: 120,
+    correlationId: crypto.randomUUID(),
+  });
 }
 
 async function handleDelete(

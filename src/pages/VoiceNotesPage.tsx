@@ -7,7 +7,7 @@ import {
   fetchReceivedVoiceNotes,
   uploadVoiceNote,
   sendVoiceNote,
-  createVoiceNoteSignedUrl,
+  getPlaybackUrl,
   recordVoiceNotePlay,
   acknowledgeVoiceNote,
   getSupportedAudioMimeType,
@@ -107,12 +107,14 @@ function RecordTab({ profileId }: { profileId?: string }) {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
   const [sendSuccess, setSendSuccess] = useState<string | null>(null)
+  const [previewValid, setPreviewValid] = useState(false)
+  const [previewDuration, setPreviewDuration] = useState<number | null>(null)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
   const mimeTypeRef = useRef<string | null>(null)
   const requestIdRef = useRef<string>('')
 
@@ -136,6 +138,7 @@ function RecordTab({ profileId }: { profileId?: string }) {
   async function startRecording() {
     setSendError(null); setSendSuccess(null)
     setRecordedBlob(null); setRecordedUrl(null); setElapsed(0)
+    setPreviewValid(false); setPreviewDuration(null)
 
     if (typeof MediaRecorder === 'undefined' || !mimeTypeRef.current) {
       setSendError('RECORDING_NOT_SUPPORTED')
@@ -153,15 +156,24 @@ function RecordTab({ profileId }: { profileId?: string }) {
 
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current! })
-        if (blob.size === 0) { setSendError('EMPTY_RECORDING'); cleanupStream(); return }
-        if (blob.size > MAX_FILE_SIZE_BYTES) { setSendError('AUDIO_TOO_LARGE'); cleanupStream(); return }
-        setRecordedBlob(blob)
-        setRecordedUrl(URL.createObjectURL(blob))
+        const finalBlob = new Blob(chunksRef.current, { type: mimeTypeRef.current! })
+        if (finalBlob.size === 0) {
+          setSendError('EMPTY_RECORDING')
+          cleanupStream()
+          return
+        }
+        if (finalBlob.size > MAX_FILE_SIZE_BYTES) {
+          setSendError('AUDIO_TOO_LARGE')
+          cleanupStream()
+          return
+        }
+        const url = URL.createObjectURL(finalBlob)
+        setRecordedBlob(finalBlob)
+        setRecordedUrl(url)
         cleanupStream()
       }
 
-      recorder.start()
+      recorder.start(1000)
       setRecording(true); setPaused(false)
       timerRef.current = setInterval(() => {
         setElapsed((prev) => {
@@ -200,17 +212,46 @@ function RecordTab({ profileId }: { profileId?: string }) {
     setRecordedBlob(null)
     if (recordedUrl) URL.revokeObjectURL(recordedUrl)
     setRecordedUrl(null); setElapsed(0); setSendError(null); setSendSuccess(null)
+    setPreviewValid(false); setPreviewDuration(null)
   }
 
   useEffect(() => {
     return () => { if (timerRef.current) clearInterval(timerRef.current); cleanupStream(); if (recordedUrl) URL.revokeObjectURL(recordedUrl) }
   }, [])
 
+  function handlePreviewLoadedMetadata() {
+    const audio = previewAudioRef.current
+    if (!audio) return
+    const dur = audio.duration
+    if (dur === Infinity || isNaN(dur)) {
+      audio.currentTime = 1e101
+      audio.ontimeupdate = () => {
+        audio.ontimeupdate = null
+        const realDur = audio.duration
+        if (realDur !== Infinity && !isNaN(realDur) && realDur > 0) {
+          setPreviewDuration(realDur)
+          setPreviewValid(true)
+        } else {
+          setPreviewDuration(elapsed)
+          setPreviewValid(true)
+        }
+        audio.currentTime = 0
+      }
+    } else if (dur > 0) {
+      setPreviewDuration(dur)
+      setPreviewValid(true)
+    } else {
+      setPreviewDuration(elapsed)
+      setPreviewValid(true)
+    }
+  }
+
   async function handleSend(e: FormEvent) {
     e.preventDefault()
     if (!profileId) return
     if (!recipientId) { setSendError('Please select a recipient.'); return }
     if (!recordedBlob) { setSendError('EMPTY_RECORDING'); return }
+    if (!previewValid) { setSendError('Please wait for the preview to load before sending.'); return }
 
     setSendError(null); setSendSuccess(null); setUploadProgress(0)
     requestIdRef.current = crypto.randomUUID()
@@ -292,12 +333,20 @@ function RecordTab({ profileId }: { profileId?: string }) {
           {recordedBlob && !recording && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
               <div style={{ fontSize: '13px', color: 'var(--slate)' }}>
-                Recorded: {formatDuration(elapsed)} · {(recordedBlob.size / (1024 * 1024)).toFixed(2)} MB
+                Recorded: {formatDuration(previewDuration ?? elapsed)} · {(recordedBlob.size / (1024 * 1024)).toFixed(2)} MB · {recordedBlob.type}
+                {!previewValid && <span style={{ marginLeft: 'var(--space-2)' }}>(loading preview…)</span>}
               </div>
-              <audio ref={audioRef} src={recordedUrl ?? undefined} controls style={{ width: '100%' }} />
+              <audio
+                ref={previewAudioRef}
+                src={recordedUrl ?? undefined}
+                controls
+                preload="metadata"
+                onLoadedMetadata={handlePreviewLoadedMetadata}
+                style={{ width: '100%' }}
+              />
               <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
                 <button type="button" className="btn btn-secondary" onClick={resetRecording}>↺ Re-record</button>
-                <button type="submit" className="btn" disabled={uploadProgress !== null && uploadProgress < 100}>
+                <button type="submit" className="btn" disabled={!previewValid || (uploadProgress !== null && uploadProgress < 100)}>
                   {uploadProgress !== null && uploadProgress < 100 ? `Sending… ${uploadProgress}%` : 'Send Voice Note'}
                 </button>
               </div>
@@ -380,16 +429,20 @@ function SentTab() {
   )
 }
 
+type PlayerState = 'idle' | 'loading' | 'ready' | 'error'
+
 function ReceivedTab({ voiceNoteId, canPlay, canAck, onClearId }: { voiceNoteId?: string; canPlay: boolean; canAck: boolean; onClearId: () => void }) {
   const [notes, setNotes] = useState<ReceivedNote[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<'all' | 'unheard' | 'heard' | 'acknowledged'>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({})
-  const [urlLoading, setUrlLoading] = useState<string | null>(null)
+  const [playerStates, setPlayerStates] = useState<Record<string, PlayerState>>({})
+  const [playerUrls, setPlayerUrls] = useState<Record<string, string>>({})
+  const [playerErrors, setPlayerErrors] = useState<Record<string, string>>({})
   const [playedSet, setPlayedSet] = useState<Set<string>>(new Set())
   const [acknowledging, setAcknowledging] = useState<string | null>(null)
+  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
   async function load() {
     setLoading(true); setError(null)
@@ -399,7 +452,10 @@ function ReceivedTab({ voiceNoteId, canPlay, canAck, onClearId }: { voiceNoteId?
       const played = new Set<string>()
       data.forEach((n) => { if (n.voice_note_recipients?.[0]?.first_played_at) played.add(n.id) })
       setPlayedSet(played)
-      if (voiceNoteId) setSelectedId(voiceNoteId)
+      if (voiceNoteId) {
+        setSelectedId(voiceNoteId)
+        setTimeout(() => handleShowPlayer(voiceNoteId), 300)
+      }
     } catch {
       setError('Voice notes could not be loaded.')
     } finally { setLoading(false) }
@@ -407,19 +463,43 @@ function ReceivedTab({ voiceNoteId, canPlay, canAck, onClearId }: { voiceNoteId?
 
   useEffect(() => { load() }, [])
 
-  async function handlePlay(note: ReceivedNote) {
-    if (!signedUrls[note.id]) {
-      setUrlLoading(note.id)
-      try {
-        const url = await createVoiceNoteSignedUrl(note.storage_path)
-        if (url) setSignedUrls((prev) => ({ ...prev, [note.id]: url }))
-        else setError('PLAYBACK_URL_FAILED')
-      } catch { setError('PLAYBACK_URL_FAILED') }
-      finally { setUrlLoading(null) }
+  async function handleShowPlayer(noteId: string) {
+    setSelectedId(noteId)
+    if (playerUrls[noteId]) {
+      setPlayerStates((prev) => ({ ...prev, [noteId]: 'ready' }))
+      return
     }
-    if (!playedSet.has(note.id)) {
-      setPlayedSet((prev) => new Set(prev).add(note.id))
-      try { await recordVoiceNotePlay(note.id) } catch { /* non-blocking */ }
+
+    setPlayerStates((prev) => ({ ...prev, [noteId]: 'loading' }))
+    setPlayerErrors((prev) => { const { [noteId]: _, ...rest } = prev; return rest })
+
+    try {
+      const result = await getPlaybackUrl(noteId)
+      setPlayerUrls((prev) => ({ ...prev, [noteId]: result.signedUrl }))
+      setPlayerStates((prev) => ({ ...prev, [noteId]: 'ready' }))
+    } catch {
+      setPlayerStates((prev) => ({ ...prev, [noteId]: 'error' }))
+      setPlayerErrors((prev) => ({ ...prev, [noteId]: 'Voice note could not be loaded. Please try again.' }))
+    }
+  }
+
+  function handleHidePlayer(noteId: string) {
+    setSelectedId(null)
+    const audio = audioRefs.current[noteId]
+    if (audio) { audio.pause(); audio.src = '' }
+    setPlayerStates((prev) => ({ ...prev, [noteId]: 'idle' }))
+  }
+
+  function handleAudioError(noteId: string) {
+    setPlayerStates((prev) => ({ ...prev, [noteId]: 'error' }))
+    setPlayerErrors((prev) => ({ ...prev, [noteId]: 'The secure playback link expired. Click Play to retry.' }))
+    setPlayerUrls((prev) => { const { [noteId]: _, ...rest } = prev; return rest })
+  }
+
+  function handleAudioPlaying(noteId: string) {
+    if (!playedSet.has(noteId)) {
+      setPlayedSet((prev) => new Set(prev).add(noteId))
+      recordVoiceNotePlay(noteId).catch(() => {})
     }
   }
 
@@ -473,6 +553,12 @@ function ReceivedTab({ voiceNoteId, canPlay, canAck, onClearId }: { voiceNoteId?
             const isPlayed = playedSet.has(note.id) || !!r?.first_played_at
             const isSelected = selectedId === note.id
             const senderName = note.sender_employee?.full_name ?? 'Management'
+            const playerState = playerStates[note.id] ?? 'idle'
+            const playerError = playerErrors[note.id]
+            const playbackStatus = note.playback_status
+
+            const showUnavailable = playbackStatus === 'CORRUPT' || playbackStatus === 'MISSING'
+            const playerUrl = playerUrls[note.id]
 
             return (
               <div key={note.id} style={{ padding: 'var(--space-4) var(--card-pad)', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
@@ -480,9 +566,10 @@ function ReceivedTab({ voiceNoteId, canPlay, canAck, onClearId }: { voiceNoteId?
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0, flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
                       <strong style={{ fontSize: '14px' }}>{note.title ?? '(Untitled)'}</strong>
-                      {!isPlayed && <span className="tag tag-rose">New</span>}
-                      {isPlayed && !isAck && <span className="tag tag-amber">Listened</span>}
+                      {!isPlayed && !showUnavailable && <span className="tag tag-rose">New</span>}
+                      {isPlayed && !isAck && <span className="tag tag-amber">Heard</span>}
                       {isAck && <span className="tag tag-teal">Acknowledged</span>}
+                      {showUnavailable && <span className="tag" style={{ background: 'var(--rose-100)', color: 'var(--rose-700)' }}>Unavailable</span>}
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--slate)' }}>
                       From {senderName} · {formatRelativeTime(note.created_at)} · {formatDuration(note.duration_seconds)}
@@ -492,12 +579,21 @@ function ReceivedTab({ voiceNoteId, canPlay, canAck, onClearId }: { voiceNoteId?
                 </div>
 
                 <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
-                  {canPlay && (
-                    <button className="btn btn-sm btn-secondary" onClick={() => { setSelectedId(isSelected ? null : note.id); if (!isSelected) onClearId() }}>
+                  {canPlay && !showUnavailable && (
+                    <button className="btn btn-sm btn-secondary" onClick={() => {
+                      if (isSelected) handleHidePlayer(note.id)
+                      else handleShowPlayer(note.id)
+                      onClearId()
+                    }}>
                       {isSelected ? 'Hide Player' : 'Play'}
                     </button>
                   )}
-                  {canAck && !isAck && (
+                  {showUnavailable && (
+                    <span style={{ fontSize: '13px', color: 'var(--rose-600)' }}>
+                      {playbackStatus === 'MISSING' ? 'The voice note file could not be found.' : 'Audio recording is unavailable.'}
+                    </span>
+                  )}
+                  {canAck && !isAck && !showUnavailable && (
                     <button className="btn btn-sm" onClick={() => handleAcknowledge(note.id)} disabled={acknowledging === note.id}>
                       {acknowledging === note.id ? 'Acknowledging…' : 'Acknowledge'}
                     </button>
@@ -506,12 +602,25 @@ function ReceivedTab({ voiceNoteId, canPlay, canAck, onClearId }: { voiceNoteId?
 
                 {isSelected && (
                   <div style={{ marginTop: 'var(--space-1)' }}>
-                    {urlLoading === note.id ? (
-                      <div style={{ fontSize: '13px', color: 'var(--slate)' }}>Loading audio…</div>
-                    ) : signedUrls[note.id] ? (
-                      <audio src={signedUrls[note.id]} controls onPlay={() => handlePlay(note)} style={{ width: '100%' }} />
-                    ) : (
-                      <audio controls onPlay={() => handlePlay(note)} style={{ width: '100%' }} />
+                    {playerState === 'loading' && (
+                      <div style={{ fontSize: '13px', color: 'var(--slate)' }}>Loading voice note…</div>
+                    )}
+                    {playerState === 'error' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--rose-600)' }}>{playerError ?? 'Voice note could not be loaded.'}</div>
+                        <button className="btn btn-sm btn-secondary" onClick={() => handleShowPlayer(note.id)}>Retry Playback</button>
+                      </div>
+                    )}
+                    {playerState === 'ready' && playerUrl && (
+                      <audio
+                        ref={(el) => { audioRefs.current[note.id] = el }}
+                        src={playerUrl}
+                        controls
+                        preload="metadata"
+                        onPlaying={() => handleAudioPlaying(note.id)}
+                        onError={() => handleAudioError(note.id)}
+                        style={{ width: '100%' }}
+                      />
                     )}
                   </div>
                 )}
