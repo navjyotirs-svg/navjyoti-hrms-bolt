@@ -90,6 +90,9 @@ const TABLE_TO_QUERIES: Record<string, QueryKey[]> = {
   recurring_task_templates: ['recurring-tasks', 'management-dashboard', 'my-tasks'],
   voice_notes: ['voice-notes', 'my-voice-notes', 'management-dashboard'],
   voice_note_recipients: ['my-voice-notes', 'voice-notes'],
+
+  task_drafts: [],
+  task_draft_assignees: [],
 }
 
 export function getQueriesForTable(table: string): QueryKey[] {

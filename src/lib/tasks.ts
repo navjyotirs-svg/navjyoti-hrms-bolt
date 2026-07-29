@@ -70,14 +70,32 @@ export interface TaskRow {
   task_cost_updated_at: string | null
 }
 
-export interface TaskWithAssignments extends TaskRow {
-  task_assignments: {
+export interface TaskAssignmentWithEmployee {
+  id: string
+  assigned_to: string
+  assignment_type: string
+  is_current: boolean
+  accepted_at: string | null
+  assignment_status: string
+  progress_percent: number
+  submitted_at: string | null
+  individual_outcome: string | null
+  employees?: {
     id: string
-    assigned_to: string
-    assignment_type: string
-    is_current: boolean
-    accepted_at: string | null
-  }[]
+    employee_code: string
+    full_name: string
+    designation: string | null
+  } | null
+}
+
+export interface TaskWithAssignments extends TaskRow {
+  deadline_at: string | null
+  task_assignments: TaskAssignmentWithEmployee[]
+  projects?: {
+    id: string
+    project_name: string
+    project_code: string
+  } | null
 }
 
 export async function fetchMyTasks() {
@@ -85,7 +103,7 @@ export async function fetchMyTasks() {
     .from('tasks')
     .select(`
       *,
-      task_assignments!inner (id, assigned_to, assignment_type, is_current, accepted_at)
+      task_assignments!inner (id, assigned_to, assignment_type, is_current, accepted_at, assignment_status, progress_percent, submitted_at, individual_outcome)
     `)
     .order('created_at', { ascending: false })
   if (error) throw error
@@ -97,7 +115,12 @@ export async function fetchTeamTasks() {
     .from('tasks')
     .select(`
       *,
-      task_assignments (id, assigned_to, assignment_type, is_current, accepted_at)
+      task_assignments (
+        id, assigned_to, assignment_type, is_current, accepted_at,
+        assignment_status, progress_percent, submitted_at, individual_outcome,
+        employees ( id, employee_code, full_name, designation )
+      ),
+      projects ( id, project_name, project_code )
     `)
     .order('created_at', { ascending: false })
   if (error) throw error
@@ -109,14 +132,19 @@ export async function fetchTaskById(taskId: string) {
     .from('tasks')
     .select(`
       *,
-      task_assignments (id, assigned_to, assignment_type, is_current, accepted_at, assigned_by, assigned_at),
+      task_assignments (
+        id, assigned_to, assignment_type, is_current, accepted_at, assigned_by, assigned_at,
+        assignment_status, progress_percent, submitted_at, reviewed_at, individual_outcome, rejection_reason,
+        employees ( id, employee_code, full_name, designation )
+      ),
       task_status_history (id, old_status, new_status, changed_by, reason, created_at),
       task_deadline_history (id, old_deadline, new_deadline, changed_by, change_reason, created_at),
       task_progress_updates (id, progress_percent, work_completed, result_so_far, blocker, support_required, hours_spent, created_at, employee_id),
       task_submissions (id, submission_note, result_summary, submitted_at, review_status, reviewed_by, reviewed_at, reviewer_feedback, submitted_by),
       task_comments (id, author_id, comment_text, is_internal, created_at, edited_at, deleted_at),
       task_attachments (id, storage_path, file_name, mime_type, file_size_bytes, attachment_category, uploaded_by, created_at),
-      task_dependencies!task_dependencies_task_id_fkey (id, depends_on_task_id, dependency_type, created_at)
+      task_dependencies!task_dependencies_task_id_fkey (id, depends_on_task_id, dependency_type, created_at),
+      projects ( id, project_name, project_code )
     `)
     .eq('id', taskId)
     .maybeSingle()
@@ -168,11 +196,13 @@ export async function createTask(payload: {
   project_id?: string
   title: string
   description: string
-  assignee_id: string
+  assignee_id?: string
+  assignee_ids?: string[]
   priority?: TaskPriority
   task_type?: TaskType
   start_date: string
-  deadline: string
+  deadline?: string
+  deadline_at?: string
   expected_result?: string
   target_quantity?: number | null
   target_unit?: string | null
@@ -184,6 +214,7 @@ export async function createTask(payload: {
   reviewers?: string[]
   dependencies?: string[]
   task_cost?: number | null
+  draft_id?: string
 }) {
   return callTaskAction('create', payload)
 }
@@ -395,4 +426,72 @@ export function formatDateTime(dateStr: string): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+export function formatDeadline(deadlineAt: string | null, deadlineDate?: string | null): string {
+  if (deadlineAt) return formatDateTime(deadlineAt)
+  if (deadlineDate) return formatDate(deadlineDate)
+  return '—'
+}
+
+export function formatDeadlineShort(deadlineAt: string | null, deadlineDate?: string | null): string {
+  if (!deadlineAt && !deadlineDate) return '—'
+  const d = new Date(deadlineAt || deadlineDate!)
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+}
+
+export function formatAssignees(assignments: TaskAssignmentWithEmployee[]): string {
+  const current = assignments.filter((a) => a.is_current && a.assignment_type === 'PRIMARY')
+  const names = current
+    .map((a) => a.employees?.full_name || 'Unknown')
+    .filter((n) => n !== 'Unknown')
+  if (names.length === 0) return '—'
+  if (names.length <= 2) return names.join(', ')
+  return `${names.slice(0, 2).join(', ')} +${names.length - 2}`
+}
+
+export function getAssigneeInitials(name: string): string {
+  if (!name) return '?'
+  const parts = name.trim().split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  return parts[0].slice(0, 2).toUpperCase()
+}
+
+export async function saveTaskDraft(payload: {
+  draft_id?: string
+  project_id?: string
+  title?: string
+  description?: string
+  priority?: string
+  expected_result?: string
+  target_quantity?: number | null
+  target_unit?: string | null
+  estimated_hours?: number | null
+  task_cost?: number | null
+  deadline_at?: string
+  start_date?: string
+  task_type?: string
+  acceptance_required?: boolean
+  branch_id?: string | null
+  department_id?: string | null
+  assignee_employee_ids?: string[]
+}) {
+  return callTaskAction('save_draft', payload)
+}
+
+export async function loadTaskDraft() {
+  return callTaskAction('load_draft', {})
+}
+
+export async function discardTaskDraft(draftId?: string) {
+  return callTaskAction('discard_draft', { draft_id: draftId })
+}
+
+export async function removeTaskAssignee(payload: {
+  task_id: string
+  assignment_id: string
+  reason?: string
+}) {
+  return callTaskAction('remove_assignee', payload)
 }

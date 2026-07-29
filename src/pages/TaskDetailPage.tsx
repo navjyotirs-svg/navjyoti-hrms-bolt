@@ -3,18 +3,18 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import {
   TASK_STATUS_LABELS, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS,
-  COMPLETION_OUTCOME_LABELS, ASSIGNMENT_TYPE_LABELS,
+  COMPLETION_OUTCOME_LABELS,
   TASK_REQUEST_TYPE_LABELS, TASK_REQUEST_STATUS_LABELS,
   SUBMISSION_REVIEW_LABELS, ATTACHMENT_CATEGORY_LABELS,
   DEPENDENCY_TYPE_LABELS,
   type TaskStatus, type TaskPriority, type TaskType, type CompletionOutcome,
-  type AssignmentType, type TaskRequestType, type TaskRequestStatus,
+  type TaskRequestType, type TaskRequestStatus,
   type SubmissionReviewStatus, type AttachmentCategory, type DependencyType,
 } from '@/types/roles'
 import {
   fetchTaskById, fetchTaskActionRequests, acceptTask,
   addProgressUpdate, submitTask, addTaskComment, uploadTaskAttachment,
-  createTaskAttachmentSignedUrl, formatDate, formatDateTime, formatTaskCost,
+  createTaskAttachmentSignedUrl, formatDate, formatDateTime, formatTaskCost, formatDeadline,
 } from '@/lib/tasks'
 import { DetailPageSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
@@ -201,11 +201,11 @@ export function TaskDetailPage() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Original Deadline</span>
-              <span className="mono" style={{ fontSize: '13px' }}>{formatDate(task.original_deadline)}</span>
+              <span className="mono" style={{ fontSize: '13px' }}>{formatDeadline(task.deadline_at, task.original_deadline)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Current Deadline</span>
-              <span className="mono" style={{ fontSize: '13px' }}>{formatDate(task.current_deadline)}</span>
+              <span className="mono" style={{ fontSize: '13px' }}>{formatDeadline(task.deadline_at, task.current_deadline)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Expected Result</span>
@@ -236,13 +236,25 @@ export function TaskDetailPage() {
 
             {task.task_assignments && task.task_assignments.length > 0 && (
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)' }}>
-                <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Assignments</span>
-                <div style={{ marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                  {task.task_assignments.map((a: any) => (
-                    <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                      <span className="mono">{a.assigned_to.slice(0, 8)}…</span>
-                      <span>{ASSIGNMENT_TYPE_LABELS[a.assignment_type as AssignmentType]} {a.is_current ? '(Current)' : ''}</span>
-                      {a.accepted_at && <span style={{ color: 'var(--teal)' }}>Accepted</span>}
+                <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Assignee-wise Status</span>
+                <div style={{ marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                  {task.task_assignments.filter((a: any) => a.is_current).map((a: any) => (
+                    <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: '24px', height: '24px', borderRadius: '50%',
+                          background: 'var(--teal)', color: 'white', fontSize: '10px', fontWeight: 600,
+                        }}>{(a.employees?.full_name || '?').trim().split(/\s+/).map((p: string) => p[0]).slice(0, 2).join('').toUpperCase()}</span>
+                        <span>{a.employees?.full_name || 'Unknown'}</span>
+                        {a.employees?.employee_code && <span style={{ color: 'var(--slate)', fontSize: '12px' }}>({a.employees.employee_code})</span>}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                        <span className={`attendance-badge ${a.assignment_status?.toLowerCase() || 'acceptance_pending'}`} style={{ fontSize: '11px' }}>
+                          {(a.assignment_status || 'ACCEPTANCE_PENDING').replace(/_/g, ' ')}
+                        </span>
+                        {a.progress_percent > 0 && <span style={{ color: 'var(--slate)' }}>{a.progress_percent}%</span>}
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -2880,3 +2880,111 @@ Migration `fix_attendance_rpc_finite_function` replaced the `finite()` call with
 - Build passes
 
 
+## Task Management Improvements — completed 2026-07-29
+
+### Objective
+Four task management improvements: (1) display assignee names in Team Tasks, (2) multi-assignee task creation, (3) mandatory deadline date and time, (4) preserve Assign Task form data across navigation. No new phases, no unrelated module changes, no payroll features.
+
+### 1. Exact reason assignee names were missing
+The `fetchTeamTasks` query in `src/lib/tasks.ts` selected `task_assignments` with only `assigned_to` (a UUID referencing `auth.users`), without joining to the `employees` table. The Team Tasks page had no way to resolve UUIDs to human-readable names. The `task_assignments.assigned_to` column stores `auth.users.id`, but employee names live in `employees.full_name` (linked via `employees.user_id`). No join existed between these tables in the query.
+
+### 2. Team Tasks query/UI changes
+- `fetchTeamTasks` now joins `task_assignments → employees (id, employee_code, full_name, designation)` and `tasks → projects (id, project_name, project_code)`
+- Desktop table columns: Code, Title, Project, Assignee(s), Priority, Status, Deadline, Cost, Outcome, Actions
+- Assignee column shows avatar initials + full name, with tooltip showing employee code and designation
+- Multiple assignees: first 3 shown as chips, "+N" for overflow
+- Mobile: responsive card layout (`.task-card-mobile`) with code, title, project, assignees, priority, deadline, cost
+- CSS: `.team-tasks-desktop` (hidden on mobile), `.team-tasks-mobile` (hidden on desktop) via media queries
+
+### 3. Multiple-assignment database model
+- `task_assignments` enhanced with: `assignment_status` (8 states: ACCEPTANCE_PENDING, ACCEPTED, REJECTED, REASSIGNMENT_REQUESTED, IN_PROGRESS, SUBMITTED, COMPLETED, CANCELLED), `progress_percent` (0-100), `submitted_at`, `reviewed_at`, `individual_outcome`, `rejection_reason`, `updated_at`
+- Unique index `idx_task_assign_unique_current` on `(task_id, assigned_to) WHERE is_current = true` prevents duplicate active assignments
+- One task → multiple PRIMARY assignments (one per selected employee)
+- Each assignment has independent status — one employee accepting does not change another's status
+- `updated_at` trigger added to `task_assignments`
+
+### 4. Assignment status aggregation rules
+`recalcOverallTaskStatus()` in the edge function computes overall task status from all current assignments:
+- All CANCELLED → CANCELLED
+- All COMPLETED → COMPLETED
+- Any REASSIGNMENT_REQUESTED → REASSIGNMENT_REQUESTED
+- All SUBMITTED or COMPLETED → SUBMITTED
+- All ACCEPTANCE_PENDING → ACCEPTANCE_PENDING
+- Any active (ACCEPTED, IN_PROGRESS, SUBMITTED, COMPLETED) → IN_PROGRESS
+- Aggregate status never replaces individual assignment statuses
+
+### 5. Deadline date/time implementation
+- `tasks.deadline_at timestamptz` added — canonical deadline with time (stored as UTC, displayed in Asia/Kolkata)
+- Existing date-only records backfilled: `deadline_at = current_deadline + 12:30 UTC` (6:00 PM IST)
+- Edge function: `deadline_at` preferred; falls back to `deadline` date with 6 PM IST default
+- Frontend: separate date and time inputs, combined into ISO string on submit
+- Validation: deadline must be in the future, must be after start date (both frontend and server)
+- Display: `formatDeadline()` shows date+time; `formatDeadlineShort()` for compact table cells
+- Updated in: Team Tasks, My Tasks, Task Details
+
+### 6. Draft persistence architecture
+- New tables: `task_drafts` (id, org_id, created_by, project_id, title, description, priority, expected_result, target_quantity, target_unit, estimated_hours, task_cost, deadline_at, start_date, task_type, acceptance_required, branch_id, department_id, last_saved_at, expires_at) and `task_draft_assignees` (draft_id, employee_id)
+- RLS: only draft creator can SELECT/INSERT/UPDATE/DELETE their own drafts; assignee access scoped through parent draft ownership
+- Autosave: 1200ms debounce after last change; status indicators (Saving…, Saved, Failed, Restored)
+- Restore flow: on page load, checks for existing draft → shows "An unfinished task draft was found" with Continue/Discard/Start New options
+- Draft cleared only on successful task creation or explicit discard — NOT on validation failure, route change, or network error
+- Edge function actions: `save_draft`, `load_draft`, `discard_draft`
+
+### 7. Project-creation preservation flow
+- "Create New Project" button opens modal without navigating away
+- Autosave fires before modal opens (form state already saved as draft)
+- After project creation, projects list reloads and new project is auto-selected
+- All form fields preserved (assignees, deadline, cost, expected result)
+
+### 8. Migrations created
+1. `phase10_task_management_improvements` — Added `deadline_at` to tasks, enhanced `task_assignments` with 6 new columns + unique index, created `task_drafts` and `task_draft_assignees` tables with RLS (7 policies), added `updated_at` trigger to `task_assignments`, backfilled `deadline_at` for existing records
+
+### 9. Edge Functions/RPCs changed
+- `task-action` — rewritten `handleCreate` (multi-assignee, deadline_at, draft cleanup), rewritten `handleAccept` (per-assignment status, overall status recalculation), new `handleSaveDraft`, `handleLoadDraft`, `handleDiscardDraft`, `handleRemoveAssignee`, new helpers `recalcOverallTaskStatus`, `getCreatorName`
+
+### 10. Notification changes
+- Multi-assignee creation: each assignee gets individual notification with unique dedup_key (`task_assigned:{task_id}:{assignee_id}`)
+- Supervisory summary notification: `"{creator} assigned '{title}' to N employee(s)."` sent to hr_admin, director, manager roles via `notifyBusinessEvent`
+- Assignee removal: affected employee notified with reason
+- Accept: unique dedup_key per accepting user (`task_accepted:{task_id}:{userId}`)
+
+### 11. Realtime changes
+- `task_drafts` and `task_draft_assignees` added to `supabase_realtime` publication
+- `queryClient.ts` invalidation map updated with `task_drafts` and `task_draft_assignees` entries
+- Existing realtime subscriptions for `tasks`, `task_assignments`, `task_status_history`, `task_submissions` remain active
+
+### 12. Tests and exact results
+- `src/lib/__tests__/task_management.test.ts` — 41 tests covering all 4 features:
+  - Feature 1 (Assignee Display): 7 tests — single/multiple assignee display, no UUID-as-name, mobile cards, cross-org isolation, task details assignee-wise status
+  - Feature 2 (Multiple Assignment): 11 tests — multi-select UI, multiple assignment rows, duplicate prevention, independent status, per-assignee notifications, dedup, removal with reason, history preservation, inactive employee exclusion, aggregation rules
+  - Feature 3 (Deadline): 8 tests — required date, required time, past deadline rejected, timestamptz storage, display in Team Tasks/My Tasks, backward compatibility, 6 PM IST default
+  - Feature 4 (Draft Persistence): 11 tests — autosave debounce, status indicators, restore flow, last saved time, project creation preservation, assignee restoration, deadline restoration, validation failure preservation, creation failure preservation, successful creation cleanup, explicit discard, user isolation, org isolation, no payroll
+  - Production build: 1 test
+- All 41 tests PASS
+- TypeScript: PASS
+- Production build: PASS (847.93 kB JS / 42.54 kB CSS)
+
+### 13. Manual production verification
+NOT YET PERFORMED — requires browser testing. The user should:
+1. Login as Director or Manager
+2. Open Assign New Task
+3. Select a project
+4. Search and select at least 3 employees by name or code
+5. Enter title, description, cost, deadline date and time
+6. Navigate to Team Tasks, then return to Assign Task — confirm all values restored
+7. Click Create New Project, create a project, return — confirm all task values remain and new project is auto-selected
+8. Submit the task
+9. Confirm one shared task created with 3 assignment records
+10. Confirm Team Tasks shows all employee names with initials
+11. Login as each assigned employee — confirm each receives the task
+12. Accept with one employee — confirm others remain Acceptance Pending
+13. Confirm exact deadline time appears everywhere
+
+### 14. Remaining limitations
+- Browser smoke test not performed (no browser automation available)
+- Offline/IndexedDB recovery copy not implemented (draft relies on server-side persistence; in-memory fallback only)
+- `Select Reporting Team` bulk action not implemented (individual selection only)
+- Branch/department/reporting-team filters in assignee dropdown not implemented (search by name and code only)
+- Task exports not updated to include assignee names (exports module doesn't reference task_assignments)
+- Recurring-task generated instances use the old single-assignee `assigned_employee_id` field — multi-assignee recurring templates not yet supported
+- Dashboard task drill-downs not updated for assignee names (Dashboard doesn't directly query task_assignments)

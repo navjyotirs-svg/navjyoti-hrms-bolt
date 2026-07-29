@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from '@/types/roles'
-import { createTask, formatTaskCost } from '@/lib/tasks'
+import { createTask, formatTaskCost, saveTaskDraft, loadTaskDraft, discardTaskDraft } from '@/lib/tasks'
 import { fetchProjects, createProject, type ProjectRow } from '@/lib/projects'
 import { FormSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
@@ -11,10 +11,43 @@ import '@/styles/shared.css'
 const PROJECT_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
 type ProjectPriority = (typeof PROJECT_PRIORITIES)[number]
 
+interface EmployeeOption {
+  id: string
+  employee_code: string
+  full_name: string
+  user_id: string
+  designation: string | null
+  branch_id: string | null
+  department_id: string | null
+}
+
+interface DraftData {
+  draft_id?: string
+  project_id?: string
+  title?: string
+  description?: string
+  priority?: string
+  expected_result?: string
+  target_quantity?: number | null
+  target_unit?: string | null
+  estimated_hours?: number | null
+  task_cost?: number | null
+  deadline_at?: string
+  start_date?: string
+  task_type?: string
+  acceptance_required?: boolean
+  branch_id?: string | null
+  department_id?: string | null
+  assignee_employee_ids?: string[]
+  last_saved_at?: string
+}
+
+type DraftStatus = 'idle' | 'saving' | 'saved' | 'error' | 'restored'
+
 export function CreateTaskPage() {
   const { profile } = useAuth()
   const navigate = useNavigate()
-  const [employees, setEmployees] = useState<any[]>([])
+  const [employees, setEmployees] = useState<EmployeeOption[]>([])
   const [projects, setProjects] = useState<ProjectRow[]>([])
   const [projectsLoading, setProjectsLoading] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -36,11 +69,12 @@ export function CreateTaskPage() {
     project_id: '',
     title: '',
     description: '',
-    assignee_id: '',
+    selectedEmployeeIds: [] as string[],
     priority: 'MEDIUM' as TaskPriority,
     task_type: 'GENERAL' as TaskType,
     start_date: new Date().toISOString().slice(0, 10),
-    deadline: '',
+    deadline_date: '',
+    deadline_time: '18:00',
     expected_result: '',
     target_quantity: '',
     target_unit: '',
@@ -51,16 +85,31 @@ export function CreateTaskPage() {
     department_id: '',
   })
 
+  const [assigneeSearch, setAssigneeSearch] = useState('')
+  const [showAssigneeDropdown, setShowAssigneeDropdown] = useState(false)
+
+  const [draftStatus, setDraftStatus] = useState<DraftStatus>('idle')
+  const [draftId, setDraftId] = useState<string | undefined>(undefined)
+  const [draftLastSaved, setDraftLastSaved] = useState<string | null>(null)
+  const [showDraftRestore, setShowDraftRestore] = useState(false)
+
+  const draftLoadedRef = useRef(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
     loadEmployees()
     loadProjects()
+    if (!draftLoadedRef.current) {
+      draftLoadedRef.current = true
+      checkForDraft()
+    }
   }, [profile?.organization_id])
 
   async function loadEmployees() {
     if (!profile?.organization_id) return
     const { data } = await supabase
       .from('employees')
-      .select('id, employee_code, full_name, user_id, designation')
+      .select('id, employee_code, full_name, user_id, designation, branch_id, department_id')
       .eq('organization_id', profile.organization_id)
       .eq('is_active', true)
       .order('full_name')
@@ -73,10 +122,117 @@ export function CreateTaskPage() {
       const data = await fetchProjects()
       setProjects(data)
     } catch (e) {
-      // Non-fatal: project dropdown will be empty with an option to create
       console.error('Failed to load projects:', (e as Error).message)
     }
     setProjectsLoading(false)
+  }
+
+  async function checkForDraft() {
+    try {
+      const result = await loadTaskDraft()
+      if (result.draft) {
+        setShowDraftRestore(true)
+      }
+    } catch {
+      // No draft found — normal
+    }
+  }
+
+  function restoreDraft(draft: DraftData) {
+    if (draft.draft_id) setDraftId(draft.draft_id)
+    setForm((prev) => ({
+      ...prev,
+      project_id: draft.project_id || '',
+      title: draft.title || '',
+      description: draft.description || '',
+      selectedEmployeeIds: draft.assignee_employee_ids || [],
+      priority: (draft.priority as TaskPriority) || 'MEDIUM',
+      task_type: (draft.task_type as TaskType) || 'GENERAL',
+      start_date: draft.start_date || new Date().toISOString().slice(0, 10),
+      deadline_date: draft.deadline_at ? draft.deadline_at.slice(0, 10) : '',
+      deadline_time: draft.deadline_at
+        ? new Date(draft.deadline_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
+        : '18:00',
+      expected_result: draft.expected_result || '',
+      target_quantity: draft.target_quantity?.toString() || '',
+      target_unit: draft.target_unit || '',
+      estimated_hours: draft.estimated_hours?.toString() || '',
+      task_cost: draft.task_cost?.toString() || '',
+      acceptance_required: draft.acceptance_required ?? true,
+      branch_id: draft.branch_id || '',
+      department_id: draft.department_id || '',
+    }))
+    setDraftStatus('restored')
+    setDraftLastSaved(draft.last_saved_at || null)
+  }
+
+  const doSaveDraft = useCallback(async () => {
+    if (!form.title && !form.description && form.selectedEmployeeIds.length === 0 && !form.project_id) {
+      return
+    }
+    setDraftStatus('saving')
+    try {
+      const deadlineAt = form.deadline_date
+        ? new Date(`${form.deadline_date}T${form.deadline_time}:00`).toISOString()
+        : undefined
+      const result = await saveTaskDraft({
+        draft_id: draftId,
+        project_id: form.project_id || undefined,
+        title: form.title,
+        description: form.description,
+        priority: form.priority,
+        expected_result: form.expected_result,
+        target_quantity: form.target_quantity ? Number(form.target_quantity) : null,
+        target_unit: form.target_unit || null,
+        estimated_hours: form.estimated_hours ? Number(form.estimated_hours) : null,
+        task_cost: form.task_cost ? Number(form.task_cost) : null,
+        deadline_at: deadlineAt,
+        start_date: form.start_date,
+        task_type: form.task_type,
+        acceptance_required: form.acceptance_required,
+        branch_id: form.branch_id || null,
+        department_id: form.department_id || null,
+        assignee_employee_ids: form.selectedEmployeeIds,
+      })
+      if (result.draft_id) setDraftId(result.draft_id)
+      setDraftStatus('saved')
+      setDraftLastSaved(result.last_saved_at || new Date().toISOString())
+    } catch {
+      setDraftStatus('error')
+    }
+  }, [form, draftId])
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (!draftLoadedRef.current) return
+    if (showDraftRestore) return
+    debounceRef.current = setTimeout(() => {
+      doSaveDraft()
+    }, 1200)
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [form, doSaveDraft, showDraftRestore])
+
+  const selectedEmployees = employees.filter((e) => form.selectedEmployeeIds.includes(e.id))
+  const filteredEmployees = employees.filter((e) => {
+    if (form.selectedEmployeeIds.includes(e.id)) return false
+    const q = assigneeSearch.trim().toLowerCase()
+    if (!q) return true
+    return e.full_name.toLowerCase().includes(q) || e.employee_code.toLowerCase().includes(q)
+  })
+
+  function toggleEmployee(empId: string) {
+    setForm((prev) => ({
+      ...prev,
+      selectedEmployeeIds: prev.selectedEmployeeIds.includes(empId)
+        ? prev.selectedEmployeeIds.filter((id) => id !== empId)
+        : [...prev.selectedEmployeeIds, empId],
+    }))
+  }
+
+  function clearAllAssignees() {
+    setForm((prev) => ({ ...prev, selectedEmployeeIds: [] }))
   }
 
   async function handleCreateProject(e: React.FormEvent) {
@@ -96,7 +252,6 @@ export function CreateTaskPage() {
         expected_end_date: projectForm.expected_end_date || undefined,
       })
       await loadProjects()
-      // Auto-select the newly created project. The edge function returns the new project id.
       const newId = result?.project_id || result?.id
       if (newId) {
         setForm((prev) => ({ ...prev, project_id: newId }))
@@ -121,11 +276,25 @@ export function CreateTaskPage() {
       setError('Project is required')
       return
     }
-    if (!form.title.trim() || !form.description.trim() || !form.assignee_id || !form.deadline) {
-      setError('Project, title, description, assignee, and deadline are required')
+    if (!form.title.trim() || !form.description.trim()) {
+      setError('Title and description are required')
       return
     }
-    if (new Date(form.deadline) < new Date(form.start_date)) {
+    if (form.selectedEmployeeIds.length === 0) {
+      setError('At least one assignee is required')
+      return
+    }
+    if (!form.deadline_date || !form.deadline_time) {
+      setError('Deadline date and time are required')
+      return
+    }
+
+    const deadlineAt = new Date(`${form.deadline_date}T${form.deadline_time}:00`).toISOString()
+    if (new Date(deadlineAt) < new Date()) {
+      setError('Deadline must be in the future')
+      return
+    }
+    if (new Date(form.deadline_date) < new Date(form.start_date)) {
       setError('Deadline cannot be before start date')
       return
     }
@@ -139,19 +308,24 @@ export function CreateTaskPage() {
       }
     }
 
+    const assigneeUserIds = selectedEmployees.map((e) => e.user_id).filter(Boolean)
+    if (assigneeUserIds.length !== form.selectedEmployeeIds.length) {
+      setError('One or more selected employees have no user account')
+      return
+    }
+
     setLoading(true)
     setError(null)
     try {
-      const assignee = employees.find((e) => e.id === form.assignee_id)
       await createTask({
         project_id: form.project_id,
         title: form.title.trim(),
         description: form.description.trim(),
-        assignee_id: assignee.user_id,
+        assignee_ids: assigneeUserIds,
         priority: form.priority,
         task_type: form.task_type,
         start_date: form.start_date,
-        deadline: form.deadline,
+        deadline_at: deadlineAt,
         expected_result: form.expected_result,
         target_quantity: form.target_quantity ? Number(form.target_quantity) : null,
         target_unit: form.target_unit || null,
@@ -160,7 +334,9 @@ export function CreateTaskPage() {
         acceptance_required: form.acceptance_required,
         branch_id: form.branch_id || null,
         department_id: form.department_id || null,
+        draft_id: draftId,
       })
+      setDraftId(undefined)
       navigate('/team-tasks')
     } catch (e) {
       setError((e as Error).message)
@@ -174,12 +350,56 @@ export function CreateTaskPage() {
     </div>
   )
 
+  const draftStatusLabel = {
+    idle: '',
+    saving: 'Saving draft…',
+    saved: 'Draft saved',
+    error: 'Save failed — Retry',
+    restored: 'Restored from draft',
+  }[draftStatus]
+
   return (
     <div className="page">
       <div className="page-header">
         <h2 className="page-title">Assign New Task</h2>
         <button className="btn btn-secondary" onClick={() => navigate(-1)}>Back</button>
       </div>
+
+      {showDraftRestore && (
+        <div className="card" style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-4)', borderLeft: '4px solid var(--teal)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            <div>
+              <strong>An unfinished task draft was found.</strong>
+              {draftLastSaved && (
+                <div style={{ fontSize: '13px', color: 'var(--slate)', marginTop: '4px' }}>
+                  Last saved {new Date(draftLastSaved).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+              <button className="btn btn-primary" onClick={async () => {
+                try {
+                  const result = await loadTaskDraft()
+                  if (result.draft) restoreDraft(result.draft)
+                } catch { /* ignore */ }
+                setShowDraftRestore(false)
+              }}>Continue Draft</button>
+              <button className="btn btn-secondary" onClick={async () => {
+                try { await discardTaskDraft(draftId) } catch { /* ignore */ }
+                setDraftId(undefined)
+                setShowDraftRestore(false)
+              }}>Discard Draft</button>
+              <button className="btn btn-secondary" onClick={() => setShowDraftRestore(false)}>Start New Task</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {draftStatus !== 'idle' && (
+        <div style={{ fontSize: '13px', color: 'var(--slate)', marginBottom: 'var(--space-2)' }}>
+          {draftStatusLabel}
+        </div>
+      )}
 
       {error && <div className="form-error" style={{ marginBottom: '12px' }}>{error}</div>}
 
@@ -219,16 +439,70 @@ export function CreateTaskPage() {
             <label htmlFor="t-desc">Description *</label>
             <textarea id="t-desc" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={4} required />
           </div>
-          <div className="form-grid">
-            <div className="form-field">
-              <label htmlFor="t-assignee">Assignee *</label>
-              <select id="t-assignee" value={form.assignee_id} onChange={(e) => setForm({ ...form, assignee_id: e.target.value })} required>
-                <option value="">Select employee</option>
-                {employees.map((e) => (
-                  <option key={e.id} value={e.id}>{e.full_name} ({e.employee_code})</option>
+
+          {/* Multi-select Assignee */}
+          <div className="form-field" style={{ position: 'relative' }}>
+            <label htmlFor="t-assignee-search">Assign To * <span style={{ fontSize: '12px', color: 'var(--slate)' }}>({form.selectedEmployeeIds.length} selected)</span></label>
+
+            {/* Selected chips */}
+            {selectedEmployees.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                {selectedEmployees.map((emp) => (
+                  <span key={emp.id} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                    padding: '4px 10px', borderRadius: '20px',
+                    background: 'var(--teal)', color: 'white', fontSize: '13px',
+                  }}>
+                    {emp.full_name} ({emp.employee_code})
+                    <button type="button" onClick={() => toggleEmployee(emp.id)} style={{
+                      background: 'none', border: 'none', color: 'white', cursor: 'pointer',
+                      fontSize: '16px', lineHeight: '1', padding: '0',
+                    }}>×</button>
+                  </span>
                 ))}
-              </select>
-            </div>
+                <button type="button" onClick={clearAllAssignees} style={{
+                  background: 'none', border: 'none', color: 'var(--rose)', cursor: 'pointer',
+                  fontSize: '13px', textDecoration: 'underline',
+                }}>Clear All</button>
+              </div>
+            )}
+
+            <input
+              id="t-assignee-search"
+              type="text"
+              value={assigneeSearch}
+              onChange={(e) => setAssigneeSearch(e.target.value)}
+              onFocus={() => setShowAssigneeDropdown(true)}
+              onBlur={() => setTimeout(() => setShowAssigneeDropdown(false), 200)}
+              placeholder="Search by name or employee code…"
+            />
+
+            {showAssigneeDropdown && filteredEmployees.length > 0 && (
+              <div style={{
+                position: 'absolute', zIndex: 10, top: '100%', left: 0, right: 0,
+                maxHeight: '260px', overflowY: 'auto',
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-md)',
+              }}>
+                {filteredEmployees.map((emp) => (
+                  <div
+                    key={emp.id}
+                    onClick={() => { toggleEmployee(emp.id); setAssigneeSearch('') }}
+                    style={{
+                      padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border)',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <span>{emp.full_name} <span style={{ color: 'var(--slate)', fontSize: '12px' }}>({emp.employee_code})</span></span>
+                    {emp.designation && <span style={{ fontSize: '12px', color: 'var(--slate)' }}>{emp.designation}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="form-grid">
             <div className="form-field">
               <label htmlFor="t-priority">Priority</label>
               <select id="t-priority" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as TaskPriority })}>
@@ -252,8 +526,12 @@ export function CreateTaskPage() {
               <input id="t-start" type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} required />
             </div>
             <div className="form-field">
-              <label htmlFor="t-deadline">Deadline *</label>
-              <input id="t-deadline" type="date" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} required />
+              <label htmlFor="t-deadline-date">Deadline Date *</label>
+              <input id="t-deadline-date" type="date" value={form.deadline_date} onChange={(e) => setForm({ ...form, deadline_date: e.target.value })} required />
+            </div>
+            <div className="form-field">
+              <label htmlFor="t-deadline-time">Deadline Time *</label>
+              <input id="t-deadline-time" type="time" value={form.deadline_time} onChange={(e) => setForm({ ...form, deadline_time: e.target.value })} required />
             </div>
           </div>
           <div className="form-field">

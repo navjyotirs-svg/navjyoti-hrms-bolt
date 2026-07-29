@@ -103,6 +103,14 @@ Deno.serve(async (req: Request) => {
         return await handleUpdateCost(supabase, body, user.id, orgId, permissions);
       case "self_assign":
         return await handleSelfAssign(supabase, body, user.id, orgId, permissions);
+      case "save_draft":
+        return await handleSaveDraft(supabase, body, user.id, orgId);
+      case "load_draft":
+        return await handleLoadDraft(supabase, user.id);
+      case "discard_draft":
+        return await handleDiscardDraft(supabase, body, user.id);
+      case "remove_assignee":
+        return await handleRemoveAssignee(supabase, body, user.id, orgId, permissions);
       default:
         return errorResponse(`Unknown action: ${action}`, 400);
     }
@@ -263,6 +271,261 @@ async function notifyBusinessEvent(
   } catch { /* best-effort */ }
 }
 
+async function getCreatorName(supabase: ReturnType<typeof createClient>, userId: string): Promise<string> {
+  try {
+    const { data: profile } = await supabase
+      .from("user_profiles")
+      .select("full_name")
+      .eq("id", userId)
+      .maybeSingle();
+    if (profile?.full_name) return profile.full_name;
+    const { data: emp } = await supabase
+      .from("employees")
+      .select("full_name")
+      .eq("user_id", userId)
+      .maybeSingle();
+    return emp?.full_name || "A user";
+  } catch {
+    return "A user";
+  }
+}
+
+async function recalcOverallTaskStatus(
+  supabase: ReturnType<typeof createClient>,
+  taskId: string,
+  currentStatus: string,
+  _actorId: string
+): Promise<string> {
+  try {
+    const { data: assignments } = await supabase
+      .from("task_assignments")
+      .select("assignment_status, is_current")
+      .eq("task_id", taskId)
+      .eq("is_current", true);
+    if (!assignments || assignments.length === 0) return currentStatus;
+
+    const statuses = assignments.map((a: { assignment_status: string }) => a.assignment_status);
+    const allPending = statuses.every((s: string) => s === "ACCEPTANCE_PENDING");
+    const allCompleted = statuses.every((s: string) => s === "COMPLETED");
+    const allCancelled = statuses.every((s: string) => s === "CANCELLED");
+    const allSubmitted = statuses.every((s: string) => s === "SUBMITTED" || s === "COMPLETED");
+    const anyReassignment = statuses.some((s: string) => s === "REASSIGNMENT_REQUESTED");
+    const anyActive = statuses.some((s: string) => s === "ACCEPTED" || s === "IN_PROGRESS" || s === "SUBMITTED" || s === "COMPLETED");
+
+    let newStatus = currentStatus;
+    if (allCancelled) newStatus = "CANCELLED";
+    else if (allCompleted) newStatus = "COMPLETED";
+    else if (anyReassignment) newStatus = "REASSIGNMENT_REQUESTED";
+    else if (allSubmitted) newStatus = "SUBMITTED";
+    else if (allPending) newStatus = "ACCEPTANCE_PENDING";
+    else if (anyActive) newStatus = "IN_PROGRESS";
+
+    if (newStatus !== currentStatus) {
+      await supabase.from("tasks").update({ status: newStatus, version: 1 }).eq("id", taskId);
+    }
+    return newStatus;
+  } catch {
+    return currentStatus;
+  }
+}
+
+async function handleSaveDraft(
+  supabase: ReturnType<typeof createClient>,
+  body: any,
+  userId: string,
+  orgId: string
+) {
+  const {
+    draft_id,
+    project_id,
+    title,
+    description,
+    priority = "MEDIUM",
+    expected_result,
+    target_quantity,
+    target_unit,
+    estimated_hours,
+    task_cost,
+    deadline_at,
+    start_date,
+    task_type = "GENERAL",
+    acceptance_required = true,
+    branch_id,
+    department_id,
+    assignee_employee_ids = [],
+  } = body;
+
+  const now = new Date().toISOString();
+  const draftData: Record<string, unknown> = {
+    organization_id: orgId,
+    created_by: userId,
+    project_id: project_id || null,
+    title: title || "",
+    description: description || "",
+    priority,
+    expected_result: expected_result || "",
+    target_quantity: target_quantity || null,
+    target_unit: target_unit || null,
+    estimated_hours: estimated_hours || null,
+    task_cost: task_cost || null,
+    deadline_at: deadline_at || null,
+    start_date: start_date || new Date().toISOString().slice(0, 10),
+    task_type,
+    acceptance_required,
+    branch_id: branch_id || null,
+    department_id: department_id || null,
+    last_saved_at: now,
+    expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+
+  let draftId = draft_id;
+
+  if (draft_id) {
+    const { data: existing } = await supabase
+      .from("task_drafts")
+      .select("id")
+      .eq("id", draft_id)
+      .eq("created_by", userId)
+      .maybeSingle();
+    if (existing) {
+      await supabase.from("task_drafts").update({ ...draftData, updated_at: now }).eq("id", draft_id);
+    } else {
+      draftId = null;
+    }
+  }
+
+  if (!draftId) {
+    const { data: newDraft, error } = await supabase
+      .from("task_drafts")
+      .insert({ ...draftData, created_at: now, updated_at: now })
+      .select("id")
+      .single();
+    if (error) return errorResponse(`Failed to save draft: ${error.message}`, 500);
+    draftId = newDraft.id;
+  }
+
+  // Sync assignees: delete old, insert new
+  await supabase.from("task_draft_assignees").delete().eq("draft_id", draftId);
+  if (assignee_employee_ids.length > 0) {
+    const assigneeRows = assignee_employee_ids.map((eid: string) => ({ draft_id: draftId, employee_id: eid }));
+    await supabase.from("task_draft_assignees").insert(assigneeRows);
+  }
+
+  return successResponse({ draft_id: draftId, last_saved_at: now });
+}
+
+async function handleLoadDraft(
+  supabase: ReturnType<typeof createClient>,
+  userId: string
+) {
+  const { data: draft } = await supabase
+    .from("task_drafts")
+    .select("*")
+    .eq("created_by", userId)
+    .order("last_saved_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!draft) return successResponse({ draft: null });
+
+  const { data: assignees } = await supabase
+    .from("task_draft_assignees")
+    .select("employee_id")
+    .eq("draft_id", draft.id);
+
+  return successResponse({
+    draft: {
+      ...draft,
+      assignee_employee_ids: (assignees || []).map((a: { employee_id: string }) => a.employee_id),
+    },
+  });
+}
+
+async function handleDiscardDraft(
+  supabase: ReturnType<typeof createClient>,
+  body: any,
+  userId: string
+) {
+  const { draft_id } = body;
+  if (draft_id) {
+    await supabase.from("task_drafts").delete().eq("id", draft_id).eq("created_by", userId);
+  } else {
+    await supabase.from("task_drafts").delete().eq("created_by", userId);
+  }
+  return successResponse({ message: "Draft discarded" });
+}
+
+async function handleRemoveAssignee(
+  supabase: ReturnType<typeof createClient>,
+  body: any,
+  userId: string,
+  orgId: string,
+  perms: string[]
+) {
+  if (!hasPerm(perms, "task.reassign")) {
+    return errorResponse("No permission to remove assignees", 403);
+  }
+  const { task_id, assignment_id, reason } = body;
+  if (!task_id || !assignment_id) return errorResponse("Task ID and assignment ID required", 400);
+
+  const { data: assignment } = await supabase
+    .from("task_assignments")
+    .select("id, assigned_to, assignment_status, is_current")
+    .eq("id", assignment_id)
+    .eq("task_id", task_id)
+    .maybeSingle();
+  if (!assignment) return errorResponse("Assignment not found", 404);
+
+  // If assignee already accepted or started work, require reason and preserve history
+  const needsReason = ["ACCEPTED", "IN_PROGRESS", "SUBMITTED"].includes(assignment.assignment_status);
+  if (needsReason && !reason) {
+    return errorResponse("Reason required to remove an assignee who has already accepted or started work", 400);
+  }
+
+  // End the assignment (preserve history — don't delete)
+  await supabase
+    .from("task_assignments")
+    .update({
+      is_current: false,
+      ended_at: new Date().toISOString(),
+      assignment_status: "CANCELLED",
+      rejection_reason: reason || "Removed by manager",
+    })
+    .eq("id", assignment_id);
+
+  // Status history
+  await supabase.from("task_status_history").insert({
+    task_id,
+    old_status: null,
+    new_status: "CANCELLED",
+    changed_by: userId,
+    reason: `Assignee removed: ${reason || "Removed by manager"}`,
+  });
+
+  // Recalculate overall task status
+  const { data: task } = await supabase.from("tasks").select("status").eq("id", task_id).single();
+  if (task) {
+    await recalcOverallTaskStatus(supabase, task_id, task.status, userId);
+  }
+
+  // Notify the affected employee
+  await createNotification(
+    supabase,
+    assignment.assigned_to,
+    "TASK_ASSIGNMENT_CANCELLED",
+    "Task Assignment Cancelled",
+    `Your assignment has been cancelled. Reason: ${reason || "Removed by manager"}`,
+    "normal",
+    `task_assign_cancelled:${task_id}:${assignment_id}`,
+    "task",
+    "/my-tasks"
+  );
+
+  await writeAudit(supabase, userId, "task.remove_assignee", "task_assignment", assignment_id, { assignment_status: assignment.assignment_status }, { assignment_status: "CANCELLED", reason });
+
+  return successResponse({ message: "Assignee removed" });
+}
+
 async function writeAudit(
   supabase: ReturnType<typeof createClient>,
   actorId: string,
@@ -300,11 +563,13 @@ async function handleCreate(
     title,
     description,
     assignee_id,
+    assignee_ids,
     project_id,
     priority = "MEDIUM",
     task_type = "GENERAL",
     start_date,
     deadline,
+    deadline_at,
     expected_result,
     target_quantity,
     target_unit,
@@ -316,15 +581,49 @@ async function handleCreate(
     reviewers = [],
     dependencies = [],
     task_cost,
+    draft_id,
   } = body;
 
   if (!title || !title.trim()) return errorResponse("Title is required", 400);
   if (!description || !description.trim()) return errorResponse("Description is required", 400);
-  if (!assignee_id) return errorResponse("Assignee is required", 400);
   if (!project_id) return errorResponse("Project is required", 400);
-  if (!deadline) return errorResponse("Deadline is required", 400);
   if (!start_date) return errorResponse("Start date is required", 400);
-  if (new Date(deadline) < new Date(start_date)) {
+
+  // Resolve assignee IDs: support both new multi-assignee (assignee_ids array) and legacy single assignee_id
+  const allAssigneeIds: string[] = [];
+  if (assignee_ids && Array.isArray(assignee_ids) && assignee_ids.length > 0) {
+ allAssigneeIds.push(...assignee_ids);
+  } else if (assignee_id) {
+    allAssigneeIds.push(assignee_id);
+  }
+
+  // Deduplicate
+  const uniqueAssigneeIds = [...new Set(allAssigneeIds)];
+  if (uniqueAssigneeIds.length === 0) {
+    return errorResponse("At least one assignee is required", 400);
+  }
+
+  // Validate deadline: prefer deadline_at (timestamptz), fall back to deadline (date)
+  let deadlineAt: string | null = null;
+  let deadlineDate: string | null = null;
+  if (deadline_at) {
+    deadlineAt = deadline_at;
+    deadlineDate = deadline_at.slice(0, 10);
+  } else if (deadline) {
+    deadlineDate = deadline;
+    // Default to 6:00 PM IST (12:30 UTC) if no time provided
+    deadlineAt = `${deadline}T12:30:00Z`;
+  } else {
+    return errorResponse("Deadline date and time are required", 400);
+  }
+
+  // Validate deadline is in the future
+  const deadlineDateObj = new Date(deadlineAt);
+  const startDateObj = new Date(start_date);
+  if (deadlineDateObj < new Date()) {
+    return errorResponse("Deadline must be in the future", 400);
+  }
+  if (deadlineDateObj < startDateObj) {
     return errorResponse("Deadline cannot be before start date", 400);
   }
 
@@ -345,33 +644,33 @@ async function handleCreate(
     if (isNaN(parsedCost) || parsedCost < 0) {
       return errorResponse("Task cost must be zero or greater", 400);
     }
-    parsedCost = Math.round(parsedCost * 100) / 100; // 2 decimal places
+    parsedCost = Math.round(parsedCost * 100) / 100;
   }
-
-  // Check cost_set permission if task_cost is provided
   if (parsedCost !== null && !hasPerm(perms, "task.cost_set")) {
     return errorResponse("No permission to set task cost", 403);
   }
 
-  // Validate assignee belongs to same org
-  const { data: assigneeProfile } = await supabase
-    .from("user_profiles")
-    .select("id, organization_id")
-    .eq("id", assignee_id)
-    .single();
-  if (!assigneeProfile || assigneeProfile.organization_id !== orgId) {
-    return errorResponse("Assignee not in same organization", 403);
-  }
-
-  // Resolve assignee's employee record for assigned_employee_id (recurring index compatibility)
-  const { data: assigneeEmployee } = await supabase
-    .from("employees")
-    .select("id")
-    .eq("user_id", assignee_id)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (!assigneeEmployee) {
-    return errorResponse("Assignee has no active employee record", 400);
+  // Validate ALL assignees belong to same org and have active employee records
+  const assigneeEmployeeMap = new Map<string, string>(); // user_id -> employee_id
+  for (const assigneeId of uniqueAssigneeIds) {
+    const { data: assigneeProfile } = await supabase
+      .from("user_profiles")
+      .select("id, organization_id")
+      .eq("id", assigneeId)
+      .maybeSingle();
+    if (!assigneeProfile || assigneeProfile.organization_id !== orgId) {
+      return errorResponse(`Assignee ${assigneeId} not in same organization`, 403);
+    }
+    const { data: assigneeEmployee } = await supabase
+      .from("employees")
+      .select("id")
+      .eq("user_id", assigneeId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!assigneeEmployee) {
+      return errorResponse(`Assignee has no active employee record`, 400);
+    }
+    assigneeEmployeeMap.set(assigneeId, assigneeEmployee.id);
   }
 
   // Generate task code server-side
@@ -383,6 +682,8 @@ async function handleCreate(
   }
 
   const initialStatus = acceptance_required ? "ACCEPTANCE_PENDING" : "ASSIGNED";
+  const firstAssigneeId = uniqueAssigneeIds[0];
+  const firstEmployeeId = assigneeEmployeeMap.get(firstAssigneeId)!;
 
   // Create task
   const { data: task, error: taskError } = await supabase
@@ -398,11 +699,12 @@ async function handleCreate(
       priority,
       task_type,
       created_by: userId,
-      owner_id: assignee_id,
-      assigned_employee_id: assigneeEmployee.id,
+      owner_id: firstAssigneeId,
+      assigned_employee_id: firstEmployeeId,
       start_date,
-      original_deadline: deadline,
-      current_deadline: deadline,
+      original_deadline: deadlineDate,
+      current_deadline: deadlineDate,
+      deadline_at: deadlineAt,
       expected_result: expected_result || "",
       target_quantity: target_quantity || null,
       target_unit: target_unit || null,
@@ -421,44 +723,53 @@ async function handleCreate(
     return errorResponse(`Failed to create task: ${taskError.message}`, 500);
   }
 
-  // Create primary assignment
-  await supabase.from("task_assignments").insert({
+  // Create assignments for ALL selected employees
+  const assignmentsToInsert = uniqueAssigneeIds.map((assigneeId: string) => ({
     task_id: task.id,
-    assigned_to: assignee_id,
+    assigned_to: assigneeId,
     assigned_by: userId,
     assignment_type: "PRIMARY",
-  });
+    assignment_status: acceptance_required ? "ACCEPTANCE_PENDING" : "ACCEPTED",
+    accepted_at: acceptance_required ? null : new Date().toISOString(),
+  }));
+  const { error: assignError } = await supabase
+    .from("task_assignments")
+    .insert(assignmentsToInsert);
+  if (assignError) {
+    return errorResponse(`Failed to create assignments: ${assignError.message}`, 500);
+  }
 
   // Create collaborator assignments
   for (const c of collaborators) {
-    await supabase.from("task_assignments").insert({
-      task_id: task.id,
-      assigned_to: c,
-      assigned_by: userId,
-      assignment_type: "COLLABORATOR",
-    });
+    if (!uniqueAssigneeIds.includes(c)) {
+      await supabase.from("task_assignments").insert({
+        task_id: task.id,
+        assigned_to: c,
+        assigned_by: userId,
+        assignment_type: "COLLABORATOR",
+      });
+    }
   }
 
   // Create reviewer assignments
   for (const r of reviewers) {
-    await supabase.from("task_assignments").insert({
-      task_id: task.id,
-      assigned_to: r,
-      assigned_by: userId,
-      assignment_type: "REVIEWER",
-    });
+    if (!uniqueAssigneeIds.includes(r) && !collaborators.includes(r)) {
+      await supabase.from("task_assignments").insert({
+        task_id: task.id,
+        assigned_to: r,
+        assigned_by: userId,
+        assignment_type: "REVIEWER",
+      });
+    }
   }
 
   // Create dependencies
   for (const dep of dependencies) {
-    // Check circular dependency
     const { data: isCircular } = await supabase.rpc("check_circular_dependency", {
       p_task_id: task.id,
       p_depends_on_id: dep,
     });
-    if (isCircular) {
-      continue; // Skip circular dependency
-    }
+    if (isCircular) continue;
     await supabase.from("task_dependencies").insert({
       task_id: task.id,
       depends_on_task_id: dep,
@@ -472,41 +783,65 @@ async function handleCreate(
     old_status: null,
     new_status: initialStatus,
     changed_by: userId,
-    reason: "Task created",
+    reason: `Task created with ${uniqueAssigneeIds.length} assignee(s)`,
   });
 
-  // Notify assignee
-  await createNotification(
-    supabase,
-    assignee_id,
-    "TASK_ASSIGNED",
-    "New Task Assigned",
-    `Task ${taskCode}: ${title}`,
-    "normal",
-    `task_assigned:${task.id}:${assignee_id}`,
-    "task",
-    "/my-tasks"
-  );
-
-  // If task has a cost, notify assignee with TASK_COST_CREATED (no amount in notification)
-  if (parsedCost !== null) {
+  // Notify each assignee individually (no duplicates)
+  for (const assigneeId of uniqueAssigneeIds) {
     await createNotification(
       supabase,
-      assignee_id,
-      "TASK_COST_CREATED",
-      "Task Assigned with Cost",
-      `Task ${taskCode}: ${title} has been assigned with an operational task cost.`,
+      assigneeId,
+      "TASK_ASSIGNED",
+      "New Task Assigned",
+      `You have been assigned a new task: ${title.trim()}`,
       "normal",
-      `task_cost_created:${task.id}:${assignee_id}`,
+      `task_assigned:${task.id}:${assigneeId}`,
       "task",
       "/my-tasks"
     );
+    if (parsedCost !== null) {
+      await createNotification(
+        supabase,
+        assigneeId,
+        "TASK_COST_CREATED",
+        "Task Assigned with Cost",
+        `Task ${taskCode}: ${title.trim()} has been assigned with an operational task cost.`,
+        "normal",
+        `task_cost_created:${task.id}:${assigneeId}`,
+        "task",
+        "/my-tasks"
+      );
+    }
   }
 
-  // Audit
-  await writeAudit(supabase, userId, "task.create", "task", task.id, null, { task_code: taskCode, title });
+  // Supervisory notification summarising the assignment
+  const creatorName = await getCreatorName(supabase, userId);
+  await notifyBusinessEvent(supabase, {
+    eventCode: "TASK_CREATED",
+    actorUserId: userId,
+    organizationId: orgId,
+    entityType: "task",
+    entityId: task.id,
+    title: "New Task Created",
+    message: `${creatorName} assigned '${title.trim()}' to ${uniqueAssigneeIds.length} employee(s).`,
+    priority: "normal",
+    category: "task",
+    actionUrl: "/team-tasks",
+    recipientRoles: ["hr_admin", "director", "manager"],
+  });
 
-  return successResponse({ task, task_code: taskCode });
+  // Audit
+  await writeAudit(supabase, userId, "task.create", "task", task.id, null, { task_code: taskCode, title, assignee_count: uniqueAssigneeIds.length });
+
+  // Clear the creator's draft if draft_id provided
+  if (draft_id) {
+    await supabase.from("task_drafts").delete().eq("id", draft_id).eq("created_by", userId);
+  } else {
+    // Clear any existing drafts by this user (task creation succeeded)
+    await supabase.from("task_drafts").delete().eq("created_by", userId);
+  }
+
+  return successResponse({ task, task_code: taskCode, assignment_count: uniqueAssigneeIds.length });
 }
 
 // ============================================================
@@ -712,7 +1047,7 @@ async function handleAccept(
   // Verify user is current assignee
   const { data: assignment } = await supabase
     .from("task_assignments")
-    .select("id, task_id")
+    .select("id, task_id, assignment_status")
     .eq("task_id", task_id)
     .eq("assigned_to", userId)
     .eq("is_current", true)
@@ -735,22 +1070,23 @@ async function handleAccept(
     return errorResponse(`Task cannot be accepted in status: ${task.status}`, 400);
   }
 
-  const newStatus = "ACCEPTED";
-
-  // Update task
-  await supabase.from("tasks").update({ status: newStatus, version: 1 }).eq("id", task_id);
-
-  // Update assignment
+  // Update THIS assignment's status (per-assignee workflow)
   await supabase
     .from("task_assignments")
-    .update({ accepted_at: new Date().toISOString() })
+    .update({
+      accepted_at: new Date().toISOString(),
+      assignment_status: "ACCEPTED",
+    })
     .eq("id", assignment.id);
+
+  // Recalculate overall task status from all assignments
+  const newTaskStatus = await recalcOverallTaskStatus(supabase, task_id, task.status, userId);
 
   // Status history
   await supabase.from("task_status_history").insert({
     task_id,
     old_status: task.status,
-    new_status: newStatus,
+    new_status: newTaskStatus,
     changed_by: userId,
     reason: "Task accepted by assignee",
   });
@@ -769,15 +1105,15 @@ async function handleAccept(
       "Task Accepted",
       `Task ${task.task_code}: ${task.title} has been accepted`,
       "normal",
-      `task_accepted:${task_id}`,
+      `task_accepted:${task_id}:${userId}`,
       "task",
       "/team-tasks"
     );
   }
 
-  await writeAudit(supabase, userId, "task.accept", "task", task_id, { status: task.status }, { status: newStatus });
+  await writeAudit(supabase, userId, "task.accept", "task", task_id, { status: task.status }, { status: newTaskStatus });
 
-  return successResponse({ message: "Task accepted", status: newStatus });
+  return successResponse({ message: "Task accepted", status: newTaskStatus, assignment_status: "ACCEPTED" });
 }
 
 // ============================================================

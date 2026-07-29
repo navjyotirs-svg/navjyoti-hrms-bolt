@@ -467,6 +467,27 @@ table.data-table tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
+  .team-tasks-desktop { display: none; }
+  .team-tasks-mobile { display: flex; flex-direction: column; gap: var(--space-3); }
+
+  .task-card-mobile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    cursor: pointer;
+    transition: box-shadow var(--transition-fast);
+  }
+  .task-card-mobile:hover { box-shadow: var(--shadow-sm); }
+  .task-card-mobile:active { box-shadow: var(--shadow-md); }
+}
+
+@media (min-width: 769px) {
+  .team-tasks-desktop { display: block; }
+  .team-tasks-mobile { display: none; }
+}
+
+@media (max-width: 600px) {
   .form-actions {
     flex-direction: column-reverse;
   }
