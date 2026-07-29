@@ -53,7 +53,6 @@ import { ExportCenterPage } from '@/pages/ExportCenterPage'
 import { NotificationInboxPage } from '@/pages/NotificationInboxPage'
 import { ProjectsPage } from '@/pages/ProjectsPage'
 import { VoiceNotesPage } from '@/pages/VoiceNotesPage'
-import { MyVoiceNotesPage } from '@/pages/MyVoiceNotesPage'
 import { RecurringTasksPage } from '@/pages/RecurringTasksPage'
 import { SelfAssignTaskPage } from '@/pages/SelfAssignTaskPage'
 import type { ReactNode } from 'react'
@@ -263,10 +262,10 @@ function AppRoutes() {
           <PermissionRoute permissions={['project.read_self', 'project.read_team', 'project.read_all', 'project.create']}><ProjectsPage /></PermissionRoute>
         } />
         <Route path="/voice-notes" element={
-          <PermissionRoute permissions={['voice_note.send', 'voice_note.read_sent']}><VoiceNotesPage /></PermissionRoute>
+          <PermissionRoute permissions={['voice_note.send', 'voice_note.send_team', 'voice_note.send_all', 'voice_note.read_sent', 'voice_note.read_own', 'voice_note.read_self']}><VoiceNotesPage /></PermissionRoute>
         } />
-        <Route path="/my-voice-notes" element={
-          <PermissionRoute permissions={['voice_note.read_self']}><MyVoiceNotesPage /></PermissionRoute>
+        <Route path="/voice-notes/:voiceNoteId" element={
+          <PermissionRoute permissions={['voice_note.read_own', 'voice_note.read_self', 'voice_note.read_sent']}><VoiceNotesPage /></PermissionRoute>
         } />
         <Route path="/recurring-tasks" element={
           <PermissionRoute permissions={['recurring_task.create', 'recurring_task.read_all', 'recurring_task.read_team']}><RecurringTasksPage /></PermissionRoute>

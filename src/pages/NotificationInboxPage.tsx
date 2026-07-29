@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, archiveNotification, type NotificationRow } from '@/lib/notifications'
 import { NotificationSkeleton } from '@/components/Skeleton'
+import { safeNavigateFromActionUrl } from '@/lib/safeNavigate'
 import '@/styles/shared.css'
 
 export function NotificationInboxPage() {
@@ -98,6 +99,12 @@ export function NotificationInboxPage() {
               <div key={n.id} style={{
                 border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 'var(--space-3)',
                 backgroundColor: n.is_read ? 'transparent' : 'var(--bg-accent)',
+                cursor: n.action_url ? 'pointer' : 'default',
+              }} onClick={() => {
+                if (n.action_url) {
+                  if (!n.is_read) handleMarkRead(n.id)
+                  safeNavigateFromActionUrl(n.action_url, navigate)
+                }
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                   <div>
@@ -111,7 +118,7 @@ export function NotificationInboxPage() {
                       {n.category.replace(/_/g, ' ')} | {new Date(n.created_at).toLocaleString()}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)' }} onClick={(e) => e.stopPropagation()}>
                     {!n.is_read && <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => handleMarkRead(n.id)}>Mark Read</button>}
                     <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => handleArchive(n.id)}>Archive</button>
                   </div>

@@ -35,6 +35,11 @@ export interface VoiceNoteRow {
   status: string
   created_at: string
   deleted_at: string | null
+  sender_employee?: {
+    id: string
+    full_name: string
+    designation: string | null
+  } | null
 }
 
 export interface VoiceNoteRecipientRow {
@@ -48,34 +53,74 @@ export interface VoiceNoteRecipientRow {
   play_count: number
   acknowledged_at: string | null
   created_at: string
+  recipient_employee?: {
+    id: string
+    full_name: string
+    employee_code: string | null
+    designation: string | null
+  } | null
 }
 
-export async function fetchReceivedVoiceNotes(): Promise<(VoiceNoteRow & { voice_note_recipients: VoiceNoteRecipientRow[] })[]> {
+export type ReceivedNote = VoiceNoteRow & { voice_note_recipients: VoiceNoteRecipientRow[] }
+export type SentNote = VoiceNoteRow & { voice_note_recipients: VoiceNoteRecipientRow[] }
+
+export async function fetchReceivedVoiceNotes(): Promise<ReceivedNote[]> {
   const { data, error } = await supabase
     .from('voice_note_recipients')
     .select(`
       *,
-      voice_notes (*)
+      voice_notes (
+        *,
+        sender_employee:employees!voice_notes_sender_employee_id_fkey (
+          id, full_name, designation
+        )
+      )
     `)
     .order('created_at', { ascending: false })
-  if (error) throw new Error(error.message)
+  if (error) throw new Error('DATABASE_POLICY_ERROR')
   return (data ?? []).map((r: any) => ({
     ...r.voice_notes,
     voice_note_recipients: [r],
-  })) as (VoiceNoteRow & { voice_note_recipients: VoiceNoteRecipientRow[] })[]
+  })) as ReceivedNote[]
 }
 
-export async function fetchSentVoiceNotes(): Promise<(VoiceNoteRow & { voice_note_recipients: VoiceNoteRecipientRow[] })[]> {
+export async function fetchSentVoiceNotes(): Promise<SentNote[]> {
   const { data, error } = await supabase
     .from('voice_notes')
     .select(`
       *,
-      voice_note_recipients (*)
+      voice_note_recipients (
+        *,
+        recipient_employee:employees!voice_note_recipients_recipient_employee_id_fkey (
+          id, full_name, employee_code, designation
+        )
+      )
     `)
     .eq('status', 'SENT')
     .order('created_at', { ascending: false })
-  if (error) throw new Error(error.message)
-  return (data ?? []) as (VoiceNoteRow & { voice_note_recipients: VoiceNoteRecipientRow[] })[]
+  if (error) throw new Error('DATABASE_POLICY_ERROR')
+  return (data ?? []) as SentNote[]
+}
+
+export async function fetchVoiceNoteById(voiceNoteId: string): Promise<ReceivedNote | null> {
+  const { data, error } = await supabase
+    .from('voice_notes')
+    .select(`
+      *,
+      voice_note_recipients (
+        *,
+        recipient_employee:employees!voice_note_recipients_recipient_employee_id_fkey (
+          id, full_name, employee_code, designation
+        )
+      ),
+      sender_employee:employees!voice_notes_sender_employee_id_fkey (
+        id, full_name, designation
+      )
+    `)
+    .eq('id', voiceNoteId)
+    .maybeSingle()
+  if (error) throw new Error('DATABASE_POLICY_ERROR')
+  return data as ReceivedNote | null
 }
 
 export async function uploadVoiceNote(userId: string, blob: Blob, mimeType: string): Promise<string> {
@@ -85,14 +130,14 @@ export async function uploadVoiceNote(userId: string, blob: Blob, mimeType: stri
     .from('voice-notes')
     .upload(path, blob, { contentType: mimeType })
 
-  if (error) throw new Error(error.message)
+  if (error) throw new Error('AUDIO_UPLOAD_FAILED')
   return path
 }
 
 export async function createVoiceNoteSignedUrl(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage
     .from('voice-notes')
-    .createSignedUrl(path, 300)
+    .createSignedUrl(path, 120)
   if (error || !data?.signedUrl) return null
   return data.signedUrl
 }
@@ -105,6 +150,7 @@ export async function sendVoiceNote(payload: {
   mime_type: string
   file_size_bytes: number
   duration_seconds?: number
+  request_id?: string
 }) {
   return callVoiceNoteAction('send', payload)
 }

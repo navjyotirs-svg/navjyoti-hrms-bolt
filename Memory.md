@@ -3049,3 +3049,124 @@ Team Tasks screen showed no tasks because PostgREST could not resolve the embedd
 - `assigned_to` (auth.users.id) remains for backward compatibility
 - `assigned_employee_id` (employees.id) is the canonical FK for PostgREST joins
 - Both columns are populated on every new assignment
+
+
+## Voice Notes RLS Recursion Fix — completed 2026-07-29
+
+### Problem
+Two production errors:
+1. Director/Manager "Sent Voice Notes": `infinite recursion detected in policy for relation "voice_note_recipients"`
+2. Employee "Voice Notes": `Access Denied` — route required send permission
+
+### Root Cause — RLS Recursion
+Exact recursive chain:
+- `voice_notes` SELECT policy (`select_own_sent_voice_notes`): queries `voice_note_recipients` to check if user is a recipient
+- `voice_note_recipients` SELECT policy (`select_voice_note_recipients`): queries `voice_notes` to check if user is the sender
+- Postgres re-evaluates both policies → infinite recursion
+
+### Root Cause — Employee Access Denied
+- `/voice-notes` route required `voice_note.send` OR `voice_note.read_sent`
+- Employees only had `voice_note.read_self` → Access Denied
+- The page had no tab system — it was a single management view
+
+### Migration: `fix_voice_notes_rls_recursion`
+1. Created 6 SECURITY DEFINER helper functions:
+   - `get_caller_org_id()` — returns caller's org UUID
+   - `get_caller_employee_id()` — returns caller's employee UUID
+   - `can_read_voice_note(p_voice_note_id)` — true if sender or recipient (bypasses RLS)
+   - `can_manage_voice_note(p_voice_note_note_id)` — true if sender only
+   - `is_voice_note_recipient(p_voice_note_id)` — true if recipient only
+   - `can_send_voice_note_to_employee(p_employee_id)` — validates org + reporting scope
+   - All use `auth.uid()`, fixed `search_path = public, auth`, granted only to `authenticated`
+
+2. Dropped all 6 recursive RLS policies (3 on voice_notes, 3 on voice_note_recipients)
+3. Dropped 3 recursive storage policies (vn_select, vn_insert, vn_delete)
+
+4. Created 6 non-recursive RLS policies:
+   - `vn_select_policy`: `USING (can_read_voice_note(id))` — no cross-table reference
+   - `vn_insert_policy`: sender + org check
+   - `vn_update_policy`: `can_manage_voice_note(id)`
+   - `vnr_select_policy`: `recipient_user_id = auth.uid() OR can_manage_voice_note(voice_note_id)`
+   - `vnr_insert_policy`: `can_manage_voice_note(voice_note_id)` (sender only)
+   - `vnr_update_policy`: `recipient_user_id = auth.uid()` (own play/ack fields only)
+   - No DELETE policies (soft-delete only)
+
+5. Created 3 non-recursive storage policies:
+   - `vn_storage_select`: owner folder OR sender OR recipient via `is_voice_note_recipient()`
+   - `vn_storage_insert`: own folder only
+   - `vn_storage_delete`: own folder only
+
+6. Added 5 granular permissions:
+   - `voice_note.send_team` — Manager
+   - `voice_note.send_all` — Director
+   - `voice_note.read_own` — Employee (replaces read_self)
+   - `voice_note.play_own` — Employee
+   - `voice_note.acknowledge_own` — Employee
+
+7. Assigned permissions to all 7 roles:
+   - Director: send_all + read_sent + read_own + play_own + acknowledge_own
+   - Manager: send_team + read_sent + read_own + play_own + acknowledge_own
+   - Employee: read_own + play_own + acknowledge_own
+   - HR Admin: read_own + play_own + acknowledge_own (no send)
+   - System Admin: read_own only (no audio content access)
+   - Intern: read_own + play_own + acknowledge_own
+   - Team Leader: read_own + play_own + acknowledge_own
+
+8. Reloaded PostgREST schema cache: `NOTIFY pgrst, 'reload schema'`
+
+### Frontend Changes
+1. **Route guard** (`App.tsx`):
+   - `/voice-notes` now accepts: send, send_team, send_all, read_sent, read_own, read_self
+   - Added `/voice-notes/:voiceNoteId` route for direct notification links
+   - Removed separate `/my-voice-notes` route (merged into VoiceNotesPage)
+
+2. **VoiceNotesPage** rewritten as tab-based:
+   - Record & Send tab (Director/Manager only): employee selector, title, message, MediaRecorder with Start/Stop/Pause/Resume/Preview/Re-record, 5min max, 15MB max, upload progress, error codes
+   - Sent Voice Notes tab (Director/Manager): table with recipient, title, duration, sent time, played, plays, acknowledged, status
+   - Received Voice Notes tab (all roles): filters (All/Unheard/Heard/Acknowledged), sender name, play, acknowledge, loading skeleton, empty state, error state + Retry
+   - Direct voice note ID from URL auto-opens player
+
+3. **voiceNotes.ts** rewritten:
+   - `fetchReceivedVoiceNotes`: starts from `voice_note_recipients`, embeds `voice_notes` with `sender_employee:employees!voice_notes_sender_employee_id_fkey`
+   - `fetchSentVoiceNotes`: starts from `voice_notes`, embeds `voice_note_recipients` with `recipient_employee:employees!voice_note_recipients_recipient_employee_id_fkey`
+   - Error handling: `DATABASE_POLICY_ERROR` instead of raw recursion error
+   - `getSupportedAudioMimeType()`: checks audio/webm, audio/ogg, audio/mp4
+
+4. **Edge function** `voice-note-action` updated:
+   - Idempotency via `request_id` — duplicate sends return existing voice note
+   - Notification: `actionUrl: /voice-notes/${voiceNote.id}` (exact note)
+   - Notification message: `You received a new voice note${safeTitle} from ${senderName}.`
+   - No audio URL or storage path in notification
+
+5. **Notification redirection**:
+   - `safeNavigate.ts`: central safe navigation handler — rejects `javascript:`, external origins
+   - `NotificationInboxPage`: clicking a notification navigates to `action_url` via safe handler
+   - Service worker already validates same-origin and focuses existing window
+
+6. **roles.ts**: Added new permission codes, labels, and updated nav item permissions
+
+### Tests
+- `src/lib/__tests__/voice_notes_fix.test.ts` — 46 tests covering:
+  - RLS recursion fix (5 tests)
+  - Permissions and route guard (6 tests)
+  - Record and send workflow (11 tests)
+  - Edge function idempotency and notifications (8 tests)
+  - Received tab (7 tests)
+  - Sent tab (3 tests)
+  - Notification redirection (5 tests)
+  - Production build (1 test)
+- All 46 tests PASS
+- TypeScript: PASS
+- Production build: PASS
+
+### Manual Production Verification
+NOT YET PERFORMED — user should test on https://hrms.ngspl.com:
+1. Login as Director → Voice Notes → no recursion error
+2. Select employee → record → preview → send
+3. Sent Voice Notes shows the new note
+4. Login as employee → Voice Notes → no Access Denied
+5. Received Voice Notes shows the note with sender name
+6. Click notification → opens exact voice note
+7. Play audio → works
+8. Acknowledge → works
+9. Sender sees played/acknowledged status update

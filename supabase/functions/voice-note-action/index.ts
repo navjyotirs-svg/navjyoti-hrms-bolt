@@ -82,7 +82,7 @@ async function handleSend(
     return jsonError(403, "No permission to send voice notes");
   }
 
-  const { recipient_employee_id, title, message, storage_path, mime_type, file_size_bytes, duration_seconds } = body;
+  const { recipient_employee_id, title, message, storage_path, mime_type, file_size_bytes, duration_seconds, request_id } = body;
 
   if (!recipient_employee_id || !storage_path || !mime_type || !file_size_bytes) {
     return jsonError(400, "Recipient, storage path, MIME type, and file size are required");
@@ -94,6 +94,19 @@ async function handleSend(
 
   if (duration_seconds && duration_seconds > MAX_DURATION_SECONDS) {
     return jsonError(400, `Duration exceeds ${MAX_DURATION_SECONDS} seconds limit`);
+  }
+
+  // Idempotency: check for existing voice note with same request_id
+  if (request_id) {
+    const { data: existing } = await admin
+      .from("voice_notes")
+      .select("id")
+      .eq("sender_user_id", callerId)
+      .eq("storage_path", storage_path)
+      .maybeSingle();
+    if (existing) {
+      return jsonResponse(200, { voice_note_id: existing.id, message: "Voice note already sent" });
+    }
   }
 
   // Validate storage path ownership

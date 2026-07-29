@@ -150,8 +150,13 @@ export type Permission =
   | 'task.self_assign'
   // Phase 9 — Voice Notes
   | 'voice_note.send'
+  | 'voice_note.send_team'
+  | 'voice_note.send_all'
   | 'voice_note.read_self'
+  | 'voice_note.read_own'
   | 'voice_note.read_sent'
+  | 'voice_note.play_own'
+  | 'voice_note.acknowledge_own'
   // Phase 9 — Projects
   | 'project.create'
   | 'project.read_self'
@@ -696,8 +701,13 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'export.sensitive': 'Export Sensitive Data',
   'task.self_assign': 'Self-Assign Task',
   'voice_note.send': 'Send Voice Note',
+  'voice_note.send_team': 'Send Voice Note (Team)',
+  'voice_note.send_all': 'Send Voice Note (All)',
   'voice_note.read_self': 'Read Own Voice Notes',
+  'voice_note.read_own': 'Read Own Voice Notes',
   'voice_note.read_sent': 'Read Sent Voice Notes',
+  'voice_note.play_own': 'Play Own Voice Notes',
+  'voice_note.acknowledge_own': 'Acknowledge Own Voice Notes',
   'project.create': 'Create Project',
   'project.read_self': 'Read Own Projects',
   'project.read_team': 'Read Team Projects',
@@ -930,7 +940,7 @@ export const NAV_ITEMS: NavItem[] = [
     id: 'voice-notes',
     label: 'Voice Notes',
     icon: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4a2 2 0 002 2h2a2 2 0 002-2v-4M12 2a3 3 0 013 3v6a3 3 0 01-6 0V5a3 3 0 013-3z',
-    permissions: ['voice_note.send', 'voice_note.read_self', 'voice_note.read_sent'],
+    permissions: ['voice_note.send', 'voice_note.send_team', 'voice_note.send_all', 'voice_note.read_self', 'voice_note.read_own', 'voice_note.read_sent', 'voice_note.play_own', 'voice_note.acknowledge_own'],
   },
   {
     id: 'settings',
