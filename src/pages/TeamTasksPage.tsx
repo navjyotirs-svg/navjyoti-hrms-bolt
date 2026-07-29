@@ -4,12 +4,14 @@ import { useAuth } from '@/auth/AuthContext'
 import { TASK_STATUS_LABELS, TASK_PRIORITY_LABELS, type TaskStatus, type TaskPriority } from '@/types/roles'
 import {
   fetchTeamTasks,
+  fetchTaskEvidenceCounts,
   formatDeadline,
   formatDeadlineShort,
   getAssigneeInitials,
   formatTaskCost,
   type TaskWithAssignments,
   type TaskAssignmentWithEmployee,
+  type TaskEvidenceCount,
 } from '@/lib/tasks'
 import { TaskSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
@@ -18,6 +20,7 @@ export function TeamTasksPage() {
   const navigate = useNavigate()
   const { permissions } = useAuth()
   const [tasks, setTasks] = useState<TaskWithAssignments[]>([])
+  const [evidenceCounts, setEvidenceCounts] = useState<Map<string, TaskEvidenceCount>>(new Map())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState('all')
@@ -31,6 +34,12 @@ export function TeamTasksPage() {
     try {
       const data = await fetchTeamTasks()
       setTasks(data)
+      try {
+        const counts = await fetchTaskEvidenceCounts(data.map(t => t.id))
+        setEvidenceCounts(counts)
+      } catch {
+        setEvidenceCounts(new Map())
+      }
     } catch (e) { setError((e as Error).message) }
     setLoading(false)
   }
@@ -74,6 +83,22 @@ export function TeamTasksPage() {
           <span style={{ fontSize: '12px', color: 'var(--slate)' }}>+{current.length - 3}</span>
         )}
       </div>
+    )
+  }
+
+  function EvidenceBadge({ taskId }: { taskId: string }) {
+    const ev = evidenceCounts.get(taskId)
+    if (!ev || ev.photo_count === 0) {
+      return <span style={{ fontSize: '12px', color: 'var(--slate)' }}>No Report Evidence</span>
+    }
+    return (
+      <button
+        className="btn btn-sm btn-secondary"
+        style={{ fontSize: '11px', padding: '3px 8px' }}
+        onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${taskId}/daily-report-evidence`) }}
+      >
+        {ev.daily_report_count} {ev.daily_report_count === 1 ? 'Report' : 'Reports'} / {ev.photo_count} Photos
+      </button>
     )
   }
 
@@ -130,6 +155,7 @@ export function TeamTasksPage() {
                     <th>Deadline</th>
                     <th>Cost</th>
                     <th>Outcome</th>
+                    <th>Evidence</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -145,6 +171,7 @@ export function TeamTasksPage() {
                       <td className="mono" style={{ whiteSpace: 'nowrap' }}>{formatDeadlineShort(t.deadline_at, t.current_deadline)}</td>
                       <td className="mono">{formatTaskCost(t.task_cost, t.task_cost_currency)}</td>
                       <td>{t.completion_outcome || '—'}</td>
+                      <td><EvidenceBadge taskId={t.id} /></td>
                       <td>
                         <button className="btn-sm" onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${t.id}`) }}>View</button>
                       </td>
@@ -171,10 +198,13 @@ export function TeamTasksPage() {
                   <div style={{ marginBottom: '8px' }}>
                     <AssigneeBadges assignments={t.task_assignments || []} />
                   </div>
-                  <div style={{ display: 'flex', gap: 'var(--space-3)', fontSize: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 'var(--space-3)', fontSize: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
                     <span><span className={`tag tag-${t.priority.toLowerCase()}`}>{TASK_PRIORITY_LABELS[t.priority as TaskPriority]}</span></span>
                     <span className="mono">{formatDeadline(t.deadline_at, t.current_deadline)}</span>
                     {t.task_cost != null && <span className="mono">{formatTaskCost(t.task_cost, t.task_cost_currency)}</span>}
+                  </div>
+                  <div style={{ marginTop: '8px' }}>
+                    <EvidenceBadge taskId={t.id} />
                   </div>
                 </div>
               ))}

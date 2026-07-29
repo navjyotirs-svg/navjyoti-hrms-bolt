@@ -43,6 +43,7 @@ import { MyTicketsPage } from '@/pages/MyTicketsPage'
 import { TicketDetailPage } from '@/pages/TicketDetailPage'
 import { TicketManagementPage } from '@/pages/TicketManagementPage'
 import { DailyReportPage } from '@/pages/DailyReportPage'
+import { TaskEvidenceViewerPage } from '@/pages/TaskEvidenceViewerPage'
 import { MyReportHistoryPage } from '@/pages/MyReportHistoryPage'
 import { TeamReportsPage } from '@/pages/TeamReportsPage'
 import { ReportReviewPage } from '@/pages/ReportReviewPage'
@@ -220,6 +221,9 @@ function AppRoutes() {
         } />
         <Route path="/team-tasks" element={
           <PermissionRoute permissions={['task.read_team', 'task.read_all', 'task.review']}><TeamTasksPage /></PermissionRoute>
+        } />
+        <Route path="/tasks/:taskId/daily-report-evidence" element={
+          <PermissionRoute permissions={['task.read_team', 'task.read_all', 'task.review']}><TaskEvidenceViewerPage /></PermissionRoute>
         } />
         <Route path="/task-review" element={
           <PermissionRoute permissions={['task.review', 'task.read_all']}><TaskReviewPage /></PermissionRoute>

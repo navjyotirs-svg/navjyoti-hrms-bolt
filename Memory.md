@@ -3262,3 +3262,113 @@ NOT YET PERFORMED — user should test on https://hrms.ngspl.com with a NEWLY RE
 13. Sender sees first-played and acknowledged update without reload
 14. Old corrupt notes show "Audio recording is unavailable" instead of broken player
 
+## Daily Report Multiple-Photo Upload — completed 2026-07-29
+
+### Problem
+The My Daily Report photo-upload feature was incomplete: no immediate preview, no per-photo upload status, no image processing, photos disappeared after reload, and Director/Manager had no way to view evidence from Team Tasks.
+
+### Root Causes
+1. **No immediate preview**: Photos uploaded one-by-one without showing previews first
+2. **No per-photo status**: Generic "Uploading…" instead of per-photo progress
+3. **No image processing in DailyReportPage**: Skipped `processImage` compression
+4. **No Team Tasks evidence integration**: No evidence count or viewer
+
+### Changes Made
+
+**DailyReportPage.tsx (rewritten):**
+- Multiple photo selection via `<input type="file" multiple accept="image/jpeg,image/png,image/webp">`
+- Immediate preview: object URLs created on selection, shown before upload
+- Per-photo status: SELECTED → PROCESSING → UPLOADING → UPLOADED / FAILED
+- Per-photo progress bar, file name, file size, status text
+- Per-photo Retry and Remove buttons
+- Auto-draft: `ensureDraft()` creates DRAFT report before upload if none exists
+- "Preparing your Daily Report…" message during draft creation
+- Image processing: `processImage()` called for each photo (resize 1920px, compress 82-85%)
+- HEIC rejection with message
+- Photo counter: "N of 10 photos added"
+- Limit enforcement: 10 photos max, 10MB per file, 50MB total
+- Save Draft preserves photos (they're already linked via metadata)
+- Reload restores all photos via `fetchTaskPhotos` + signed URLs
+- Submit blocked while uploads pending: "Please wait for all photos to finish uploading."
+- Read-only after submission (fields disabled, remove hidden)
+- Captions for uploaded photos
+- Lightbox slider via PhotoSlider component
+
+**PhotoSlider.tsx (new component):**
+- Full-screen lightbox with large current image
+- Previous/Next buttons
+- Keyboard left/right arrow navigation
+- Mobile swipe support (touchstart/touchend)
+- Thumbnail strip with active indicator
+- Photo counter: "2 / 6"
+- Caption, file name, upload date display
+- Fullscreen toggle
+- Close button (or Escape key)
+- `object-fit: contain` — no cropping
+- No autoplay
+
+**TaskEvidenceViewerPage.tsx (new page):**
+- Route: `/tasks/:taskId/daily-report-evidence`
+- Shows task title, code, project name
+- Groups evidence by employee (sorted alphabetically)
+- Each employee section: avatar, name, employee code, report date, photo count
+- Report summary: overall summary, work completed, result, blockers, support required
+- Photo grid with lazy-loaded signed URLs
+- Click photo → opens PhotoSlider
+- Multi-assignee tasks: evidence grouped per employee, not mixed
+
+**TeamTasksPage.tsx (rewritten):**
+- Evidence count badge per task row
+- Shows "No Report Evidence" or "N Reports / M Photos"
+- "View Daily Report Evidence" button navigates to evidence viewer
+- Evidence query failure doesn't break Team Tasks (falls back to empty map)
+
+**tasks.ts (updated):**
+- New `fetchTaskEvidenceCounts(taskIds)`: returns Map of task_id → {daily_report_count, photo_count, latest_report_date}
+- Queries `daily_report_task_items` joined with `daily_reports` and counts photos
+- Separate query (not nested join) to avoid breaking Team Tasks
+
+**App.tsx (updated):**
+- New route: `/tasks/:taskId/daily-report-evidence` → TaskEvidenceViewerPage
+- Permission: task.read_team, task.read_all, task.review
+
+### Storage
+- Bucket: `daily-report-task-photos` (private, confirmed)
+- Path: `{userId}/{reportId}/{randomUuid}.{ext}`
+- Signed URLs: 300-second expiry, generated on demand
+- No public URLs, no base64 in database
+
+### Tests
+- `src/lib/__tests__/daily_report_photos.test.ts` — 50 tests covering:
+  - Gallery selection (4 tests)
+  - Immediate preview (4 tests)
+  - Upload validation (5 tests)
+  - Image processing (3 tests)
+  - Auto-draft (3 tests)
+  - Storage and metadata (4 tests)
+  - Save and reload (3 tests)
+  - Submission (3 tests)
+  - Photo slider (10 tests)
+  - Team Tasks evidence (5 tests)
+  - Evidence viewer (4 tests)
+  - Production build (2 tests)
+- All 50 tests PASS
+- TypeScript: PASS
+- Production build: PASS
+
+### Manual Production Verification
+NOT YET PERFORMED — user should test on https://hrms.ngspl.com:
+1. Login as Employee → My Daily Report
+2. Click Upload Photos → select 5+ photos
+3. Confirm all 5 previews appear immediately
+4. Confirm per-photo upload progress
+5. Remove one photo → confirm it disappears
+6. Save Draft → reload → confirm photos remain
+7. Submit Report → confirm employee can't delete submitted photos
+8. Login as Director/Manager → Team Tasks
+9. Confirm evidence count badge appears on task rows
+10. Click View Daily Report Evidence → confirm photos load in slider
+11. Test next/previous/thumbnails/fullscreen in slider
+12. Test multi-assignee task → confirm evidence grouped by employee
+
+

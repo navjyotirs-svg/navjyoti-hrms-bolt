@@ -500,3 +500,70 @@ export async function removeTaskAssignee(payload: {
 }) {
   return callTaskAction('remove_assignee', payload)
 }
+
+export interface TaskEvidenceCount {
+  task_id: string
+  daily_report_count: number
+  photo_count: number
+  latest_report_date: string | null
+}
+
+export async function fetchTaskEvidenceCounts(taskIds: string[]): Promise<Map<string, TaskEvidenceCount>> {
+  const result = new Map<string, TaskEvidenceCount>()
+  if (taskIds.length === 0) return result
+
+  const { data, error } = await supabase
+    .from('daily_report_task_items')
+    .select(`
+      task_id,
+      daily_report_id,
+      daily_reports!inner ( id, report_date )
+    `)
+    .in('task_id', taskIds)
+
+  if (error || !data) return result
+
+  const taskReportMap = new Map<string, Set<string>>()
+  const taskLatestDate = new Map<string, string>()
+  const taskReportIds = new Set<string>()
+
+  ;(data as any[]).forEach((item) => {
+    if (!item.task_id) return
+    const reportId = item.daily_report_id
+    if (!reportId) return
+    if (!taskReportMap.has(item.task_id)) taskReportMap.set(item.task_id, new Set())
+    taskReportMap.get(item.task_id)!.add(reportId)
+    taskReportIds.add(reportId)
+    const reportDate = item.daily_reports?.report_date
+    if (reportDate) {
+      const existing = taskLatestDate.get(item.task_id)
+      if (!existing || reportDate > existing) taskLatestDate.set(item.task_id, reportDate)
+    }
+  })
+
+  let photoCountMap = new Map<string, number>()
+  if (taskReportIds.size > 0) {
+    const { data: photos } = await supabase
+      .from('daily_report_task_photos')
+      .select('daily_report_id')
+      .in('daily_report_id', Array.from(taskReportIds))
+      .is('deleted_at', null)
+    ;(photos || []).forEach((p: any) => {
+      photoCountMap.set(p.daily_report_id, (photoCountMap.get(p.daily_report_id) || 0) + 1)
+    })
+  }
+
+  for (const [taskId, reportSet] of taskReportMap) {
+    let photoCount = 0
+    for (const rid of reportSet) { photoCount += photoCountMap.get(rid) || 0 }
+    result.set(taskId, {
+      task_id: taskId,
+      daily_report_count: reportSet.size,
+      photo_count: photoCount,
+      latest_report_date: taskLatestDate.get(taskId) || null,
+    })
+  }
+
+  return result
+}
+

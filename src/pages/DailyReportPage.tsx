@@ -2,12 +2,30 @@ import { useEffect, useRef, useState } from 'react'
 import {
   getKolkataDate, fetchMyReport, saveDraft, submitReport,
   fetchTaskPhotos, uploadTaskPhoto, deleteTaskPhoto,
-  createTaskPhotoSignedUrl, validatePhotoFile, MAX_PHOTOS_PER_TASK_ITEM,
+  createTaskPhotoSignedUrl, validatePhotoFile,
+  MAX_PHOTOS_PER_TASK_ITEM, MAX_TOTAL_PHOTO_BYTES_PER_TASK_ITEM,
   type DailyReportRow, type DailyReportTaskPhoto,
 } from '@/lib/dailyReports'
 import { DailyReportSkeleton } from '@/components/Skeleton'
 import { useAuth } from '@/auth/AuthContext'
+import { processImage, isHeic } from '@/lib/imageProcessing'
+import { PhotoSlider } from '@/components/PhotoSlider'
 import '@/styles/shared.css'
+
+type PhotoStatus = 'SELECTED' | 'PROCESSING' | 'UPLOADING' | 'UPLOADED' | 'FAILED' | 'REMOVED'
+
+interface PhotoEntry {
+  id: string
+  file: File | null
+  previewUrl: string | null
+  signedUrl: string | null
+  photo: DailyReportTaskPhoto | null
+  status: PhotoStatus
+  progress: number
+  error: string | null
+  caption: string
+  displayOrder: number
+}
 
 export function DailyReportPage() {
   const today = getKolkataDate()
@@ -19,11 +37,9 @@ export function DailyReportPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  const [photos, setPhotos] = useState<DailyReportTaskPhoto[]>([])
-  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [lightbox, setLightbox] = useState<string | null>(null)
+  const [photos, setPhotos] = useState<PhotoEntry[]>([])
+  const [preparingDraft, setPreparingDraft] = useState(false)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const galleryRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState({
@@ -62,7 +78,6 @@ export function DailyReportPage() {
         setExisting(null)
         setForm({ overall_summary: '', work_planned: '', work_completed: '', overall_result: '', pending_work: '', blockers: '', support_required: '', follow_up_required: false, tomorrow_plan: '' })
         setPhotos([])
-        setPhotoUrls({})
       }
     } catch (e) { setError((e as Error).message) }
     setLoading(false)
@@ -71,68 +86,185 @@ export function DailyReportPage() {
   async function loadPhotos(reportId: string) {
     try {
       const list = await fetchTaskPhotos(reportId)
-      setPhotos(list)
-      const urls: Record<string, string> = {}
-      await Promise.all(list.map(async (p) => {
-        const url = await createTaskPhotoSignedUrl(p.storage_path)
-        if (url) urls[p.id] = url
+      const entries: PhotoEntry[] = await Promise.all(list.map(async (p, i) => {
+        const signedUrl = await createTaskPhotoSignedUrl(p.storage_path).catch(() => null)
+        return {
+          id: p.id,
+          file: null,
+          previewUrl: null,
+          signedUrl,
+          photo: p,
+          status: 'UPLOADED' as PhotoStatus,
+          progress: 100,
+          error: null,
+          caption: p.caption || '',
+          displayOrder: i,
+        }
       }))
-      setPhotoUrls(urls)
+      setPhotos(entries)
     } catch { /* best-effort */ }
   }
 
   const isReadOnly = !!(existing && !['draft', 'returned'].includes(existing.status))
 
-  async function ensureDraft(): Promise<string> {
+  async function ensureDraft(): Promise<string | null> {
     if (existing?.id) return existing.id
-    const result = await saveDraft({ report_date: reportDate, ...form, task_items: [] })
-    const id: string = result.report_id
-    await loadReport()
-    return id
+    setPreparingDraft(true)
+    try {
+      const result = await saveDraft({ report_date: reportDate, ...form, task_items: [] })
+      const id: string = result.report_id
+      const data = await fetchMyReport(reportDate)
+      if (data) {
+        setExisting(data as DailyReportRow)
+        const existingPhotos = [...photos]
+        await loadPhotos(id)
+        setPhotos((prev) => {
+          const merged = [...existingPhotos.filter(p => p.photo === null), ...prev]
+          return merged
+        })
+      }
+      return id
+    } catch (e) {
+      setError('REPORT_DRAFT_CREATION_FAILED')
+      return null
+    } finally {
+      setPreparingDraft(false)
+    }
   }
 
   async function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || [])
     if (!files.length) return
+    if (galleryRef.current) galleryRef.current.value = ''
+
     if (photos.length + files.length > MAX_PHOTOS_PER_TASK_ITEM) {
-      setUploadError(`You can upload at most ${MAX_PHOTOS_PER_TASK_ITEM} photos per report.`)
+      setError(`PHOTO_LIMIT_EXCEEDED: Maximum ${MAX_PHOTOS_PER_TASK_ITEM} photos per report.`)
       return
     }
-    for (const f of files) {
-      const err = validatePhotoFile(f)
-      if (err) { setUploadError(err); return }
-    }
-    setUploading(true); setUploadError(null)
-    try {
-      const reportId = await ensureDraft()
-      const orgId = profile?.organization_id || ''
-      const currentReport = existing || { id: reportId, employee_id: '' } as any
 
-      for (let i = 0; i < files.length; i++) {
-        const photo = await uploadTaskPhoto(
-          reportId,
-          null,
-          null,
-          currentReport.employee_id || '',
-          orgId,
-          files[i],
-          photos.length + i,
-        )
-        const url = await createTaskPhotoSignedUrl(photo.storage_path)
-        setPhotos(prev => [...prev, photo])
-        if (url) setPhotoUrls(prev => ({ ...prev, [photo.id]: url }))
+    const totalNewBytes = files.reduce((s, f) => s + f.size, 0)
+    const existingBytes = photos.filter(p => p.photo).reduce((s, p) => s + (p.photo?.file_size_bytes || 0), 0)
+    if (existingBytes + totalNewBytes > MAX_TOTAL_PHOTO_BYTES_PER_TASK_ITEM) {
+      setError('PHOTO_TOO_LARGE: Total photo size exceeds 50 MB limit per report.')
+      return
+    }
+
+    setError(null)
+
+    const newEntries: PhotoEntry[] = files.map((file, i) => ({
+      id: crypto.randomUUID(),
+      file,
+      previewUrl: URL.createObjectURL(file),
+      signedUrl: null,
+      photo: null,
+      status: 'SELECTED' as PhotoStatus,
+      progress: 0,
+      error: null,
+      caption: '',
+      displayOrder: photos.length + i,
+    }))
+    setPhotos(prev => [...prev, ...newEntries])
+
+    const reportId = await ensureDraft()
+    if (!reportId) {
+      setPhotos(prev => prev.map((p) => {
+        if (newEntries.find(ne => ne.id === p.id)) {
+          return { ...p, status: 'FAILED', error: 'REPORT_DRAFT_CREATION_FAILED' }
+        }
+        return p
+      }))
+      return
+    }
+
+    const orgId = profile?.organization_id || ''
+    const employeeId = (existing as any)?.employee_id || ''
+
+    for (const entry of newEntries) {
+      if (!entry.file) continue
+
+      if (isHeic(entry.file)) {
+        setPhotos(prev => prev.map(p => p.id === entry.id ? {
+          ...p, status: 'FAILED', error: 'HEIC images are not supported. Please upload JPG, PNG or WEBP.'
+        } : p))
+        continue
       }
-    } catch (e) { setUploadError((e as Error).message) }
-    setUploading(false)
-    if (galleryRef.current) galleryRef.current.value = ''
+
+      const validationError = validatePhotoFile(entry.file)
+      if (validationError) {
+        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, status: 'FAILED', error: validationError } : p))
+        continue
+      }
+
+      setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, status: 'PROCESSING', progress: 10 } : p))
+
+      let processedFile: File
+      try {
+        const processed = await processImage(entry.file)
+        const ext = processed.blob.type === 'image/webp' ? 'webp' : 'jpg'
+        processedFile = new File([processed.blob], entry.file.name.replace(/\.[^.]+$/, `.${ext}`), {
+          type: processed.blob.type || 'image/jpeg',
+        })
+      } catch {
+        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, status: 'FAILED', error: 'PHOTO_PROCESSING_FAILED' } : p))
+        continue
+      }
+
+      setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, status: 'UPLOADING', progress: 30 } : p))
+
+      try {
+        const photo = await uploadTaskPhoto(
+          reportId, null, null, employeeId, orgId, processedFile, entry.displayOrder, 'GALLERY', entry.caption
+        )
+        const signedUrl = await createTaskPhotoSignedUrl(photo.storage_path).catch(() => null)
+        setPhotos(prev => prev.map(p => p.id === entry.id ? {
+          ...p, status: 'UPLOADED', progress: 100, photo, signedUrl, error: null
+        } : p))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'PHOTO_UPLOAD_FAILED'
+        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, status: 'FAILED', error: msg } : p))
+      }
+    }
   }
 
-  async function handleDeletePhoto(photo: DailyReportTaskPhoto) {
+  async function handleRetryPhoto(entryId: string) {
+    const entry = photos.find(p => p.id === entryId)
+    if (!entry || !entry.file) return
+
+    setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'PROCESSING', progress: 10, error: null } : p))
+
+    const reportId = existing?.id
+    if (!reportId) { setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'FAILED', error: 'REPORT_DRAFT_CREATION_FAILED' } : p)); return }
+
+    const orgId = profile?.organization_id || ''
+    const employeeId = (existing as any)?.employee_id || ''
+
     try {
-      await deleteTaskPhoto(photo.id, photo.storage_path)
-      setPhotos(prev => prev.filter(p => p.id !== photo.id))
-      setPhotoUrls(prev => { const n = { ...prev }; delete n[photo.id]; return n })
-    } catch (e) { setUploadError((e as Error).message) }
+      const processed = await processImage(entry.file)
+      const ext = processed.blob.type === 'image/webp' ? 'webp' : 'jpg'
+      const processedFile = new File([processed.blob], entry.file.name.replace(/\.[^.]+$/, `.${ext}`), {
+        type: processed.blob.type || 'image/jpeg',
+      })
+      setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'UPLOADING', progress: 30 } : p))
+      const photo = await uploadTaskPhoto(reportId, null, null, employeeId, orgId, processedFile, entry.displayOrder, 'GALLERY', entry.caption)
+      const signedUrl = await createTaskPhotoSignedUrl(photo.storage_path).catch(() => null)
+      setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'UPLOADED', progress: 100, photo, signedUrl, error: null } : p))
+    } catch (err) {
+      setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'FAILED', error: err instanceof Error ? err.message : 'PHOTO_UPLOAD_FAILED' } : p))
+    }
+  }
+
+  function handleRemovePhoto(entryId: string) {
+    const entry = photos.find(p => p.id === entryId)
+    if (!entry) return
+    if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl)
+    if (entry.photo && !isReadOnly) {
+      deleteTaskPhoto(entry.photo.id, entry.photo.storage_path).catch(() => {})
+    }
+    setPhotos(prev => prev.filter(p => p.id !== entryId))
+  }
+
+  function handleCaptionChange(entryId: string, caption: string) {
+    setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, caption } : p))
   }
 
   async function handleSaveDraft() {
@@ -145,8 +277,11 @@ export function DailyReportPage() {
     setSaving(false)
   }
 
+  const hasPendingUploads = photos.some(p => p.status === 'PROCESSING' || p.status === 'UPLOADING')
+
   async function handleSubmit() {
     if (!form.overall_summary.trim()) { setError('Overall summary is required'); return }
+    if (hasPendingUploads) { setError('Please wait for all photos to finish uploading.'); return }
     setSaving(true); setError(null); setSuccess(null)
     try {
       await submitReport({ report_date: reportDate, ...form, task_items: [] })
@@ -155,6 +290,18 @@ export function DailyReportPage() {
     } catch (e) { setError((e as Error).message) }
     setSaving(false)
   }
+
+  const uploadedPhotos = photos.filter(p => p.status === 'UPLOADED' && (p.signedUrl || p.previewUrl))
+  const sliderImages = uploadedPhotos.map(p => ({
+    url: p.signedUrl || p.previewUrl || '',
+    caption: p.caption || p.photo?.file_name || '',
+    fileName: p.photo?.file_name || p.file?.name || '',
+    uploadedAt: p.photo?.uploaded_at || '',
+  }))
+
+  useEffect(() => {
+    return () => { photos.forEach(p => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl) }) }
+  }, [])
 
   return (
     <div className="page">
@@ -192,7 +339,7 @@ export function DailyReportPage() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
                 <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0 }}>
                   Photos
-                  {photos.length > 0 && <span style={{ marginLeft: '8px', fontWeight: 400, color: 'var(--slate)', fontSize: '13px' }}>({photos.length})</span>}
+                  {photos.length > 0 && <span style={{ marginLeft: '8px', fontWeight: 400, color: 'var(--slate)', fontSize: '13px' }}>{photos.length} of {MAX_PHOTOS_PER_TASK_ITEM} photos added</span>}
                 </h3>
                 {!isReadOnly && photos.length < MAX_PHOTOS_PER_TASK_ITEM && (
                   <label style={{ cursor: 'pointer' }}>
@@ -203,45 +350,96 @@ export function DailyReportPage() {
                       multiple
                       style={{ display: 'none' }}
                       onChange={handlePhotoSelect}
-                      disabled={uploading}
+                      disabled={preparingDraft}
                     />
-                    <span className="btn btn-sm btn-secondary" style={{ pointerEvents: uploading ? 'none' : 'auto', opacity: uploading ? 0.6 : 1 }}>
-                      {uploading ? 'Uploading…' : 'Upload Photos'}
+                    <span className="btn btn-sm btn-secondary" style={{ pointerEvents: preparingDraft ? 'none' : 'auto', opacity: preparingDraft ? 0.6 : 1 }}>
+                      {preparingDraft ? 'Preparing your Daily Report…' : 'Upload Photos'}
                     </span>
                   </label>
                 )}
               </div>
-
-              {uploadError && <div className="form-error" style={{ marginBottom: '8px' }}>{uploadError}</div>}
 
               {photos.length === 0 ? (
                 <div style={{ fontSize: '13px', color: 'var(--slate)', padding: 'var(--space-2) 0' }}>
                   {isReadOnly ? 'No photos attached to this report.' : 'Upload photos from your gallery to attach evidence to this report.'}
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 'var(--space-2)' }}>
-                  {photos.map(p => (
-                    <div key={p.id} style={{ position: 'relative', aspectRatio: '1', borderRadius: '6px', overflow: 'hidden', background: '#f0f0f0', cursor: 'pointer' }}>
-                      {photoUrls[p.id] ? (
-                        <img
-                          src={photoUrls[p.id]}
-                          alt={p.file_name}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          onClick={() => setLightbox(photoUrls[p.id])}
-                        />
-                      ) : (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', color: 'var(--slate)' }}>…</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 'var(--space-2)' }}>
+                  {photos.map((p) => (
+                    <div key={p.id} style={{ position: 'relative', borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                      <div style={{ aspectRatio: '1', position: 'relative' }}>
+                        {(p.signedUrl || p.previewUrl) && (p.status === 'UPLOADED' || p.status === 'SELECTED') ? (
+                          <img
+                            src={p.signedUrl || p.previewUrl || ''}
+                            alt={p.photo?.file_name || p.file?.name || ''}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }}
+                            onClick={() => {
+                              const sliderIdx = uploadedPhotos.findIndex(up => up.id === p.id)
+                              if (sliderIdx >= 0) setLightboxIndex(sliderIdx)
+                            }}
+                          />
+                        ) : (
+                          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', padding: '4px' }}>
+                            {p.status === 'PROCESSING' && <span style={{ fontSize: '11px', color: 'var(--slate)' }}>Processing…</span>}
+                            {p.status === 'UPLOADING' && (
+                              <>
+                                <span style={{ fontSize: '11px', color: 'var(--slate)' }}>Uploading…</span>
+                                <div style={{ width: '70%', height: '3px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden' }}>
+                                  <div style={{ width: `${p.progress}%`, height: '100%', background: 'var(--teal)', transition: 'width 0.3s' }} />
+                                </div>
+                              </>
+                            )}
+                            {p.status === 'FAILED' && <span style={{ fontSize: '10px', color: 'var(--rose)', textAlign: 'center' }}>Failed</span>}
+                          </div>
+                        )}
+                      </div>
+                      {/* Info bar */}
+                      <div style={{ padding: '4px 6px', fontSize: '10px', color: 'var(--slate)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {p.photo?.file_name || p.file?.name || ''}
+                      </div>
+                      <div style={{ padding: '0 6px 4px', fontSize: '9px', color: 'var(--slate)' }}>
+                        {p.photo ? `${(p.photo.file_size_bytes / 1024).toFixed(0)} KB` : p.file ? `${(p.file.size / 1024).toFixed(0)} KB` : ''}
+                        {' · '}
+                        {p.status === 'UPLOADED' && <span style={{ color: 'var(--teal)' }}>Uploaded</span>}
+                        {p.status === 'SELECTED' && <span style={{ color: 'var(--slate)' }}>Selected</span>}
+                        {p.status === 'PROCESSING' && <span style={{ color: 'var(--slate)' }}>Processing</span>}
+                        {p.status === 'UPLOADING' && <span style={{ color: 'var(--slate)' }}>{p.progress}%</span>}
+                        {p.status === 'FAILED' && <span style={{ color: 'var(--rose)' }}>Failed</span>}
+                      </div>
+                      {/* Action buttons */}
+                      <div style={{ position: 'absolute', top: '4px', right: '4px', display: 'flex', gap: '2px' }}>
+                        {p.status === 'FAILED' && (
+                          <button type="button" onClick={() => handleRetryPhoto(p.id)} title="Retry"
+                            style={{ background: 'rgba(0,0,0,0.55)', color: 'white', border: 'none', borderRadius: '50%', width: '20px', height: '20px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                            ↻
+                          </button>
+                        )}
+                        {!isReadOnly && (
+                          <button type="button" onClick={() => handleRemovePhoto(p.id)} title="Remove"
+                            style={{ background: 'rgba(0,0,0,0.55)', color: 'white', border: 'none', borderRadius: '50%', width: '20px', height: '20px', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                            ×
+                          </button>
+                        )}
+                      </div>
+                      {/* Error tooltip */}
+                      {p.error && (
+                        <div style={{ position: 'absolute', bottom: '0', left: '0', right: '0', background: 'rgba(220,38,38,0.9)', color: 'white', fontSize: '9px', padding: '2px 4px', lineHeight: 1.2 }}>
+                          {p.error}
+                        </div>
                       )}
-                      {!isReadOnly && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeletePhoto(p)}
-                          style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(0,0,0,0.55)', color: 'white', border: 'none', borderRadius: '50%', width: '22px', height: '22px', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}
-                          title="Remove photo"
-                        >
-                          ×
-                        </button>
-                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Captions for uploaded photos */}
+              {uploadedPhotos.length > 0 && !isReadOnly && (
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  {photos.filter(p => p.status === 'UPLOADED').map(p => (
+                    <div key={`cap-${p.id}`} style={{ display: 'flex', gap: 'var(--space-1)', marginBottom: 'var(--space-1)', alignItems: 'center' }}>
+                      <input type="text" placeholder={`Caption for ${(p.photo?.file_name || p.file?.name || '').slice(0, 20)}…`}
+                        value={p.caption} onChange={(e) => handleCaptionChange(p.id, e.target.value)}
+                        style={{ flex: 1, fontSize: '12px', minHeight: '28px' }} />
                     </div>
                   ))}
                 </div>
@@ -255,70 +453,44 @@ export function DailyReportPage() {
             </div>
 
             <div className="form-grid" style={{ marginBottom: 'var(--space-4)' }}>
-              <div className="form-field">
-                <label>Work Planned</label>
-                <textarea rows={3} value={form.work_planned} onChange={(e) => setForm({ ...form, work_planned: e.target.value })} disabled={isReadOnly} />
-              </div>
-              <div className="form-field">
-                <label>Work Completed</label>
-                <textarea rows={3} value={form.work_completed} onChange={(e) => setForm({ ...form, work_completed: e.target.value })} disabled={isReadOnly} />
-              </div>
+              <div className="form-field"><label>Work Planned</label><textarea rows={3} value={form.work_planned} onChange={(e) => setForm({ ...form, work_planned: e.target.value })} disabled={isReadOnly} /></div>
+              <div className="form-field"><label>Work Completed</label><textarea rows={3} value={form.work_completed} onChange={(e) => setForm({ ...form, work_completed: e.target.value })} disabled={isReadOnly} /></div>
             </div>
 
             <div className="form-grid" style={{ marginBottom: 'var(--space-4)' }}>
-              <div className="form-field">
-                <label>Overall Result</label>
-                <textarea rows={2} value={form.overall_result} onChange={(e) => setForm({ ...form, overall_result: e.target.value })} disabled={isReadOnly} />
-              </div>
-              <div className="form-field">
-                <label>Pending Work</label>
-                <textarea rows={2} value={form.pending_work} onChange={(e) => setForm({ ...form, pending_work: e.target.value })} disabled={isReadOnly} />
-              </div>
+              <div className="form-field"><label>Overall Result</label><textarea rows={2} value={form.overall_result} onChange={(e) => setForm({ ...form, overall_result: e.target.value })} disabled={isReadOnly} /></div>
+              <div className="form-field"><label>Pending Work</label><textarea rows={2} value={form.pending_work} onChange={(e) => setForm({ ...form, pending_work: e.target.value })} disabled={isReadOnly} /></div>
             </div>
 
             <div className="form-grid" style={{ marginBottom: 'var(--space-4)' }}>
-              <div className="form-field">
-                <label>Blockers</label>
-                <textarea rows={2} value={form.blockers} onChange={(e) => setForm({ ...form, blockers: e.target.value })} disabled={isReadOnly} />
-              </div>
-              <div className="form-field">
-                <label>Support Required</label>
-                <textarea rows={2} value={form.support_required} onChange={(e) => setForm({ ...form, support_required: e.target.value })} disabled={isReadOnly} />
-              </div>
+              <div className="form-field"><label>Blockers</label><textarea rows={2} value={form.blockers} onChange={(e) => setForm({ ...form, blockers: e.target.value })} disabled={isReadOnly} /></div>
+              <div className="form-field"><label>Support Required</label><textarea rows={2} value={form.support_required} onChange={(e) => setForm({ ...form, support_required: e.target.value })} disabled={isReadOnly} /></div>
             </div>
 
             <div className="form-grid" style={{ marginBottom: 'var(--space-4)' }}>
-              <div className="form-field">
-                <label>Tomorrow's Plan</label>
-                <textarea rows={2} value={form.tomorrow_plan} onChange={(e) => setForm({ ...form, tomorrow_plan: e.target.value })} disabled={isReadOnly} />
-              </div>
-              <div className="form-field">
-                <label>Follow-up Required</label>
-                <select value={form.follow_up_required ? 'yes' : 'no'} onChange={(e) => setForm({ ...form, follow_up_required: e.target.value === 'yes' })} disabled={isReadOnly}>
-                  <option value="no">No</option>
-                  <option value="yes">Yes</option>
-                </select>
-              </div>
+              <div className="form-field"><label>Tomorrow's Plan</label><textarea rows={2} value={form.tomorrow_plan} onChange={(e) => setForm({ ...form, tomorrow_plan: e.target.value })} disabled={isReadOnly} /></div>
+              <div className="form-field"><label>Follow-up Required</label><select value={form.follow_up_required ? 'yes' : 'no'} onChange={(e) => setForm({ ...form, follow_up_required: e.target.value === 'yes' })} disabled={isReadOnly}><option value="no">No</option><option value="yes">Yes</option></select></div>
             </div>
 
             {!isReadOnly && (
               <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-                <button className="btn btn-secondary" onClick={handleSaveDraft} disabled={saving}>Save Draft</button>
-                <button className="btn btn-primary" onClick={handleSubmit} disabled={saving}>Submit Report</button>
+                <button className="btn btn-secondary" onClick={handleSaveDraft} disabled={saving || preparingDraft}>Save Draft</button>
+                <button className="btn btn-primary" onClick={handleSubmit} disabled={saving || hasPendingUploads}>
+                  {saving ? 'Submitting…' : 'Submit Report'}
+                </button>
               </div>
             )}
           </>
         )}
       </div>
 
-      {/* LIGHTBOX */}
-      {lightbox && (
-        <div
-          onClick={() => setLightbox(null)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, cursor: 'zoom-out' }}
-        >
-          <img src={lightbox} alt="Preview" style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '8px', objectFit: 'contain' }} />
-        </div>
+      {/* LIGHTBOX / SLIDER */}
+      {lightboxIndex !== null && sliderImages.length > 0 && (
+        <PhotoSlider
+          images={sliderImages}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
       )}
     </div>
   )
