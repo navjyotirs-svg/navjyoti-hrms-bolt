@@ -139,6 +139,19 @@ describe('Daily Report Photos — Auto-Draft', () => {
     const src = readFile('src/pages/DailyReportPage.tsx')
     assert.ok(src.includes('REPORT_DRAFT_CREATION_FAILED'), 'Draft creation error code')
   })
+
+  test('19a. ensureDraft returns reportId, employeeId, orgId (not stale state)', () => {
+    const src = readFile('src/pages/DailyReportPage.tsx')
+    assert.ok(src.includes('Promise<{ reportId: string; employeeId: string; orgId: string } | null>'), 'Returns structured object')
+    assert.ok(src.includes('const { reportId, employeeId, orgId } = draft'), 'Destructures from draft result')
+    assert.ok(!src.includes("(existing as any)?.employee_id || ''\n\n    for (const entry"), 'Does not use stale existing state for employeeId')
+  })
+
+  test('19b. ensureDraft fetches report data to get employee_id', () => {
+    const src = readFile('src/pages/DailyReportPage.tsx')
+    assert.ok(src.includes('fetchMyReport(reportDate)'), 'Fetches report to get employee_id')
+    assert.ok(src.includes('employeeId: (data as any).employee_id'), 'Gets employeeId from fetched data')
+  })
 })
 
 // ============================================================

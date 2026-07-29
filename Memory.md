@@ -3371,4 +3371,13 @@ NOT YET PERFORMED — user should test on https://hrms.ngspl.com:
 11. Test next/previous/thumbnails/fullscreen in slider
 12. Test multi-assignee task → confirm evidence grouped by employee
 
+### Bug Fix: Stale employeeId closure (2026-07-29)
+**Root cause:** When `ensureDraft()` created a new draft via `setExisting()`, the `handlePhotoSelect` closure still held the OLD `existing` value (null). So `employeeId = (existing as any)?.employee_id || ''` evaluated to `''` (empty string). The database INSERT failed because `employee_id` is NOT NULL with a foreign key constraint.
+
+**Fix:** `ensureDraft()` now returns `{ reportId, employeeId, orgId }` directly from the `fetchMyReport()` response, instead of relying on stale React state. The caller destructures these values: `const { reportId, employeeId, orgId } = draft`.
+
+**Secondary fix:** Removed the `loadPhotos` call inside `ensureDraft` that was overwriting in-flight photo entries with empty DB results. `ensureDraft` now only creates the draft and returns the IDs — photo loading happens during `loadReport` (page load/reload).
+
+**Tests added:** 2 new tests (52 total) verifying ensureDraft returns structured object and fetches employeeId from fresh data.
+
 

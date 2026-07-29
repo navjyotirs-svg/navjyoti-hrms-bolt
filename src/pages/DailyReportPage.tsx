@@ -107,23 +107,28 @@ export function DailyReportPage() {
 
   const isReadOnly = !!(existing && !['draft', 'returned'].includes(existing.status))
 
-  async function ensureDraft(): Promise<string | null> {
-    if (existing?.id) return existing.id
+  async function ensureDraft(): Promise<{ reportId: string; employeeId: string; orgId: string } | null> {
+    if (existing?.id) {
+      return {
+        reportId: existing.id,
+        employeeId: (existing as any).employee_id || '',
+        orgId: (existing as any).organization_id || profile?.organization_id || '',
+      }
+    }
     setPreparingDraft(true)
     try {
-      const result = await saveDraft({ report_date: reportDate, ...form, task_items: [] })
-      const id: string = result.report_id
+      await saveDraft({ report_date: reportDate, ...form, task_items: [] })
       const data = await fetchMyReport(reportDate)
       if (data) {
         setExisting(data as DailyReportRow)
-        const existingPhotos = [...photos]
-        await loadPhotos(id)
-        setPhotos((prev) => {
-          const merged = [...existingPhotos.filter(p => p.photo === null), ...prev]
-          return merged
-        })
+        return {
+          reportId: data.id,
+          employeeId: (data as any).employee_id || '',
+          orgId: (data as any).organization_id || profile?.organization_id || '',
+        }
       }
-      return id
+      setError('REPORT_DRAFT_CREATION_FAILED')
+      return null
     } catch (e) {
       setError('REPORT_DRAFT_CREATION_FAILED')
       return null
@@ -165,8 +170,8 @@ export function DailyReportPage() {
     }))
     setPhotos(prev => [...prev, ...newEntries])
 
-    const reportId = await ensureDraft()
-    if (!reportId) {
+    const draft = await ensureDraft()
+    if (!draft) {
       setPhotos(prev => prev.map((p) => {
         if (newEntries.find(ne => ne.id === p.id)) {
           return { ...p, status: 'FAILED', error: 'REPORT_DRAFT_CREATION_FAILED' }
@@ -176,8 +181,7 @@ export function DailyReportPage() {
       return
     }
 
-    const orgId = profile?.organization_id || ''
-    const employeeId = (existing as any)?.employee_id || ''
+    const { reportId, employeeId, orgId } = draft
 
     for (const entry of newEntries) {
       if (!entry.file) continue
@@ -198,8 +202,12 @@ export function DailyReportPage() {
       setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, status: 'PROCESSING', progress: 10 } : p))
 
       let processedFile: File
+      let imgWidth: number | undefined
+      let imgHeight: number | undefined
       try {
         const processed = await processImage(entry.file)
+        imgWidth = processed.width
+        imgHeight = processed.height
         const ext = processed.blob.type === 'image/webp' ? 'webp' : 'jpg'
         processedFile = new File([processed.blob], entry.file.name.replace(/\.[^.]+$/, `.${ext}`), {
           type: processed.blob.type || 'image/jpeg',
@@ -213,7 +221,7 @@ export function DailyReportPage() {
 
       try {
         const photo = await uploadTaskPhoto(
-          reportId, null, null, employeeId, orgId, processedFile, entry.displayOrder, 'GALLERY', entry.caption
+          reportId, null, null, employeeId, orgId, processedFile, entry.displayOrder, 'GALLERY', entry.caption, imgWidth, imgHeight
         )
         const signedUrl = await createTaskPhotoSignedUrl(photo.storage_path).catch(() => null)
         setPhotos(prev => prev.map(p => p.id === entry.id ? {
@@ -235,7 +243,7 @@ export function DailyReportPage() {
     const reportId = existing?.id
     if (!reportId) { setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'FAILED', error: 'REPORT_DRAFT_CREATION_FAILED' } : p)); return }
 
-    const orgId = profile?.organization_id || ''
+    const orgId = (existing as any)?.organization_id || profile?.organization_id || ''
     const employeeId = (existing as any)?.employee_id || ''
 
     try {
@@ -245,7 +253,7 @@ export function DailyReportPage() {
         type: processed.blob.type || 'image/jpeg',
       })
       setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'UPLOADING', progress: 30 } : p))
-      const photo = await uploadTaskPhoto(reportId, null, null, employeeId, orgId, processedFile, entry.displayOrder, 'GALLERY', entry.caption)
+      const photo = await uploadTaskPhoto(reportId, null, null, employeeId, orgId, processedFile, entry.displayOrder, 'GALLERY', entry.caption, processed.width, processed.height)
       const signedUrl = await createTaskPhotoSignedUrl(photo.storage_path).catch(() => null)
       setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, status: 'UPLOADED', progress: 100, photo, signedUrl, error: null } : p))
     } catch (err) {

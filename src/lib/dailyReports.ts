@@ -419,7 +419,9 @@ export async function uploadTaskPhoto(
   file: File,
   displayOrder: number,
   sourceType: string = 'GALLERY',
-  caption?: string
+  caption?: string,
+  width?: number,
+  height?: number
 ): Promise<DailyReportTaskPhoto> {
   const userId = (await supabase.auth.getUser()).data.user?.id
   if (!userId) throw new Error('Not authenticated')
@@ -453,6 +455,8 @@ export async function uploadTaskPhoto(
       display_order: displayOrder,
       caption: caption || null,
       source_type: sourceType,
+      width: width || null,
+      height: height || null,
     })
     .select()
     .single()
