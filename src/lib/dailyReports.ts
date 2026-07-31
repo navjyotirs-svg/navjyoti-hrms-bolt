@@ -414,8 +414,8 @@ export async function uploadTaskPhoto(
   reportId: string,
   taskItemId: string | null,
   taskId: string | null,
-  employeeId: string,
-  orgId: string,
+  _employeeId: string,
+  _orgId: string,
   file: File,
   displayOrder: number,
   sourceType: string = 'GALLERY',
@@ -425,6 +425,22 @@ export async function uploadTaskPhoto(
 ): Promise<DailyReportTaskPhoto> {
   const userId = (await supabase.auth.getUser()).data.user?.id
   if (!userId) throw new Error('Not authenticated')
+
+  const { data: up } = await supabase
+    .from('user_profiles')
+    .select('organization_id')
+    .eq('id', userId)
+    .single()
+  if (!up?.organization_id) throw new Error('Could not resolve your organisation. Please reload and try again.')
+  const orgId: string = up.organization_id
+
+  const { data: emp } = await supabase
+    .from('employees')
+    .select('id')
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (!emp?.id) throw new Error('Could not find your employee record. Please contact your manager.')
+  const employeeId: string = emp.id
 
   const validationError = validatePhotoFile(file)
   if (validationError) throw new Error(validationError)
