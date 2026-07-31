@@ -92,7 +92,7 @@ export function TeamReportsPage() {
                   style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto auto auto', gap: 'var(--space-3)', alignItems: 'center', padding: 'var(--space-3)', cursor: 'pointer', background: expanded === r.id ? 'var(--surface)' : 'white' }}
                 >
                   <div style={{ fontWeight: 600, fontSize: '14px' }}>
-                    {r.employees?.first_name} {r.employees?.last_name}
+                    {r.employees?.full_name}
                     <span className="mono" style={{ marginLeft: '8px', fontWeight: 400, fontSize: '12px', color: 'var(--slate)' }}>{r.employees?.employee_code}</span>
                   </div>
                   <span className={`attendance-badge ${r.status}`}>{r.status}</span>

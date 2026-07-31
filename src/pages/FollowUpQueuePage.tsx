@@ -83,7 +83,7 @@ export function FollowUpQueuePage() {
                   <span className={`attendance-badge ${fu.status}`}>{fu.status}</span>
                 </div>
                 <div style={{ marginBottom: 'var(--space-2)', fontSize: '0.875rem' }}>
-                  <strong>Employee:</strong> {(fu as any).employees?.first_name} {(fu as any).employees?.last_name} ({(fu as any).employees?.employee_code})
+                  <strong>Employee:</strong> {(fu as any).employees?.full_name} ({(fu as any).employees?.employee_code})
                 </div>
                 {fu.description && <div style={{ marginBottom: 'var(--space-2)', fontSize: '0.875rem' }}>{fu.description}</div>}
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 'var(--space-2)' }}>

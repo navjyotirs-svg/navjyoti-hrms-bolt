@@ -110,7 +110,7 @@ export function AttendanceManagementPage() {
             .from('employees')
             .select('id, full_name, employee_code, branches (name)')
             .eq('organization_id', profile.organization_id)
-            .eq('access_status', 'Active')
+            .eq('is_active', true)
             .order('full_name', { ascending: true })
             .limit(500)
           if (empErr) {

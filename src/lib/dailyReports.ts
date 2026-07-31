@@ -137,7 +137,7 @@ export async function fetchTeamReports(reportDate: string) {
     .from('daily_reports')
     .select(`
       *,
-      employees!inner (id, employee_code, first_name, last_name, designation)
+      employees!inner (id, employee_code, full_name, designation)
     `)
     .eq('report_date', reportDate)
     .order('created_at', { ascending: true })
@@ -156,7 +156,7 @@ export async function fetchAllReports(filters: {
     .from('daily_reports')
     .select(`
       *,
-      employees!inner (id, employee_code, first_name, last_name, designation),
+      employees!inner (id, employee_code, full_name, designation),
       branches (id, name),
       departments (id, name)
     `)
@@ -181,7 +181,7 @@ export async function fetchReportById(reportId: string) {
       daily_report_task_items (*),
       daily_report_comments (*),
       daily_report_history (*),
-      employees!inner (id, employee_code, first_name, last_name, designation)
+      employees!inner (id, employee_code, full_name, designation)
     `)
     .eq('id', reportId)
     .maybeSingle()
@@ -194,7 +194,7 @@ export async function fetchPendingReviews() {
     .from('daily_reports')
     .select(`
       *,
-      employees!inner (id, employee_code, first_name, last_name, designation)
+      employees!inner (id, employee_code, full_name, designation)
     `)
     .eq('status', 'SUBMITTED')
     .order('submitted_at', { ascending: true })
@@ -221,7 +221,7 @@ export async function fetchFollowUps(filters?: {
     .from('management_follow_ups')
     .select(`
       *,
-      employees!inner (id, employee_code, first_name, last_name, designation)
+      employees!inner (id, employee_code, full_name, designation)
     `)
     .order('created_at', { ascending: false })
 

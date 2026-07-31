@@ -73,7 +73,7 @@ export function ReportReviewPage() {
               <div key={r.id} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 'var(--space-4)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
                   <div>
-                    <strong>{r.employees?.first_name} {r.employees?.last_name}</strong>
+                    <strong>{r.employees?.full_name}</strong>
                     <span className="mono" style={{ marginLeft: '8px' }}>({r.employees?.employee_code})</span>
                   </div>
                   <span className="mono">{r.report_date}</span>
