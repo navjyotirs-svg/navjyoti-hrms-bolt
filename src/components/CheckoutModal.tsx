@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   validateEvidenceFile,
   blobToBase64,
   checkOut,
   isEdgeFunctionError,
 } from '@/lib/attendance'
+import { fetchMyReport, getKolkataDate } from '@/lib/dailyReports'
 import '@/styles/attendance.css'
 
 interface Props {
@@ -17,6 +19,7 @@ type Step = 'intro' | 'camera' | 'captured' | 'location' | 'uploading' | 'done'
 type UploadStage = 'idle' | 'processing' | 'uploading' | 'verifying' | 'completing' | 'done'
 
 export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
+  const navigate = useNavigate()
   const [step, setStep] = useState<Step>('intro')
   const [error, setError] = useState<string | null>(null)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
@@ -26,6 +29,7 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [uploadStage, setUploadStage] = useState<UploadStage>('idle')
   const [correlationId, setCorrelationId] = useState<string | null>(null)
+  const [reportStatus, setReportStatus] = useState<'loading' | 'submitted' | 'not_submitted'>('loading')
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -35,6 +39,26 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
       setCameraStream(null)
     }
   }, [cameraStream])
+
+  useEffect(() => {
+    let cancelled = false
+    async function checkReport() {
+      try {
+        const today = getKolkataDate()
+        const report = await fetchMyReport(today)
+        if (cancelled) return
+        if (report && (report.status === 'SUBMITTED' || report.status === 'APPROVED')) {
+          setReportStatus('submitted')
+        } else {
+          setReportStatus('not_submitted')
+        }
+      } catch {
+        if (!cancelled) setReportStatus('not_submitted')
+      }
+    }
+    checkReport()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -199,13 +223,35 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
 
           {step === 'intro' && (
             <div className="checkout-intro">
-              <p className="checkout-warning">
-                Photo and location are mandatory for checkout.
-                Your photo and GPS coordinates will be securely uploaded as evidence.
-              </p>
-              <button className="btn btn-checkout-enable" onClick={handleEnableCameraAndLocation}>
-                Enable Camera and Location
-              </button>
+              {reportStatus === 'loading' && (
+                <p className="checkout-warning">Checking daily report status…</p>
+              )}
+              {reportStatus === 'not_submitted' && (
+                <>
+                  <p className="checkout-warning" style={{ color: 'var(--error)' }}>
+                    You must submit your daily report before checking out.
+                    Please complete and submit today's report first.
+                  </p>
+                  <button
+                    className="btn"
+                    onClick={() => navigate('/my-reports')}
+                    style={{ width: '100%' }}
+                  >
+                    Go to Daily Report
+                  </button>
+                </>
+              )}
+              {reportStatus === 'submitted' && (
+                <>
+                  <p className="checkout-warning">
+                    Photo and location are mandatory for checkout.
+                    Your photo and GPS coordinates will be securely uploaded as evidence.
+                  </p>
+                  <button className="btn btn-checkout-enable" onClick={handleEnableCameraAndLocation}>
+                    Enable Camera and Location
+                  </button>
+                </>
+              )}
             </div>
           )}
 
