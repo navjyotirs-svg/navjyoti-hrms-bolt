@@ -44,14 +44,8 @@ export function DailyReportPage() {
 
   const [form, setForm] = useState({
     overall_summary: '',
-    work_planned: '',
     work_completed: '',
-    overall_result: '',
-    pending_work: '',
-    blockers: '',
-    support_required: '',
     follow_up_required: false,
-    tomorrow_plan: '',
   })
 
   useEffect(() => { loadReport() }, [reportDate])
@@ -64,19 +58,13 @@ export function DailyReportPage() {
         setExisting(data as DailyReportRow)
         setForm({
           overall_summary: data.overall_summary || '',
-          work_planned: data.work_planned || '',
           work_completed: data.work_completed || '',
-          overall_result: data.overall_result || '',
-          pending_work: data.pending_work || '',
-          blockers: data.blockers || '',
-          support_required: data.support_required || '',
           follow_up_required: data.follow_up_required || false,
-          tomorrow_plan: data.tomorrow_plan || '',
         })
         await loadPhotos(data.id)
       } else {
         setExisting(null)
-        setForm({ overall_summary: '', work_planned: '', work_completed: '', overall_result: '', pending_work: '', blockers: '', support_required: '', follow_up_required: false, tomorrow_plan: '' })
+        setForm({ overall_summary: '', work_completed: '', follow_up_required: false })
         setPhotos([])
       }
     } catch (e) { setError((e as Error).message) }
@@ -461,24 +449,14 @@ export function DailyReportPage() {
               <textarea id="summary" rows={3} value={form.overall_summary} onChange={(e) => setForm({ ...form, overall_summary: e.target.value })} disabled={isReadOnly} placeholder="High-level summary of the day's work" />
             </div>
 
-            <div className="form-grid" style={{ marginBottom: 'var(--space-4)' }}>
-              <div className="form-field"><label>Work Planned</label><textarea rows={3} value={form.work_planned} onChange={(e) => setForm({ ...form, work_planned: e.target.value })} disabled={isReadOnly} /></div>
-              <div className="form-field"><label>Work Completed</label><textarea rows={3} value={form.work_completed} onChange={(e) => setForm({ ...form, work_completed: e.target.value })} disabled={isReadOnly} /></div>
+            <div className="form-field" style={{ marginBottom: 'var(--space-4)' }}>
+              <label htmlFor="work-completed">Work Completed</label>
+              <textarea id="work-completed" rows={4} value={form.work_completed} onChange={(e) => setForm({ ...form, work_completed: e.target.value })} disabled={isReadOnly} />
             </div>
 
-            <div className="form-grid" style={{ marginBottom: 'var(--space-4)' }}>
-              <div className="form-field"><label>Overall Result</label><textarea rows={2} value={form.overall_result} onChange={(e) => setForm({ ...form, overall_result: e.target.value })} disabled={isReadOnly} /></div>
-              <div className="form-field"><label>Pending Work</label><textarea rows={2} value={form.pending_work} onChange={(e) => setForm({ ...form, pending_work: e.target.value })} disabled={isReadOnly} /></div>
-            </div>
-
-            <div className="form-grid" style={{ marginBottom: 'var(--space-4)' }}>
-              <div className="form-field"><label>Blockers</label><textarea rows={2} value={form.blockers} onChange={(e) => setForm({ ...form, blockers: e.target.value })} disabled={isReadOnly} /></div>
-              <div className="form-field"><label>Support Required</label><textarea rows={2} value={form.support_required} onChange={(e) => setForm({ ...form, support_required: e.target.value })} disabled={isReadOnly} /></div>
-            </div>
-
-            <div className="form-grid" style={{ marginBottom: 'var(--space-4)' }}>
-              <div className="form-field"><label>Tomorrow's Plan</label><textarea rows={2} value={form.tomorrow_plan} onChange={(e) => setForm({ ...form, tomorrow_plan: e.target.value })} disabled={isReadOnly} /></div>
-              <div className="form-field"><label>Follow-up Required</label><select value={form.follow_up_required ? 'yes' : 'no'} onChange={(e) => setForm({ ...form, follow_up_required: e.target.value === 'yes' })} disabled={isReadOnly}><option value="no">No</option><option value="yes">Yes</option></select></div>
+            <div className="form-field" style={{ marginBottom: 'var(--space-4)' }}>
+              <label htmlFor="follow-up">Follow-up Required</label>
+              <select id="follow-up" value={form.follow_up_required ? 'yes' : 'no'} onChange={(e) => setForm({ ...form, follow_up_required: e.target.value === 'yes' })} disabled={isReadOnly}><option value="no">No</option><option value="yes">Yes</option></select>
             </div>
 
             {!isReadOnly && (

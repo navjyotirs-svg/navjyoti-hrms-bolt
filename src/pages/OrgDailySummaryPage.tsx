@@ -48,7 +48,6 @@ export function OrgDailySummaryPage() {
               <div className="stat-card"><div className="stat-value">{latest.data_snapshot?.approved || 0}</div><div className="stat-label">Approved</div></div>
               <div className="stat-card"><div className="stat-value">{latest.data_snapshot?.late || 0}</div><div className="stat-label">Late</div></div>
               <div className="stat-card"><div className="stat-value">{latest.data_snapshot?.missing || 0}</div><div className="stat-label">Missing</div></div>
-              <div className="stat-card"><div className="stat-value">{latest.data_snapshot?.with_blockers || 0}</div><div className="stat-label">With Blockers</div></div>
               <div className="stat-card"><div className="stat-value">{latest.data_snapshot?.follow_ups_required || 0}</div><div className="stat-label">Follow-ups Required</div></div>
             </div>
 

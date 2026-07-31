@@ -80,9 +80,6 @@ export function ReportReviewPage() {
                 </div>
                 <div style={{ marginBottom: 'var(--space-2)' }}><strong>Summary:</strong> {r.overall_summary}</div>
                 {r.work_completed && <div style={{ marginBottom: 'var(--space-2)' }}><strong>Work Completed:</strong> {r.work_completed}</div>}
-                {r.blockers && <div style={{ marginBottom: 'var(--space-2)' }}><strong>Blockers:</strong> {r.blockers}</div>}
-                {r.pending_work && <div style={{ marginBottom: 'var(--space-2)' }}><strong>Pending:</strong> {r.pending_work}</div>}
-                {r.tomorrow_plan && <div style={{ marginBottom: 'var(--space-2)' }}><strong>Tomorrow:</strong> {r.tomorrow_plan}</div>}
 
                 {/* Photos */}
                 <div style={{ marginTop: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>

@@ -14,9 +14,6 @@ interface EmployeeEvidence {
   reportDate: string
   overallSummary: string
   workCompleted: string
-  overallResult: string
-  blockers: string
-  supportRequired: string
   photos: DailyReportTaskPhoto[]
 }
 
@@ -63,7 +60,7 @@ export function TaskEvidenceViewerPage() {
 
       const { data: taskItems } = await supabase
         .from('daily_report_task_items')
-        .select('daily_report_id, daily_reports ( id, report_date, overall_summary, work_completed, overall_result, blockers, support_required, employee_id )')
+        .select('daily_report_id, daily_reports ( id, report_date, overall_summary, work_completed, employee_id )')
         .eq('task_id', taskId)
 
       const reportMap = new Map<string, EmployeeEvidence>()
@@ -82,9 +79,6 @@ export function TaskEvidenceViewerPage() {
             reportDate: r.report_date,
             overallSummary: r.overall_summary || '',
             workCompleted: r.work_completed || '',
-            overallResult: r.overall_result || '',
-            blockers: r.blockers || '',
-            supportRequired: r.support_required || '',
             photos: [],
           })
         }
@@ -176,13 +170,10 @@ export function TaskEvidenceViewerPage() {
                 </div>
 
                 {/* Report summary */}
-                {(ev.overallSummary || ev.workCompleted || ev.overallResult) && (
+                {(ev.overallSummary || ev.workCompleted) && (
                   <div style={{ marginBottom: 'var(--space-3)', padding: 'var(--space-2) var(--space-3)', background: 'var(--surface)', borderRadius: '6px', fontSize: '13px' }}>
                     {ev.overallSummary && <div style={{ marginBottom: '4px' }}><strong>Summary:</strong> {ev.overallSummary}</div>}
                     {ev.workCompleted && <div style={{ marginBottom: '4px' }}><strong>Work Completed:</strong> {ev.workCompleted}</div>}
-                    {ev.overallResult && <div style={{ marginBottom: '4px' }}><strong>Result:</strong> {ev.overallResult}</div>}
-                    {ev.blockers && <div style={{ marginBottom: '4px' }}><strong>Blockers:</strong> {ev.blockers}</div>}
-                    {ev.supportRequired && <div><strong>Support Required:</strong> {ev.supportRequired}</div>}
                   </div>
                 )}
 

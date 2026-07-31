@@ -97,7 +97,6 @@ export function TeamReportsPage() {
                   </div>
                   <span className={`attendance-badge ${r.status}`}>{r.status}</span>
                   <span style={{ fontSize: '12px', color: 'var(--slate)' }}>{r.follow_up_required ? 'Follow-up' : ''}</span>
-                  <span style={{ fontSize: '12px', color: 'var(--slate)' }}>{r.blockers ? 'Blocker' : ''}</span>
                   <span style={{ fontSize: '12px', color: 'var(--slate)' }}>
                     {r.submitted_at ? new Date(r.submitted_at).toLocaleTimeString() : '—'}
                   </span>
@@ -112,9 +111,6 @@ export function TeamReportsPage() {
                   <div style={{ padding: 'var(--space-3)', borderTop: '1px solid var(--border)', background: 'var(--surface)' }}>
                     {r.overall_summary && <div style={{ marginBottom: 'var(--space-2)', fontSize: '14px' }}><strong>Summary:</strong> {r.overall_summary}</div>}
                     {r.work_completed && <div style={{ marginBottom: 'var(--space-2)', fontSize: '14px' }}><strong>Work Completed:</strong> {r.work_completed}</div>}
-                    {r.blockers && <div style={{ marginBottom: 'var(--space-2)', fontSize: '14px' }}><strong>Blockers:</strong> {r.blockers}</div>}
-                    {r.pending_work && <div style={{ marginBottom: 'var(--space-2)', fontSize: '14px' }}><strong>Pending:</strong> {r.pending_work}</div>}
-                    {r.tomorrow_plan && <div style={{ marginBottom: 'var(--space-2)', fontSize: '14px' }}><strong>Tomorrow:</strong> {r.tomorrow_plan}</div>}
 
                     {/* Photos */}
                     <div style={{ marginTop: 'var(--space-3)' }}>

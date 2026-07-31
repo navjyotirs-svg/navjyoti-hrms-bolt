@@ -32,14 +32,8 @@ export interface DailyReportRow {
   employee_id: string
   report_date: string
   overall_summary: string
-  work_planned: string
   work_completed: string
-  overall_result: string
-  pending_work: string
-  blockers: string
-  support_required: string
   follow_up_required: boolean
-  tomorrow_plan: string
   total_hours_reported: number | null
   status: string
   submitted_at: string | null
@@ -247,14 +241,8 @@ export async function fetchFollowUps(filters?: {
 export async function saveDraft(payload: {
   report_date?: string
   overall_summary?: string
-  work_planned?: string
   work_completed?: string
-  overall_result?: string
-  pending_work?: string
-  blockers?: string
-  support_required?: string
   follow_up_required?: boolean
-  tomorrow_plan?: string
   task_items?: Array<Record<string, unknown>>
 }) {
   return callReportAction('save_draft', payload)
@@ -263,14 +251,8 @@ export async function saveDraft(payload: {
 export async function submitReport(payload: {
   report_date?: string
   overall_summary: string
-  work_planned?: string
   work_completed?: string
-  overall_result?: string
-  pending_work?: string
-  blockers?: string
-  support_required?: string
   follow_up_required?: boolean
-  tomorrow_plan?: string
   task_items?: Array<Record<string, unknown>>
 }) {
   return callReportAction('submit', payload)

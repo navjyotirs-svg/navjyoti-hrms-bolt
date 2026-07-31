@@ -42,7 +42,7 @@ export function MyReportHistoryPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Date</th><th>Status</th><th>Summary</th><th>Blockers</th><th>Submitted At</th><th>Reviewed At</th>
+                  <th>Date</th><th>Status</th><th>Summary</th><th>Submitted At</th><th>Reviewed At</th>
                 </tr>
               </thead>
               <tbody>
@@ -51,7 +51,6 @@ export function MyReportHistoryPage() {
                     <td className="mono">{r.report_date}</td>
                     <td><span className={`attendance-badge ${r.status}`}>{r.status}</span></td>
                     <td>{r.overall_summary?.slice(0, 80) || '—'}{r.overall_summary?.length > 80 ? '…' : ''}</td>
-                    <td>{r.blockers ? 'Yes' : '—'}</td>
                     <td className="mono">{r.submitted_at ? new Date(r.submitted_at).toLocaleString() : '—'}</td>
                     <td className="mono">{r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '—'}</td>
                   </tr>
