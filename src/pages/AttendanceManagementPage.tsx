@@ -37,6 +37,7 @@ interface EvidenceDetail {
 export function AttendanceManagementPage() {
   const { profile, permissions } = useAuth()
   const [records, setRecords] = useState<AttendanceRow[]>([])
+  const [notCheckedIn, setNotCheckedIn] = useState<{ employee_id: string; full_name: string; employee_code: string; branch: string | null }[]>([])
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)
@@ -94,16 +95,46 @@ export function AttendanceManagementPage() {
     query
       .order('check_in_at', { ascending: false })
       .limit(200)
-      .then(({ data, error: qError }) => {
+      .then(async ({ data, error: qError }) => {
         if (qError) {
           setError(qError.message)
           setLoading(false)
           return
         }
-        setRecords((data ?? []) as unknown as AttendanceRow[])
+        const attendanceRows = (data ?? []) as unknown as AttendanceRow[]
+        setRecords(attendanceRows)
+
+        if (statusFilter === 'not_checked_in') {
+          const checkedInIds = new Set(attendanceRows.map((r) => r.employee_id))
+          const { data: emps, error: empErr } = await supabase
+            .from('employees')
+            .select('id, full_name, employee_code, branches (name)')
+            .eq('organization_id', profile.organization_id)
+            .eq('access_status', 'Active')
+            .order('full_name', { ascending: true })
+            .limit(500)
+          if (empErr) {
+            setError(empErr.message)
+            setLoading(false)
+            return
+          }
+          const missing = (emps ?? []).filter((e) => !checkedInIds.has((e as { id: string }).id))
+          setNotCheckedIn(missing.map((e) => {
+            const emp = e as { id: string; full_name: string; employee_code: string; branches: { name: string } | { name: string }[] | null }
+            const branchName = Array.isArray(emp.branches) ? emp.branches[0]?.name ?? null : emp.branches?.name ?? null
+            return {
+              employee_id: emp.id,
+              full_name: emp.full_name,
+              employee_code: emp.employee_code,
+              branch: branchName,
+            }
+          }))
+        } else {
+          setNotCheckedIn([])
+        }
         setLoading(false)
       })
-  }, [profile?.organization_id, canReadAll, dateFilter])
+  }, [profile?.organization_id, canReadAll, dateFilter, statusFilter])
 
   const CHECKED_IN_STATUSES = ['PENDING_CHECKOUT', 'FULL_DAY', 'HALF_DAY']
   const filtered = records.filter((r) => {
@@ -112,6 +143,7 @@ export function AttendanceManagementPage() {
     const matchesSearch = !q || (emp?.full_name.toLowerCase().includes(q) || emp?.employee_code.toLowerCase().includes(q))
     let matchesStatus = statusFilter === 'all' || r.final_status === statusFilter
     if (statusFilter === 'checked_in') matchesStatus = CHECKED_IN_STATUSES.includes(r.final_status)
+    if (statusFilter === 'not_checked_in') return false
     const matchesCheckoutType = checkoutTypeFilter === 'all' || r.checkout_type === checkoutTypeFilter
     return matchesSearch && matchesStatus && matchesCheckoutType
   })
@@ -163,7 +195,7 @@ export function AttendanceManagementPage() {
     setPage(0)
   }
 
-  const statusLabel = statusFilter === 'checked_in' ? 'Checked In' : (statusFilter === 'all' ? null : ATTENDANCE_STATUS_LABELS[statusFilter as AttendanceStatus] ?? statusFilter)
+  const statusLabel = statusFilter === 'checked_in' ? 'Checked In' : (statusFilter === 'not_checked_in' ? 'Not Checked In' : (statusFilter === 'all' ? null : ATTENDANCE_STATUS_LABELS[statusFilter as AttendanceStatus] ?? statusFilter))
 
   return (
     <div className="page">
@@ -197,6 +229,7 @@ export function AttendanceManagementPage() {
             <select id="att-status" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(0) }}>
               <option value="all">All Statuses</option>
               <option value="checked_in">Checked In</option>
+              <option value="not_checked_in">Not Checked In</option>
               {Object.entries(ATTENDANCE_STATUS_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
               ))}
@@ -218,6 +251,29 @@ export function AttendanceManagementPage() {
 
         {loading ? (
           <TableSkeleton rows={10} cols={11} />
+        ) : statusFilter === 'not_checked_in' ? (
+          notCheckedIn.length === 0 ? (
+            <div className="empty-state"><div className="empty-state-text">All active employees have checked in for this date.</div></div>
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Employee</th><th>Code</th><th>Branch</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {notCheckedIn.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((e) => (
+                    <tr key={e.employee_id}>
+                      <td data-label="Employee">{e.full_name}</td>
+                      <td data-label="Code" className="mono">{e.employee_code}</td>
+                      <td data-label="Branch">{e.branch ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
         ) : filtered.length === 0 ? (
           <div className="empty-state"><div className="empty-state-text">No attendance records for this date.</div></div>
         ) : (

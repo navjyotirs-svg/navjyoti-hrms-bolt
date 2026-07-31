@@ -459,6 +459,7 @@ export function Dashboard() {
           <h3 className="dashboard-section-title">Attendance Today</h3>
           <div className="dashboard-grid">
             <MetricCard label="Checked In" value={metrics.checkedInToday} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=checked_in`)} ariaLabel="View checked-in employees" />
+            <MetricCard label="Not Checked In" value={metrics.activeEmployees !== null && metrics.checkedInToday !== null ? Math.max(0, metrics.activeEmployees - metrics.checkedInToday) : null} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=not_checked_in`)} ariaLabel="View employees who have not checked in today" />
             <MetricCard label="Pending Checkout" value={metrics.pendingCheckout} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=PENDING_CHECKOUT`)} ariaLabel="View employees pending checkout" />
             <MetricCard label="Full Day" value={metrics.fullDay} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=FULL_DAY`)} ariaLabel="View full day employees" />
             <MetricCard label="Half Day" value={metrics.halfDay} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=HALF_DAY`)} ariaLabel="View half day employees" />
