@@ -107,6 +107,16 @@ export function getKolkataDate(): string {
 }
 
 export async function fetchMyReport(reportDate: string) {
+  const { data: userData } = await supabase.auth.getUser()
+  const userId = userData.user?.id
+  if (!userId) throw new Error('Not authenticated')
+
+  const { data: emp } = await supabase
+    .from('employees')
+    .select('id')
+    .eq('user_id', userId)
+    .maybeSingle()
+
   const { data, error } = await supabase
     .from('daily_reports')
     .select(`
@@ -115,6 +125,7 @@ export async function fetchMyReport(reportDate: string) {
       daily_report_comments (*)
     `)
     .eq('report_date', reportDate)
+    .eq('employee_id', emp?.id || '00000000-0000-0000-0000-000000000000')
     .maybeSingle()
   if (error) throw error
   return data
