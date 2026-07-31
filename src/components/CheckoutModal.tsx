@@ -47,7 +47,7 @@ export function CheckoutModal({ userId: _userId, onClose, onSuccess }: Props) {
         const today = getKolkataDate()
         const report = await fetchMyReport(today)
         if (cancelled) return
-        if (report && (report.status === 'SUBMITTED' || report.status === 'APPROVED')) {
+        if (report && (report.status === 'SUBMITTED' || report.status === 'APPROVED' || report.status === 'REVIEWED')) {
           setReportStatus('submitted')
         } else {
           setReportStatus('not_submitted')
