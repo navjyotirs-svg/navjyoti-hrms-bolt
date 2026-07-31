@@ -458,41 +458,6 @@ export function Dashboard() {
         </div>
       )}
 
-      {canReadAll && (
-        <div className="dashboard-section">
-          <h3 className="dashboard-section-title">Attendance Today</h3>
-          <div className="dashboard-grid">
-            <MetricCard label="Checked In" value={metrics.checkedInToday} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=checked_in`)} ariaLabel="View checked-in employees" />
-            <MetricCard label="Not Checked In" value={metrics.activeEmployees !== null && metrics.checkedInToday !== null ? Math.max(0, metrics.activeEmployees - metrics.checkedInToday) : null} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=not_checked_in`)} ariaLabel="View employees who have not checked in today" />
-            <MetricCard label="Pending Checkout" value={metrics.pendingCheckout} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=PENDING_CHECKOUT`)} ariaLabel="View employees pending checkout" />
-            <MetricCard label="Full Day" value={metrics.fullDay} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=FULL_DAY`)} ariaLabel="View full day employees" />
-            <MetricCard label="Half Day" value={metrics.halfDay} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=HALF_DAY`)} ariaLabel="View half day employees" />
-            <MetricCard label="Pending Corrections" value={metrics.pendingCorrections} onClick={() => navigate('/attendance-corrections?status=pending')} ariaLabel="View pending corrections" />
-          </div>
-        </div>
-      )}
-
-      {canReadEmployees && (
-        <div className="dashboard-section">
-          <h3 className="dashboard-section-title">Organization Overview</h3>
-          <div className="dashboard-grid">
-            <MetricCard label="Active Employees" value={metrics.activeEmployees} onClick={() => navigate('/employees?access_status=Active')} ariaLabel="View active employees" />
-            {canReadOrg && <MetricCard label="Branches" value={metrics.branches} onClick={() => navigate('/branches')} ariaLabel="View branches" />}
-            {canReadOrg && <MetricCard label="Departments" value={metrics.departments} onClick={() => navigate('/departments')} ariaLabel="View departments" />}
-            <MetricCard label="Pending Activation" value={metrics.pendingActivation} onClick={() => navigate('/employees?access_status=Activation Pending')} ariaLabel="View pending activation employees" />
-            <MetricCard label="Onboarding Pending" value={metrics.onboardingPending} onClick={() => navigate('/employees?access_status=Activation Pending')} ariaLabel="View onboarding pending" />
-            <MetricCard label="Documents Pending Verification" value={metrics.documentsPendingVerification} onClick={() => navigate('/employees?access_status=Active')} ariaLabel="View documents pending verification" />
-          </div>
-        </div>
-      )}
-
-      <div className="dashboard-section">
-        <h3 className="dashboard-section-title">Notifications</h3>
-        <div className="dashboard-grid">
-          <MetricCard label="Unread" value={metrics.unreadNotifications} onClick={() => navigate('/notification-inbox?read=false')} ariaLabel="View unread notifications" />
-        </div>
-      </div>
-
       {(metrics.pendingReviews !== null || metrics.openFollowUps !== null || metrics.todayReports !== null) && (
         <div className="dashboard-section">
           <h3 className="dashboard-section-title">Daily Reports & Follow-ups</h3>
@@ -552,6 +517,113 @@ export function Dashboard() {
           </div>
         </div>
       )}
+
+      {canReadAll && (
+        <div className="dashboard-section">
+          <h3 className="dashboard-section-title">Attendance Today</h3>
+          <div className="dashboard-grid">
+            {canManageProjects && (
+              <div
+                className="dashboard-card dashboard-card-interactive"
+                onClick={() => navigate('/projects')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/projects') } }}
+                role="button"
+                tabIndex={0}
+                aria-label="Manage projects"
+              >
+                <div className="dashboard-card-lbl" style={{ fontSize: '1.1rem', fontWeight: 600 }}>Projects</div>
+                <div className="dashboard-card-details">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                  Manage
+                </div>
+              </div>
+            )}
+            {canManageRecurring && (
+              <div
+                className="dashboard-card dashboard-card-interactive"
+                onClick={() => navigate('/recurring-tasks')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/recurring-tasks') } }}
+                role="button"
+                tabIndex={0}
+                aria-label="Manage recurring task templates"
+              >
+                <div className="dashboard-card-lbl" style={{ fontSize: '1.1rem', fontWeight: 600 }}>Recurring Tasks</div>
+                <div className="dashboard-card-details">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 4v5h.582m9.69-5L12 12m-8 0a8 8 0 1116 0 8 8 0 01-16 0z" /></svg>
+                  Manage
+                </div>
+              </div>
+            )}
+            {canSendVoiceNotes && (
+              <div
+                className="dashboard-card dashboard-card-interactive"
+                onClick={() => navigate('/voice-notes')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/voice-notes') } }}
+                role="button"
+                tabIndex={0}
+                aria-label="Record and send voice notes"
+              >
+                <div className="dashboard-card-lbl" style={{ fontSize: '1.1rem', fontWeight: 600 }}>Voice Notes</div>
+                <div className="dashboard-card-details">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4a2 2 0 002 2h2a2 2 0 002-2v-4M12 2a3 3 0 013 3v6a3 3 0 01-6 0V5a3 3 0 013-3z" /></svg>
+                  Record & Send
+                </div>
+              </div>
+            )}
+            {canSelfAssign && (
+              <div
+                className="dashboard-card dashboard-card-interactive"
+                onClick={() => navigate('/self-assign-task')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/self-assign-task') } }}
+                role="button"
+                tabIndex={0}
+                aria-label="Create a task for yourself"
+              >
+                <div className="dashboard-card-lbl" style={{ fontSize: '1.1rem', fontWeight: 600 }}>Self-Assign Task</div>
+                <div className="dashboard-card-details">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v6a2 2 0 002 2h6a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5V3a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2" /></svg>
+                  Create
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {canReadAll && (
+        <div className="dashboard-section">
+          <h3 className="dashboard-section-title">Attendance Today</h3>
+          <div className="dashboard-grid">
+            <MetricCard label="Checked In" value={metrics.checkedInToday} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=checked_in`)} ariaLabel="View checked-in employees" />
+            <MetricCard label="Not Checked In" value={metrics.activeEmployees !== null && metrics.checkedInToday !== null ? Math.max(0, metrics.activeEmployees - metrics.checkedInToday) : null} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=not_checked_in`)} ariaLabel="View employees who have not checked in today" />
+            <MetricCard label="Pending Checkout" value={metrics.pendingCheckout} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=PENDING_CHECKOUT`)} ariaLabel="View employees pending checkout" />
+            <MetricCard label="Full Day" value={metrics.fullDay} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=FULL_DAY`)} ariaLabel="View full day employees" />
+            <MetricCard label="Half Day" value={metrics.halfDay} onClick={() => navigate(`/attendance-management?date=${todayDate}&status=HALF_DAY`)} ariaLabel="View half day employees" />
+            <MetricCard label="Pending Corrections" value={metrics.pendingCorrections} onClick={() => navigate('/attendance-corrections?status=pending')} ariaLabel="View pending corrections" />
+          </div>
+        </div>
+      )}
+
+      {canReadEmployees && (
+        <div className="dashboard-section">
+          <h3 className="dashboard-section-title">Organization Overview</h3>
+          <div className="dashboard-grid">
+            <MetricCard label="Active Employees" value={metrics.activeEmployees} onClick={() => navigate('/employees?access_status=Active')} ariaLabel="View active employees" />
+            {canReadOrg && <MetricCard label="Branches" value={metrics.branches} onClick={() => navigate('/branches')} ariaLabel="View branches" />}
+            {canReadOrg && <MetricCard label="Departments" value={metrics.departments} onClick={() => navigate('/departments')} ariaLabel="View departments" />}
+            <MetricCard label="Pending Activation" value={metrics.pendingActivation} onClick={() => navigate('/employees?access_status=Activation Pending')} ariaLabel="View pending activation employees" />
+            <MetricCard label="Onboarding Pending" value={metrics.onboardingPending} onClick={() => navigate('/employees?access_status=Activation Pending')} ariaLabel="View onboarding pending" />
+            <MetricCard label="Documents Pending Verification" value={metrics.documentsPendingVerification} onClick={() => navigate('/employees?access_status=Active')} ariaLabel="View documents pending verification" />
+          </div>
+        </div>
+      )}
+
+      <div className="dashboard-section">
+        <h3 className="dashboard-section-title">Notifications</h3>
+        <div className="dashboard-grid">
+          <MetricCard label="Unread" value={metrics.unreadNotifications} onClick={() => navigate('/notification-inbox?read=false')} ariaLabel="View unread notifications" />
+        </div>
+      </div>
 
       {canReadAudit && recentAudit.length > 0 && (
         <div className="dashboard-section">
