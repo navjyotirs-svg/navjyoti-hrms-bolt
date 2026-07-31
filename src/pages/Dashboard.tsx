@@ -48,6 +48,10 @@ export function Dashboard() {
   const canReadEmployees = permissions.includes('employee.read_all') || permissions.includes('employee.read_team')
   const canReadOrg = permissions.includes('organization.read')
 
+  const canReviewReports = permissions.includes('daily_report.review')
+  const canReadReports = permissions.includes('daily_report.read_all') || permissions.includes('daily_report.read_team')
+  const hasReportAccess = canReviewReports || canReadReports
+
   const canManageProjects = permissions.includes('project.create') || permissions.includes('project.read_team') || permissions.includes('project.read_all')
   const canManageRecurring = permissions.includes('recurring_task.create') || permissions.includes('recurring_task.read_all') || permissions.includes('recurring_task.read_team')
   const canSendVoiceNotes = permissions.includes('voice_note.send')
@@ -496,6 +500,55 @@ export function Dashboard() {
             {metrics.pendingReviews !== null && <MetricCard label="Pending Reviews" value={metrics.pendingReviews} onClick={() => navigate('/report-review?status=submitted')} ariaLabel="View pending report reviews" />}
             {metrics.openFollowUps !== null && <MetricCard label="Open Follow-ups" value={metrics.openFollowUps} onClick={() => navigate('/follow-up-queue?status=open')} ariaLabel="View open follow-ups" />}
             {metrics.todayReports !== null && <MetricCard label="Today's Reports" value={metrics.todayReports} onClick={() => navigate('/team-reports?date=today')} ariaLabel="View today's reports" />}
+          </div>
+        </div>
+      )}
+
+      {hasReportAccess && (
+        <div className="dashboard-section">
+          <h3 className="dashboard-section-title">Reports</h3>
+          <div className="dashboard-grid">
+            <div
+              className="dashboard-card dashboard-card-interactive"
+              onClick={() => navigate('/team-reports')}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/team-reports') } }}
+              role="button"
+              tabIndex={0}
+              aria-label="View team reports"
+            >
+              <div className="dashboard-card-num">
+                <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" style={{ width: '24px', height: '24px' }}>
+                  <path d="M3 4h14v2H3V4zm0 4h14v2H3V8zm0 4h10v2H3v-2zm0 4h10v2H3v-2z" />
+                </svg>
+              </div>
+              <div className="dashboard-card-lbl">Team Reports</div>
+              <div className="dashboard-card-details">
+                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 3l5 5-5 5V3z" /></svg>
+                View all employee reports
+              </div>
+            </div>
+
+            {canReviewReports && (
+              <div
+                className="dashboard-card dashboard-card-interactive"
+                onClick={() => navigate('/report-review')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/report-review') } }}
+                role="button"
+                tabIndex={0}
+                aria-label="Review pending reports"
+              >
+                <div className="dashboard-card-num">
+                  <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" style={{ width: '24px', height: '24px' }}>
+                    <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm3.7 6.7l-4.5 4.5-2.2-2.2 1.1-1.1 1.1 1.1 3.4-3.4 1.1 1.1z" />
+                  </svg>
+                </div>
+                <div className="dashboard-card-lbl">Report Review</div>
+                <div className="dashboard-card-details">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 3l5 5-5 5V3z" /></svg>
+                  Approve or return reports
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
