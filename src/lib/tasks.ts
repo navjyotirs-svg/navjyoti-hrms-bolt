@@ -567,3 +567,271 @@ export async function fetchTaskEvidenceCounts(taskIds: string[]): Promise<Map<st
   return result
 }
 
+// ============================================================
+// Team Tasks — Employee Overview & Per-Employee Timeline
+// ============================================================
+
+export interface EmployeeTaskSummary {
+  id: string
+  employee_code: string
+  full_name: string
+  designation: string | null
+  department_id: string | null
+  department_name: string | null
+  branch_id: string | null
+  branch_name: string | null
+  reporting_manager_id: string | null
+  reporting_manager_name: string | null
+  active_tasks: number
+  acceptance_pending: number
+  in_progress: number
+  submitted: number
+  completed: number
+  overdue: number
+  met_deadline: number
+  missed_deadline: number
+  deadline_success_pct: number | null
+}
+
+export interface EmployeeTaskItem {
+  task_id: string
+  task_code: string
+  title: string
+  priority: string
+  status: string
+  project_name: string | null
+  project_code: string | null
+  task_cost: number | null
+  task_cost_currency: string
+  original_deadline: string | null
+  current_deadline: string | null
+  assignment_id: string
+  assignment_status: string
+  assignment_type: string
+  is_current: boolean
+  progress_percent: number
+  accepted_at: string | null
+  submitted_at: string | null
+  ended_at: string | null
+  assigned_at: string | null
+  individual_outcome: string | null
+  evidence_count: number
+  evidence_photo_count: number
+}
+
+const ACTIVE_ASSIGNMENT_STATUSES = [
+  'ACCEPTANCE_PENDING', 'ACCEPTED', 'IN_PROGRESS', 'SUBMITTED',
+  'REVISION_REQUIRED', 'REASSIGNMENT_REQUESTED',
+]
+const COMPLETED_ASSIGNMENT_STATUSES = ['COMPLETED', 'CANCELLED', 'REJECTED']
+
+function isAssignmentOverdue(deadline: string | null, status: string, now: Date): boolean {
+  if (!deadline) return false
+  if (COMPLETED_ASSIGNMENT_STATUSES.includes((status || '').toUpperCase())) return false
+  return new Date(deadline).getTime() < now.getTime()
+}
+
+export async function fetchTeamEmployeeSummaries(orgId: string, _canReadAll: boolean, _canReadTeam: boolean): Promise<EmployeeTaskSummary[]> {
+  const now = new Date()
+
+  let empQuery = supabase
+    .from('employees')
+    .select('id, employee_code, full_name, designation, department_id, branch_id, reporting_manager_id, is_active, employment_status')
+    .eq('organization_id', orgId)
+    .eq('is_active', true)
+    .in('employment_status', ['active', 'on_probation', 'confirmed', 'notice_period'])
+    .order('full_name')
+
+  const { data: employees, error: empError } = await empQuery
+  if (empError) throw empError
+  if (!employees || employees.length === 0) return []
+
+  const empIds = employees.map(e => e.id)
+
+  const { data: assignments, error: aError } = await supabase
+    .from('task_assignments')
+    .select(`
+      id, assigned_to, assignment_status, assignment_type, is_current, progress_percent,
+      accepted_at, submitted_at, ended_at, assigned_at, individual_outcome,
+      tasks!inner (id, task_code, title, priority, status, original_deadline, current_deadline, task_cost, task_cost_currency, completed_at)
+    `)
+    .in('assigned_to', empIds)
+    .eq('is_current', true)
+
+  if (aError) throw aError
+
+  const deptIds = new Set(employees.map(e => e.department_id).filter(Boolean) as string[])
+  const branchIds = new Set(employees.map(e => e.branch_id).filter(Boolean) as string[])
+  const mgrIds = new Set(employees.map(e => e.reporting_manager_id).filter(Boolean) as string[])
+
+  const [deptRes, branchRes, mgrRes] = await Promise.all([
+    deptIds.size > 0
+      ? supabase.from('departments').select('id, name').in('id', Array.from(deptIds))
+      : Promise.resolve({ data: [], error: null }),
+    branchIds.size > 0
+      ? supabase.from('branches').select('id, name').in('id', Array.from(branchIds))
+      : Promise.resolve({ data: [], error: null }),
+    mgrIds.size > 0
+      ? supabase.from('employees').select('id, full_name').in('id', Array.from(mgrIds))
+      : Promise.resolve({ data: [], error: null }),
+  ])
+
+  const deptMap = new Map((deptRes.data || []).map((d: any) => [d.id, d.name]))
+  const branchMap = new Map((branchRes.data || []).map((b: any) => [b.id, b.name]))
+  const mgrMap = new Map((mgrRes.data || []).map((m: any) => [m.id, m.full_name]))
+
+  const summaryMap = new Map<string, EmployeeTaskSummary>()
+  for (const emp of employees) {
+    summaryMap.set(emp.id, {
+      id: emp.id,
+      employee_code: emp.employee_code,
+      full_name: emp.full_name,
+      designation: emp.designation,
+      department_id: emp.department_id,
+      department_name: emp.department_id ? deptMap.get(emp.department_id) || null : null,
+      branch_id: emp.branch_id,
+      branch_name: emp.branch_id ? branchMap.get(emp.branch_id) || null : null,
+      reporting_manager_id: emp.reporting_manager_id,
+      reporting_manager_name: emp.reporting_manager_id ? mgrMap.get(emp.reporting_manager_id) || null : null,
+      active_tasks: 0,
+      acceptance_pending: 0,
+      in_progress: 0,
+      submitted: 0,
+      completed: 0,
+      overdue: 0,
+      met_deadline: 0,
+      missed_deadline: 0,
+      deadline_success_pct: null,
+    })
+  }
+
+  for (const a of (assignments || []) as any[]) {
+    const s = summaryMap.get(a.assigned_to)
+    if (!s) continue
+    const task = a.tasks
+    const status = (a.assignment_status || '').toUpperCase()
+    const deadline = task?.current_deadline || task?.original_deadline || null
+
+    if (ACTIVE_ASSIGNMENT_STATUSES.includes(status)) {
+      s.active_tasks++
+      if (status === 'ACCEPTANCE_PENDING' || status === 'REASSIGNMENT_REQUESTED') s.acceptance_pending++
+      if (status === 'IN_PROGRESS') s.in_progress++
+      if (status === 'SUBMITTED') s.submitted++
+      if (isAssignmentOverdue(deadline, status, now)) s.overdue++
+    } else if (status === 'COMPLETED') {
+      s.completed++
+      if (deadline && a.ended_at) {
+        if (new Date(a.ended_at).getTime() <= new Date(deadline).getTime()) s.met_deadline++
+        else s.missed_deadline++
+      }
+    }
+  }
+
+  for (const s of summaryMap.values()) {
+    const totalCompleted = s.met_deadline + s.missed_deadline
+    if (totalCompleted > 0) {
+      s.deadline_success_pct = Math.round((s.met_deadline / totalCompleted) * 100)
+    }
+  }
+
+  return Array.from(summaryMap.values())
+}
+
+export async function fetchEmployeeTaskTimeline(employeeId: string): Promise<EmployeeTaskItem[]> {
+  const { data: assignments, error } = await supabase
+    .from('task_assignments')
+    .select(`
+      id, assigned_to, assignment_status, assignment_type, is_current, progress_percent,
+      accepted_at, submitted_at, ended_at, assigned_at, individual_outcome,
+      tasks!inner (
+        id, task_code, title, priority, status, original_deadline, current_deadline,
+        task_cost, task_cost_currency, completed_at,
+        projects ( id, project_name, project_code )
+      )
+    `)
+    .eq('assigned_to', employeeId)
+    .eq('is_current', true)
+    .order('assigned_at', { ascending: false })
+
+  if (error) throw error
+  if (!assignments || assignments.length === 0) return []
+
+  const taskIds = (assignments as any[]).map(a => a.tasks?.id).filter(Boolean) as string[]
+  let evidenceMap = new Map<string, { reports: number; photos: number }>()
+
+  if (taskIds.length > 0) {
+    const { data: evidence } = await supabase
+      .from('daily_report_task_items')
+      .select('task_id, daily_report_id')
+      .in('task_id', taskIds)
+
+    if (evidence) {
+      const reportIds = new Set<string>()
+      for (const e of evidence as any[]) {
+        if (e.daily_report_id) reportIds.add(e.daily_report_id)
+      }
+      let photoCountMap = new Map<string, number>()
+      if (reportIds.size > 0) {
+        const { data: photos } = await supabase
+          .from('daily_report_task_photos')
+          .select('daily_report_id')
+          .in('daily_report_id', Array.from(reportIds))
+          .is('deleted_at', null)
+        ;(photos || []).forEach((p: any) => {
+          photoCountMap.set(p.daily_report_id, (photoCountMap.get(p.daily_report_id) || 0) + 1)
+        })
+      }
+      for (const e of evidence as any[]) {
+        if (!e.task_id) continue
+        const existing = evidenceMap.get(e.task_id) || { reports: 0, photos: 0 }
+        existing.reports++
+        if (e.daily_report_id) existing.photos += photoCountMap.get(e.daily_report_id) || 0
+        evidenceMap.set(e.task_id, existing)
+      }
+    }
+  }
+
+  return (assignments as any[]).map(a => {
+    const task = a.tasks
+    const ev = evidenceMap.get(task?.id) || { reports: 0, photos: 0 }
+    return {
+      task_id: task?.id || '',
+      task_code: task?.task_code || '',
+      title: task?.title || '',
+      priority: task?.priority || 'MEDIUM',
+      status: task?.status || '',
+      project_name: task?.projects?.project_name || null,
+      project_code: task?.projects?.project_code || null,
+      task_cost: task?.task_cost ?? null,
+      task_cost_currency: task?.task_cost_currency || 'INR',
+      original_deadline: task?.original_deadline || null,
+      current_deadline: task?.current_deadline || null,
+      assignment_id: a.id,
+      assignment_status: a.assignment_status || '',
+      assignment_type: a.assignment_type || '',
+      is_current: a.is_current,
+      progress_percent: a.progress_percent || 0,
+      accepted_at: a.accepted_at || null,
+      submitted_at: a.submitted_at || null,
+      ended_at: a.ended_at || null,
+      assigned_at: a.assigned_at || null,
+      individual_outcome: a.individual_outcome || null,
+      evidence_count: ev.reports,
+      evidence_photo_count: ev.photos,
+    }
+  })
+}
+
+export async function validateEmployeeAccess(employeeId: string, orgId: string, canReadAll: boolean): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('employees')
+    .select('id, organization_id, is_active, employment_status')
+    .eq('id', employeeId)
+    .maybeSingle()
+  if (error || !data) return false
+  if (data.organization_id !== orgId) return false
+  if (!canReadAll && !data.is_active) return false
+  if (!canReadAll && data.employment_status === 'offboarded') return false
+  return true
+}
+

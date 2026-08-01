@@ -37,6 +37,7 @@ import { HolidayManagementPage } from '@/pages/HolidayManagementPage'
 import { MyTasksPage } from '@/pages/MyTasksPage'
 import { TaskDetailPage } from '@/pages/TaskDetailPage'
 import { TeamTasksPage } from '@/pages/TeamTasksPage'
+import { EmployeeTaskTimelinePage } from '@/pages/EmployeeTaskTimelinePage'
 import { CreateTaskPage } from '@/pages/CreateTaskPage'
 import { TaskReviewPage } from '@/pages/TaskReviewPage'
 import { MyTicketsPage } from '@/pages/MyTicketsPage'
@@ -221,6 +222,9 @@ function AppRoutes() {
         } />
         <Route path="/team-tasks" element={
           <PermissionRoute permissions={['task.read_team', 'task.read_all', 'task.review']}><TeamTasksPage /></PermissionRoute>
+        } />
+        <Route path="/team-tasks/employee/:employeeId" element={
+          <PermissionRoute permissions={['task.read_team', 'task.read_all', 'task.review']}><EmployeeTaskTimelinePage /></PermissionRoute>
         } />
         <Route path="/tasks/:taskId/daily-report-evidence" element={
           <PermissionRoute permissions={['task.read_team', 'task.read_all', 'task.review']}><TaskEvidenceViewerPage /></PermissionRoute>

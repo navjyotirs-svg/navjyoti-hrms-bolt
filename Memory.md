@@ -3473,3 +3473,53 @@ Add task priority colours, deadline-performance indicators, Calls activity field
 - Priority badges not yet applied to Notifications or Daily Report task selector (these views don't currently render priority badges)
 - Dashboard performance card fetches assignments client-side — for large organizations should move to server-side RPC
 - The 1 pre-existing skeleton test failure (TaskEvidenceViewerPage) was not introduced by this change
+
+## Team Tasks Employee-Wise Reorganisation — completed 2026-08-01
+
+### Objective
+Reorganise Team Tasks from a single mixed task table into an employee-wise landing page with per-employee task timeline pages. Add consistent colour system for priorities, statuses, deadline performance, and action buttons. No task business logic, database history, multi-assignee workflow, notifications, permissions, realtime, or exports changed.
+
+### 1. Team Tasks Landing Page (By Employee tab)
+- Default tab is "By Employee" — shows all authorised employees as cards/table rows.
+- Each employee shows: name, code, designation, department, reporting manager, active tasks, acceptance pending, in progress, submitted, completed, overdue, deadline success %, View Tasks button.
+- Desktop: searchable table with all columns. Mobile: responsive employee cards with stats.
+- Director sees all active employees in the organisation. Manager sees only authorised reporting hierarchy.
+- Excludes inactive, offboarded, and cross-organisation employees.
+
+### 2. Employee Search and Filters
+- Search by name or employee code. Filter by department, branch, designation, reporting manager.
+- Checkbox filters: Has Overdue, Has Pending, Has Submitted. Clear Filters button.
+- Filters stored in URL query params for browser-back preservation.
+
+### 3. Employee Task Timeline Page
+- Route: `/team-tasks/employee/:employeeId` — full page with Back to Team Tasks.
+- Shows employee name, code, designation, department, active/overdue/completed counts, deadline success %.
+- Performance summary card with warning banner if overdue, green banner if on track.
+- Only shows the selected employee's own assignments. Multi-assignee: only their own status/progress/performance.
+- Access validation via `validateEmployeeAccess()` — checks org, active status, employment status.
+
+### 4. Task Timeline Order
+- 5 sections: Overdue, Due Today, Upcoming, No Deadline, Completed History.
+- Overdue: earliest missed deadline first. Due Today: nearest time first. Upcoming: nearest deadline first. No Deadline: newest assigned first. Completed: latest completion first.
+
+### 5-9. Consistent Colours
+- Priority: `getTaskPriorityStyle()` — LOW=green, MEDIUM=amber, HIGH=red, CRITICAL=dark red.
+- Status: NEW `getTaskStatusStyle()` — ACCEPTANCE_PENDING=amber, ACCEPTED=blue, IN_PROGRESS=teal, SUBMITTED=purple, REVISION_REQUIRED=orange, COMPLETED=green, REASSIGNMENT_REQUESTED=amber, REJECTED=red, CANCELLED=grey.
+- Performance: `getAssignmentDeadlinePerformance()` — MET=green, MISSED/OVERDUE=dark red, ON_TRACK=neutral, NO_DATA=grey.
+- Action buttons: NEW semantic CSS classes `.btn-accept`, `.btn-start`, `.btn-submit`, `.btn-review`, `.btn-reassign`, `.btn-revision`, `.btn-complete`, `.btn-cancel-action`, `.btn-delete`, `.btn-back`.
+
+### 10. All Tasks Tab (secondary)
+- Preserves existing mixed task table. Not the default view.
+
+### Files Changed
+- `src/lib/taskPriority.ts` — added getTaskStatusStyle, TIMELINE_SECTIONS, getTimelineSection, sortTimelineItems
+- `src/styles/shared.css` — status badge CSS, action button CSS, employee overview/timeline/task card/tab CSS
+- `src/lib/tasks.ts` — added EmployeeTaskSummary, EmployeeTaskItem, fetchTeamEmployeeSummaries, fetchEmployeeTaskTimeline, validateEmployeeAccess
+- `src/pages/TeamTasksPage.tsx` — rewritten as employee overview with filters + All Tasks tab
+- `src/pages/EmployeeTaskTimelinePage.tsx` — NEW: per-employee task timeline
+- `src/App.tsx` — added /team-tasks/employee/:employeeId route
+- `src/lib/__tests__/team_tasks.test.ts` — NEW: 41 tests
+
+### Tests and Results
+- New tests: 41/41 PASS. All task tests: 69/69 PASS. TypeScript: PASS. Build: PASS.
+
