@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
+import { supabase } from '@/lib/supabase'
 import { TASK_STATUS_LABELS, type TaskStatus } from '@/types/roles'
 import {
   fetchTeamTasks,
@@ -72,6 +73,22 @@ export function TeamTasksPage() {
 
   useEffect(() => {
     if (profile?.organization_id) loadEmployeeSummaries()
+  }, [profile?.organization_id])
+
+  // Realtime: reload employee summaries when tasks change
+  useEffect(() => {
+    if (!profile?.organization_id) return
+    const channel = supabase
+      .channel('team-tasks-rt')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => loadEmployeeSummaries())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_progress_updates' }, () => loadEmployeeSummaries())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_assignments' }, () => loadEmployeeSummaries())
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.organization_id])
 
   async function loadEmployeeSummaries() {

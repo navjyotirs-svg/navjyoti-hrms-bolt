@@ -70,6 +70,7 @@ const TABLE_TO_QUERIES: Record<string, QueryKey[]> = {
   task_assignments: ['my-tasks', 'team-tasks', 'task-detail', 'task-dashboard'],
   task_status_history: ['task-detail'],
   task_submissions: ['task-detail', 'task-dashboard'],
+  task_progress_updates: ['my-tasks', 'team-tasks', 'task-detail', 'task-dashboard'],
   task_comments: ['task-detail'],
 
   tickets: ['my-tickets', 'team-tickets', 'ticket-detail'],

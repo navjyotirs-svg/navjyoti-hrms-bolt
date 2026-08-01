@@ -45,6 +45,7 @@ const SUBSCRIBED_TABLES = [
   'task_assignments',
   'task_status_history',
   'task_submissions',
+  'task_progress_updates',
   'task_comments',
   'tickets',
   'ticket_comments',

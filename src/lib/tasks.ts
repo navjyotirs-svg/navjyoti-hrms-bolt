@@ -617,18 +617,24 @@ export interface EmployeeTaskItem {
   individual_outcome: string | null
   evidence_count: number
   evidence_photo_count: number
+  completion_outcome: string | null
+  completed_at: string | null
 }
 
-const ACTIVE_ASSIGNMENT_STATUSES = [
-  'ACCEPTANCE_PENDING', 'ACCEPTED', 'IN_PROGRESS', 'SUBMITTED',
-  'REVISION_REQUIRED', 'REASSIGNMENT_REQUESTED',
+const ACTIVE_TASK_STATUSES = [
+  'ASSIGNED', 'ACCEPTANCE_PENDING', 'ACCEPTED', 'IN_PROGRESS', 'SUBMITTED',
+  'REVISION_REQUESTED', 'REVISION_REQUIRED', 'REASSIGNMENT_REQUESTED', 'ON_HOLD', 'REVIEW_REQUIRED',
 ]
-const COMPLETED_ASSIGNMENT_STATUSES = ['COMPLETED', 'CANCELLED', 'REJECTED']
+const COMPLETED_TASK_STATUSES = ['COMPLETED', 'CANCELLED', 'REJECTED']
 
-function isAssignmentOverdue(deadline: string | null, status: string, now: Date): boolean {
+function isTaskOverdue(deadline: string | null, taskStatus: string, now: Date): boolean {
   if (!deadline) return false
-  if (COMPLETED_ASSIGNMENT_STATUSES.includes((status || '').toUpperCase())) return false
-  return new Date(deadline).getTime() < now.getTime()
+  if (COMPLETED_TASK_STATUSES.includes((taskStatus || '').toUpperCase())) return false
+  const d = new Date(deadline)
+  if (isNaN(d.getTime())) return false
+  const deadlineDate = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  return deadlineDate.getTime() < nowDate.getTime()
 }
 
 export async function fetchTeamEmployeeSummaries(orgId: string, _canReadAll: boolean, _canReadTeam: boolean): Promise<EmployeeTaskSummary[]> {
@@ -653,7 +659,7 @@ export async function fetchTeamEmployeeSummaries(orgId: string, _canReadAll: boo
     .select(`
       id, assigned_employee_id, assignment_status, assignment_type, is_current, progress_percent,
       accepted_at, submitted_at, ended_at, assigned_at, individual_outcome,
-      tasks!inner (id, task_code, title, priority, status, original_deadline, current_deadline, task_cost, task_cost_currency, completed_at)
+      tasks!inner (id, task_code, title, priority, status, original_deadline, current_deadline, task_cost, task_cost_currency, completed_at, completion_outcome)
     `)
     .in('assigned_employee_id', empIds)
     .eq('is_current', true)
@@ -709,19 +715,22 @@ export async function fetchTeamEmployeeSummaries(orgId: string, _canReadAll: boo
     const s = summaryMap.get(a.assigned_employee_id)
     if (!s) continue
     const task = a.tasks
-    const status = (a.assignment_status || '').toUpperCase()
+    const taskStatus = (task?.status || '').toUpperCase()
     const deadline = task?.current_deadline || task?.original_deadline || null
 
-    if (ACTIVE_ASSIGNMENT_STATUSES.includes(status)) {
+    if (ACTIVE_TASK_STATUSES.includes(taskStatus)) {
       s.active_tasks++
-      if (status === 'ACCEPTANCE_PENDING' || status === 'REASSIGNMENT_REQUESTED') s.acceptance_pending++
-      if (status === 'IN_PROGRESS') s.in_progress++
-      if (status === 'SUBMITTED') s.submitted++
-      if (isAssignmentOverdue(deadline, status, now)) s.overdue++
-    } else if (status === 'COMPLETED') {
+      if (taskStatus === 'ACCEPTANCE_PENDING' || taskStatus === 'ASSIGNED' || taskStatus === 'REASSIGNMENT_REQUESTED') s.acceptance_pending++
+      if (taskStatus === 'IN_PROGRESS' || taskStatus === 'ACCEPTED') s.in_progress++
+      if (taskStatus === 'SUBMITTED' || taskStatus === 'REVIEW_REQUIRED') s.submitted++
+      if (isTaskOverdue(deadline, taskStatus, now)) s.overdue++
+    } else if (taskStatus === 'COMPLETED') {
       s.completed++
-      if (deadline && a.ended_at) {
-        if (new Date(a.ended_at).getTime() <= new Date(deadline).getTime()) s.met_deadline++
+      const outcome = (task?.completion_outcome || '').toUpperCase()
+      if (outcome === 'ON_TIME') s.met_deadline++
+      else if (outcome === 'LATE') s.missed_deadline++
+      else if (deadline && task?.completed_at) {
+        if (new Date(task.completed_at).getTime() <= new Date(deadline).getTime()) s.met_deadline++
         else s.missed_deadline++
       }
     }
@@ -745,7 +754,7 @@ export async function fetchEmployeeTaskTimeline(employeeId: string): Promise<Emp
       accepted_at, submitted_at, ended_at, assigned_at, individual_outcome,
       tasks!inner (
         id, task_code, title, priority, status, original_deadline, current_deadline,
-        task_cost, task_cost_currency, completed_at,
+        task_cost, task_cost_currency, completed_at, completion_outcome,
         projects ( id, project_name, project_code )
       )
     `)
@@ -757,6 +766,25 @@ export async function fetchEmployeeTaskTimeline(employeeId: string): Promise<Emp
   if (!assignments || assignments.length === 0) return []
 
   const taskIds = (assignments as any[]).map(a => a.tasks?.id).filter(Boolean) as string[]
+
+  // Fetch real progress from task_progress_updates (latest per task)
+  const progressMap = new Map<string, number>()
+  if (taskIds.length > 0) {
+    const { data: updates } = await supabase
+      .from('task_progress_updates')
+      .select('task_id, progress_percent, created_at')
+      .in('task_id', taskIds)
+      .order('created_at', { ascending: false })
+
+    if (updates) {
+      for (const u of updates as any[]) {
+        if (!progressMap.has(u.task_id)) {
+          progressMap.set(u.task_id, u.progress_percent || 0)
+        }
+      }
+    }
+  }
+
   let evidenceMap = new Map<string, { reports: number; photos: number }>()
 
   if (taskIds.length > 0) {
@@ -794,6 +822,8 @@ export async function fetchEmployeeTaskTimeline(employeeId: string): Promise<Emp
   return (assignments as any[]).map(a => {
     const task = a.tasks
     const ev = evidenceMap.get(task?.id) || { reports: 0, photos: 0 }
+    const taskStatus = (task?.status || '').toUpperCase()
+    const realProgress = taskStatus === 'COMPLETED' ? 100 : (progressMap.get(task?.id) ?? a.progress_percent ?? 0)
     return {
       task_id: task?.id || '',
       task_code: task?.task_code || '',
@@ -807,17 +837,19 @@ export async function fetchEmployeeTaskTimeline(employeeId: string): Promise<Emp
       original_deadline: task?.original_deadline || null,
       current_deadline: task?.current_deadline || null,
       assignment_id: a.id,
-      assignment_status: a.assignment_status || '',
+      assignment_status: task?.status || a.assignment_status || '',
       assignment_type: a.assignment_type || '',
       is_current: a.is_current,
-      progress_percent: a.progress_percent || 0,
+      progress_percent: realProgress,
       accepted_at: a.accepted_at || null,
       submitted_at: a.submitted_at || null,
-      ended_at: a.ended_at || null,
+      ended_at: task?.completed_at || a.ended_at || null,
       assigned_at: a.assigned_at || null,
       individual_outcome: a.individual_outcome || null,
       evidence_count: ev.reports,
       evidence_photo_count: ev.photos,
+      completion_outcome: task?.completion_outcome || null,
+      completed_at: task?.completed_at || null,
     }
   })
 }

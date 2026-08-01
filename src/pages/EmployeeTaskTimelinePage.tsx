@@ -20,6 +20,7 @@ import {
   TIMELINE_SECTIONS,
   type TimelineSection,
 } from '@/lib/taskPriority'
+import { supabase } from '@/lib/supabase'
 import { ListSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
@@ -53,6 +54,22 @@ export function EmployeeTaskTimelinePage() {
     if (!employeeId || !profile?.organization_id) return
     loadData()
   }, [employeeId, profile?.organization_id])
+
+  // Realtime: reload when tasks or progress updates change
+  useEffect(() => {
+    if (!employeeId) return
+    const channel = supabase
+      .channel(`emp-timeline:${employeeId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_progress_updates' }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_assignments' }, () => loadData())
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId])
 
   async function loadData() {
     setLoading(true)
@@ -106,7 +123,8 @@ export function EmployeeTaskTimelinePage() {
     }
 
     for (const item of items) {
-      const isCompleted = ['COMPLETED', 'CANCELLED', 'REJECTED'].includes((item.assignment_status || '').toUpperCase())
+      const taskStatus = (item.status || item.assignment_status || '').toUpperCase()
+      const isCompleted = ['COMPLETED', 'CANCELLED', 'REJECTED'].includes(taskStatus)
       const section = getTimelineSection({
         deadlineAt: item.current_deadline || item.original_deadline,
         isCompleted,
@@ -117,13 +135,16 @@ export function EmployeeTaskTimelinePage() {
 
     for (const section of TIMELINE_SECTIONS) {
       sections[section.key] = sortTimelineItems(
-        sections[section.key].map(item => ({
-          deadlineAt: item.current_deadline || item.original_deadline,
-          completedAt: item.ended_at,
-          assignedAt: item.assigned_at,
-          isCompleted: ['COMPLETED', 'CANCELLED', 'REJECTED'].includes((item.assignment_status || '').toUpperCase()),
-          original: item,
-        })),
+        sections[section.key].map(item => {
+          const taskStatus = (item.status || item.assignment_status || '').toUpperCase()
+          return {
+            deadlineAt: item.current_deadline || item.original_deadline,
+            completedAt: item.completed_at || item.ended_at,
+            assignedAt: item.assigned_at,
+            isCompleted: ['COMPLETED', 'CANCELLED', 'REJECTED'].includes(taskStatus),
+            original: item,
+          }
+        }),
         section.key,
       ).map(wrapped => wrapped.original)
     }
@@ -135,16 +156,17 @@ export function EmployeeTaskTimelinePage() {
 
   function renderTaskRow(item: EmployeeTaskItem) {
     const deadline = item.current_deadline || item.original_deadline
+    const taskStatus = (item.status || item.assignment_status || '').toUpperCase()
     const perf = getAssignmentDeadlinePerformance({
       deadlineAt: deadline,
-      completedAt: item.ended_at,
-      assignmentStatus: item.assignment_status,
+      completedAt: item.completed_at || item.ended_at,
+      assignmentStatus: taskStatus,
       serverNow: now,
     })
     const perfStyle = getDeadlinePerformanceStyle(perf)
     const accentClass = getPerformanceAccentClass(perf)
     const priorityStyle = getTaskPriorityStyle(item.priority)
-    const statusStyle = getTaskStatusStyle(item.assignment_status)
+    const statusStyle = getTaskStatusStyle(taskStatus)
 
     return (
       <tr key={item.assignment_id} className={accentClass} style={{ cursor: 'pointer' }} onClick={() => navigate(`/tasks/${item.task_id}`)}>
@@ -171,15 +193,16 @@ export function EmployeeTaskTimelinePage() {
 
   function renderTaskCard(item: EmployeeTaskItem) {
     const deadline = item.current_deadline || item.original_deadline
+    const taskStatus = (item.status || item.assignment_status || '').toUpperCase()
     const perf = getAssignmentDeadlinePerformance({
       deadlineAt: deadline,
-      completedAt: item.ended_at,
-      assignmentStatus: item.assignment_status,
+      completedAt: item.completed_at || item.ended_at,
+      assignmentStatus: taskStatus,
       serverNow: now,
     })
     const perfStyle = getDeadlinePerformanceStyle(perf)
     const priorityStyle = getTaskPriorityStyle(item.priority)
-    const statusStyle = getTaskStatusStyle(item.assignment_status)
+    const statusStyle = getTaskStatusStyle(taskStatus)
 
     return (
       <div key={item.assignment_id} className="task-card-mobile" onClick={() => navigate(`/tasks/${item.task_id}`)}>
