@@ -200,7 +200,12 @@ export function getAssignmentDeadlinePerformance(params: {
     return 'NO_DEADLINE_DATA'
   }
 
-  const deadline = new Date(deadlineAt)
+  // Date-only strings (YYYY-MM-DD) are midnight UTC = 05:30 AM IST.
+  // Treat them as 17:30 IST (12:00 UTC) — end of business day.
+  const deadlineStr = /^\d{4}-\d{2}-\d{2}$/.test(deadlineAt)
+    ? deadlineAt + 'T17:30:00+05:30'
+    : deadlineAt
+  const deadline = new Date(deadlineStr)
   if (isNaN(deadline.getTime())) {
     return 'NO_DEADLINE_DATA'
   }

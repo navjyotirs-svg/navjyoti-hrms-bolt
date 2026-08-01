@@ -415,35 +415,45 @@ export function formatTaskCost(cost: number | null, currency: string = 'INR'): s
   return `${symbol}${cost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+// Date-only strings (YYYY-MM-DD with no time) are midnight UTC = 05:30 AM IST.
+// Treat them as 17:30 IST (12:00 UTC) — end of business day.
+function parseDeadlineDate(value: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(value + 'T17:30:00+05:30')
+  }
+  return new Date(value)
+}
+
 export function formatDate(dateStr: string): string {
   if (!dateStr) return '—'
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const d = parseDeadlineDate(dateStr)
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
 }
 
 export function formatDateTime(dateStr: string): string {
   if (!dateStr) return '—'
-  const d = new Date(dateStr)
+  const d = parseDeadlineDate(dateStr)
   return d.toLocaleString('en-IN', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
   })
 }
 
 export function formatDeadline(deadlineAt: string | null, deadlineDate?: string | null): string {
   if (deadlineAt) return formatDateTime(deadlineAt)
-  if (deadlineDate) return formatDate(deadlineDate)
+  if (deadlineDate) return formatDateTime(deadlineDate)
   return '—'
 }
 
 export function formatDeadlineShort(deadlineAt: string | null, deadlineDate?: string | null): string {
   if (!deadlineAt && !deadlineDate) return '—'
-  const d = new Date(deadlineAt || deadlineDate!)
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-    + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+  const d = parseDeadlineDate(deadlineAt || deadlineDate!)
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+    + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
 }
 
 export function formatAssignees(assignments: TaskAssignmentWithEmployee[]): string {
@@ -630,7 +640,7 @@ const COMPLETED_TASK_STATUSES = ['COMPLETED', 'CANCELLED', 'REJECTED']
 function isTaskOverdue(deadline: string | null, taskStatus: string, now: Date): boolean {
   if (!deadline) return false
   if (COMPLETED_TASK_STATUSES.includes((taskStatus || '').toUpperCase())) return false
-  const d = new Date(deadline)
+  const d = parseDeadlineDate(deadline)
   if (isNaN(d.getTime())) return false
   const deadlineDate = new Date(d.getFullYear(), d.getMonth(), d.getDate())
   const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())

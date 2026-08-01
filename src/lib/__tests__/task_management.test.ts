@@ -150,7 +150,7 @@ describe('Feature 3 — Deadline Date and Time', () => {
   test('20. Deadline time is required', () => {
     const src = readFile('src/pages/CreateTaskPage.tsx')
     assert.ok(src.includes('deadline_time'), 'Deadline time field exists')
-    assert.ok(src.includes('type="time"'), 'Time input type used')
+    assert.ok(src.includes('AM') && src.includes('PM'), 'AM/PM selector used for time input')
   })
 
   test('21. Past deadline is rejected', () => {
@@ -182,7 +182,7 @@ describe('Feature 3 — Deadline Date and Time', () => {
     const src = readFile('src/lib/tasks.ts')
     assert.ok(src.includes('formatDeadline'), 'formatDeadline falls back to date-only')
     assert.ok(src.includes('if (deadlineAt) return formatDateTime(deadlineAt)'), 'Prefers deadline_at, falls back to date')
-    assert.ok(src.includes('if (deadlineDate) return formatDate(deadlineDate)'), 'Falls back to date-only')
+    assert.ok(src.includes('if (deadlineDate) return formatDateTime(deadlineDate)'), 'Falls back to date-only with time display')
   })
 
   test('26. Backfill uses 6 PM IST default', () => {

@@ -531,7 +531,49 @@ export function CreateTaskPage() {
             </div>
             <div className="form-field">
               <label htmlFor="t-deadline-time">Deadline Time *</label>
-              <input id="t-deadline-time" type="time" value={form.deadline_time} onChange={(e) => setForm({ ...form, deadline_time: e.target.value })} required />
+              <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                <select
+                  id="t-deadline-hour"
+                  aria-label="Deadline hour"
+                  value={(() => {
+                    const h = parseInt(form.deadline_time.split(':')[0], 10)
+                    const h12 = h % 12 || 12
+                    return String(h12)
+                  })()}
+                  onChange={(e) => {
+                    const h12 = parseInt(e.target.value, 10)
+                    const ampm = parseInt(form.deadline_time.split(':')[0], 10) >= 12 ? 'PM' : 'AM'
+                    const h24 = ampm === 'PM' ? (h12 % 12) + 12 : h12 % 12
+                    setForm({ ...form, deadline_time: `${String(h24).padStart(2, '0')}:${form.deadline_time.split(':')[1] || '00'}` })
+                  }}
+                  required
+                >
+                  {Array.from({ length: 12 }, (_, i) => String(i + 1)).map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <span>:</span>
+                <select
+                  aria-label="Deadline minute"
+                  value={form.deadline_time.split(':')[1] || '00'}
+                  onChange={(e) => setForm({ ...form, deadline_time: `${form.deadline_time.split(':')[0] || '18'}:${e.target.value}` })}
+                  required
+                >
+                  {['00', '15', '30', '45'].map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select
+                  aria-label="Deadline AM or PM"
+                  value={parseInt(form.deadline_time.split(':')[0], 10) >= 12 ? 'PM' : 'AM'}
+                  onChange={(e) => {
+                    const ampm = e.target.value
+                    const h12 = parseInt(form.deadline_time.split(':')[0], 10) % 12 || 12
+                    const h24 = ampm === 'PM' ? (h12 % 12) + 12 : h12 % 12
+                    setForm({ ...form, deadline_time: `${String(h24).padStart(2, '0')}:${form.deadline_time.split(':')[1] || '00'}` })
+                  }}
+                  required
+                >
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
             </div>
           </div>
           <div className="form-field">
