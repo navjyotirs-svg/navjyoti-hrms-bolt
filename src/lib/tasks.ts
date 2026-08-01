@@ -651,11 +651,11 @@ export async function fetchTeamEmployeeSummaries(orgId: string, _canReadAll: boo
   const { data: assignments, error: aError } = await supabase
     .from('task_assignments')
     .select(`
-      id, assigned_to, assignment_status, assignment_type, is_current, progress_percent,
+      id, assigned_employee_id, assignment_status, assignment_type, is_current, progress_percent,
       accepted_at, submitted_at, ended_at, assigned_at, individual_outcome,
       tasks!inner (id, task_code, title, priority, status, original_deadline, current_deadline, task_cost, task_cost_currency, completed_at)
     `)
-    .in('assigned_to', empIds)
+    .in('assigned_employee_id', empIds)
     .eq('is_current', true)
 
   if (aError) throw aError
@@ -706,7 +706,7 @@ export async function fetchTeamEmployeeSummaries(orgId: string, _canReadAll: boo
   }
 
   for (const a of (assignments || []) as any[]) {
-    const s = summaryMap.get(a.assigned_to)
+    const s = summaryMap.get(a.assigned_employee_id)
     if (!s) continue
     const task = a.tasks
     const status = (a.assignment_status || '').toUpperCase()
@@ -741,7 +741,7 @@ export async function fetchEmployeeTaskTimeline(employeeId: string): Promise<Emp
   const { data: assignments, error } = await supabase
     .from('task_assignments')
     .select(`
-      id, assigned_to, assignment_status, assignment_type, is_current, progress_percent,
+      id, assigned_employee_id, assignment_status, assignment_type, is_current, progress_percent,
       accepted_at, submitted_at, ended_at, assigned_at, individual_outcome,
       tasks!inner (
         id, task_code, title, priority, status, original_deadline, current_deadline,
@@ -749,7 +749,7 @@ export async function fetchEmployeeTaskTimeline(employeeId: string): Promise<Emp
         projects ( id, project_name, project_code )
       )
     `)
-    .eq('assigned_to', employeeId)
+    .eq('assigned_employee_id', employeeId)
     .eq('is_current', true)
     .order('assigned_at', { ascending: false })
 
