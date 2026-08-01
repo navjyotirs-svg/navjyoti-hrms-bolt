@@ -81,6 +81,19 @@ export function ReportReviewPage() {
                 <div style={{ marginBottom: 'var(--space-2)' }}><strong>Summary:</strong> {r.overall_summary}</div>
                 {r.work_completed && <div style={{ marginBottom: 'var(--space-2)' }}><strong>Work Completed:</strong> {r.work_completed}</div>}
 
+                {/* Calls Activity */}
+                {r.has_call_activity && (
+                  <div style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-3)', padding: 'var(--space-3)', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface)' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Calls Activity</h4>
+                    <div className="calls-grid">
+                      <div><span style={{ color: 'var(--slate)', fontSize: '13px' }}>Total Calls Made: </span><strong>{r.total_calls_made ?? 0}</strong></div>
+                      <div><span style={{ color: 'var(--slate)', fontSize: '13px' }}>Calls Picked Up: </span><strong>{r.calls_picked_up ?? 0}</strong></div>
+                      <div><span style={{ color: 'var(--slate)', fontSize: '13px' }}>Calls Not Picked Up: </span><strong>{r.calls_not_picked_up ?? 0}</strong></div>
+                      <div><span style={{ color: 'var(--slate)', fontSize: '13px' }}>Leads Generated: </span><strong>{r.leads_generated ?? 0}</strong></div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Photos */}
                 <div style={{ marginTop: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
                   <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: 'var(--space-2)' }}>

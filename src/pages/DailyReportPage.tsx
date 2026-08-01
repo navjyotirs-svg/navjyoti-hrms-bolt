@@ -5,6 +5,7 @@ import {
   createTaskPhotoSignedUrl, validatePhotoFile,
   MAX_PHOTOS_PER_TASK_ITEM, MAX_TOTAL_PHOTO_BYTES_PER_TASK_ITEM,
   type DailyReportRow, type DailyReportTaskPhoto,
+  validateCallFields,
 } from '@/lib/dailyReports'
 import { DailyReportSkeleton } from '@/components/Skeleton'
 import { useAuth } from '@/auth/AuthContext'
@@ -48,6 +49,14 @@ export function DailyReportPage() {
     follow_up_required: false,
   })
 
+  const [hasCalls, setHasCalls] = useState(false)
+  const [calls, setCalls] = useState({
+    total_calls_made: '',
+    calls_picked_up: '',
+    calls_not_picked_up: '',
+    leads_generated: '',
+  })
+
   useEffect(() => { loadReport() }, [reportDate])
 
   async function loadReport() {
@@ -61,10 +70,19 @@ export function DailyReportPage() {
           work_completed: data.work_completed || '',
           follow_up_required: data.follow_up_required || false,
         })
+        setHasCalls(!!(data as any).has_call_activity)
+        setCalls({
+          total_calls_made: (data as any).total_calls_made != null ? String((data as any).total_calls_made) : '',
+          calls_picked_up: (data as any).calls_picked_up != null ? String((data as any).calls_picked_up) : '',
+          calls_not_picked_up: (data as any).calls_not_picked_up != null ? String((data as any).calls_not_picked_up) : '',
+          leads_generated: (data as any).leads_generated != null ? String((data as any).leads_generated) : '',
+        })
         await loadPhotos(data.id)
       } else {
         setExisting(null)
         setForm({ overall_summary: '', work_completed: '', follow_up_required: false })
+        setHasCalls(false)
+        setCalls({ total_calls_made: '', calls_picked_up: '', calls_not_picked_up: '', leads_generated: '' })
         setPhotos([])
       }
     } catch (e) { setError((e as Error).message) }
@@ -95,6 +113,19 @@ export function DailyReportPage() {
 
   const isReadOnly = !!(existing && !['DRAFT', 'RETURNED_FOR_CORRECTION'].includes(existing.status))
 
+  function getCallsPayload() {
+    if (!hasCalls) {
+      return { has_call_activity: false, total_calls_made: null, calls_picked_up: null, calls_not_picked_up: null, leads_generated: null }
+    }
+    return {
+      has_call_activity: true,
+      total_calls_made: calls.total_calls_made === '' ? null : Number(calls.total_calls_made),
+      calls_picked_up: calls.calls_picked_up === '' ? null : Number(calls.calls_picked_up),
+      calls_not_picked_up: calls.calls_not_picked_up === '' ? null : Number(calls.calls_not_picked_up),
+      leads_generated: calls.leads_generated === '' ? null : Number(calls.leads_generated),
+    }
+  }
+
   async function ensureDraft(): Promise<{ reportId: string; employeeId: string; orgId: string } | null> {
     if (existing?.id) {
       return {
@@ -105,7 +136,7 @@ export function DailyReportPage() {
     }
     setPreparingDraft(true)
     try {
-      await saveDraft({ report_date: reportDate, ...form, task_items: [] })
+      await saveDraft({ report_date: reportDate, ...form, task_items: [], ...getCallsPayload() })
       const data = await fetchMyReport(reportDate)
       if (data) {
         setExisting(data as DailyReportRow)
@@ -264,10 +295,19 @@ export function DailyReportPage() {
     setPhotos(prev => prev.map(p => p.id === entryId ? { ...p, caption } : p))
   }
 
+  function handleCallsNumberChange(field: keyof typeof calls, value: string) {
+    if (value === '') { setCalls({ ...calls, [field]: '' }); return }
+    if (!/^\d+$/.test(value)) return
+    setCalls({ ...calls, [field]: value })
+  }
+
   async function handleSaveDraft() {
     setSaving(true); setError(null); setSuccess(null)
     try {
-      await saveDraft({ report_date: reportDate, ...form, task_items: [] })
+      const callsPayload = getCallsPayload()
+      const callsError = validateCallFields(callsPayload)
+      if (callsError) { setError(callsError); setSaving(false); return }
+      await saveDraft({ report_date: reportDate, ...form, task_items: [], ...callsPayload })
       setSuccess('Draft saved.')
       await loadReport()
     } catch (e) { setError((e as Error).message) }
@@ -281,7 +321,10 @@ export function DailyReportPage() {
     if (hasPendingUploads) { setError('Please wait for all photos to finish uploading.'); return }
     setSaving(true); setError(null); setSuccess(null)
     try {
-      await submitReport({ report_date: reportDate, ...form, task_items: [] })
+      const callsPayload = getCallsPayload()
+      const callsError = validateCallFields(callsPayload)
+      if (callsError) { setError(callsError); setSaving(false); return }
+      await submitReport({ report_date: reportDate, ...form, task_items: [], ...callsPayload })
       setSuccess('Report submitted successfully.')
       await loadReport()
     } catch (e) { setError((e as Error).message) }
@@ -429,6 +472,12 @@ export function DailyReportPage() {
                 </div>
               )}
 
+              {/* Red photo-proof note */}
+              <div className="photo-proof-note" role="note">
+                <span aria-hidden="true">⚠</span>
+                Please add photos as proof.
+              </div>
+
               {/* Captions for uploaded photos */}
               {uploadedPhotos.length > 0 && !isReadOnly && (
                 <div style={{ marginTop: 'var(--space-3)' }}>
@@ -453,6 +502,52 @@ export function DailyReportPage() {
               <label htmlFor="work-completed">Work Completed</label>
               <textarea id="work-completed" rows={4} value={form.work_completed} onChange={(e) => setForm({ ...form, work_completed: e.target.value })} disabled={isReadOnly} />
             </div>
+
+            {/* CALLS ACTIVITY */}
+            <div className="form-field" style={{ marginBottom: 'var(--space-4)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: isReadOnly ? 'default' : 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={hasCalls}
+                  onChange={(e) => setHasCalls(e.target.checked)}
+                  disabled={isReadOnly}
+                  style={{ width: '18px', height: '18px', cursor: isReadOnly ? 'default' : 'pointer' }}
+                />
+                Calls
+              </label>
+            </div>
+
+            {hasCalls && (
+              <div style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface)' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 var(--space-3) 0' }}>Calls Activity</h3>
+                <div className="calls-grid">
+                  <div className="form-field">
+                    <label htmlFor="total-calls">Total Calls Made</label>
+                    <input id="total-calls" type="number" min={0} step={1} value={calls.total_calls_made}
+                      onChange={(e) => handleCallsNumberChange('total_calls_made', e.target.value)} disabled={isReadOnly}
+                      placeholder="0" />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="calls-picked">Calls Picked Up</label>
+                    <input id="calls-picked" type="number" min={0} step={1} value={calls.calls_picked_up}
+                      onChange={(e) => handleCallsNumberChange('calls_picked_up', e.target.value)} disabled={isReadOnly}
+                      placeholder="0" />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="calls-not-picked">Calls Not Picked Up</label>
+                    <input id="calls-not-picked" type="number" min={0} step={1} value={calls.calls_not_picked_up}
+                      onChange={(e) => handleCallsNumberChange('calls_not_picked_up', e.target.value)} disabled={isReadOnly}
+                      placeholder="0" />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="leads-gen">Leads Generated</label>
+                    <input id="leads-gen" type="number" min={0} step={1} value={calls.leads_generated}
+                      onChange={(e) => handleCallsNumberChange('leads_generated', e.target.value)} disabled={isReadOnly}
+                      placeholder="0" />
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="form-field" style={{ marginBottom: 'var(--space-4)' }}>
               <label htmlFor="follow-up">Follow-up Required</label>

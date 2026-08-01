@@ -3381,3 +3381,95 @@ NOT YET PERFORMED — user should test on https://hrms.ngspl.com:
 **Tests added:** 2 new tests (52 total) verifying ensureDraft returns structured object and fetches employeeId from fresh data.
 
 
+## UI & Daily Report Enhancements — completed 2026-08-01
+
+### Objective
+Add task priority colours, deadline-performance indicators, Calls activity fields in My Daily Report, and a red photo-proof instruction note. No workflow/logic changes, no payroll features.
+
+### 1. Task Priority Colours
+- Created `src/lib/taskPriority.ts` — central utility with `getTaskPriorityStyle(priority)` returning `{ label, className, ariaLabel }`.
+- Design tokens: LOW=#DCFCE7/#166534, MEDIUM=#FEF3C7/#92400E, HIGH=#FEE2E2/#B91C1C, CRITICAL=#7F1D1D/#FFFFFF.
+- CSS classes `.priority-badge .priority-low/medium/high/critical` added to `src/styles/shared.css`.
+- Every badge has visible text + aria-label — colour is never the only indicator.
+- Applied across: MyTasksPage, TeamTasksPage, TaskDetailPage, RecurringTasksPage.
+- Old `tag tag-${priority.toLowerCase()}` patterns replaced with `getTaskPriorityStyle()`.
+
+### 2. Deadline Performance Status
+- `getAssignmentDeadlinePerformance({ deadlineAt, completedAt, assignmentStatus, serverNow })` in `taskPriority.ts`.
+- 5 states: MET_DEADLINE (green), MISSED_DEADLINE (dark red), OVERDUE (dark red), IN_PROGRESS_ON_TIME (neutral “On Track”), NO_DEADLINE_DATA (grey).
+- CSS classes `.perf-badge .perf-met/missed/overdue/ontrack/nodata` + accent classes `.perf-accent-met/overdue` for card borders.
+- Per-assignment calculation in TaskDetailPage assignee list — each assignee gets independent performance badge.
+- Priority badge always remains visible alongside performance badge.
+
+### 3. Employee Dashboard Performance Summary
+- Created `src/components/DeadlinePerformanceCard.tsx` — shows Met Deadline, Missed Deadline, Overdue, On Track counts + success percentage.
+- Banner text: “Attention Required: You have N overdue task(s)” / “On Track: Your current tasks are meeting their deadlines.” / neutral state.
+- Uses only the logged-in employee's own task assignments.
+- Added to Dashboard.tsx for all logged-in employees.
+
+### 4. Calls Activity in My Daily Report
+- DB migration `add_calls_activity_to_daily_reports`: added 5 columns to `daily_reports` table:
+  - `has_call_activity` boolean NOT NULL DEFAULT false
+  - `total_calls_made`, `calls_picked_up`, `calls_not_picked_up`, `leads_generated` — integer nullable
+  - CHECK constraints: all >= 0, picked+not_picked=total when active, leads<=picked when active
+- Frontend: Calls checkbox (default unchecked) in DailyReportPage. When checked, shows 4 numeric fields in responsive 2-col grid (1-col mobile).
+  - Whole numbers only, min 0, no negatives, no decimals.
+  - Validation: picked + not_picked = total, leads <= picked.
+  - Frontend validation in `validateCallFields()` in `dailyReports.ts`.
+  - Server validation in `validateCallActivity()` in `daily-report-action` edge function.
+- Save Draft and Submit both send calls data. Reload restores calls data. Unchecking clears data (sets has_call_activity=false, nulls metrics).
+- ReportReviewPage shows Calls Activity section only when `has_call_activity` is true.
+
+### 5. Red Photo-Proof Note
+- Added `.photo-proof-note` CSS class: colour #B42318, font-weight 600, with ⚠ icon.
+- Text: “Please add photos as proof.” — displayed below the upload description in DailyReportPage.
+- Does NOT make photo upload mandatory. Does NOT block Save Draft or Submit.
+
+### 6. Manager Daily Report Access Fix
+- Migration `grant_manager_daily_report_self_access`: granted manager role `daily_report.read_self`, `daily_report.submit_self`, `daily_report.update_self`, `daily_report.attachment_upload` permissions.
+- Managers can now fill and submit their own daily reports.
+
+### Files Changed
+- `src/lib/taskPriority.ts` — NEW: priority + performance utilities
+- `src/styles/shared.css` — priority badges, performance badges, calls grid, photo-proof note CSS
+- `src/pages/MyTasksPage.tsx` — priority badge
+- `src/pages/TeamTasksPage.tsx` — priority badges (desktop + mobile)
+- `src/pages/TaskDetailPage.tsx` — priority badge + per-assignment performance badges
+- `src/pages/RecurringTasksPage.tsx` — priority badge, removed PRIORITY_TAG_CLASS constant
+- `src/pages/Dashboard.tsx` — added DeadlinePerformanceCard import + render
+- `src/components/DeadlinePerformanceCard.tsx` — NEW: employee deadline performance summary
+- `src/pages/DailyReportPage.tsx` — Calls checkbox + 4 fields + photo-proof note
+- `src/pages/ReportReviewPage.tsx` — Calls Activity display in review
+- `src/lib/dailyReports.ts` — DailyReportRow interface updated, validateCallFields(), saveDraft/submitReport payloads include calls data
+- `supabase/functions/daily-report-action/index.ts` — validateCallActivity() helper, save_draft + submit include calls data
+- `src/lib/__tests__/task_priority.test.ts` — NEW: 28 tests
+
+### Migrations Applied
+1. `grant_manager_daily_report_self_access` — manager role permissions for own daily reports
+2. `add_calls_activity_to_daily_reports` — 5 columns + 6 CHECK constraints on daily_reports
+
+### Edge Functions Deployed
+- `daily-report-action` — updated with calls validation and data handling
+
+### Tests and Results
+- New tests: 28/28 PASS (priority colours, deadline performance, calls validation, multi-assignee, regression)
+- Existing tests: 85/86 PASS (1 pre-existing skeleton test failure on TaskEvidenceViewerPage — unrelated to this change)
+- TypeScript: PASS
+- Production build: PASS (884 kB JS / 44 kB CSS)
+
+### Safety Checks
+- Task workflow unchanged (acceptance, submission, review, completion logic untouched)
+- Attendance logic unchanged
+- Notification recipients and delivery unchanged
+- Realtime subscriptions unchanged
+- No payroll/salary/incentive/deduction features added
+- Forward-only migrations only
+- Existing reports and tasks remain readable
+- Photo upload remains optional
+- Old reports without calls data continue working (has_call_activity defaults to false)
+
+### Remaining Limitations
+- Browser smoke test on https://hrms.ngspl.com not performed (no browser automation available)
+- Priority badges not yet applied to Notifications or Daily Report task selector (these views don't currently render priority badges)
+- Dashboard performance card fetches assignments client-side — for large organizations should move to server-side RPC
+- The 1 pre-existing skeleton test failure (TaskEvidenceViewerPage) was not introduced by this change

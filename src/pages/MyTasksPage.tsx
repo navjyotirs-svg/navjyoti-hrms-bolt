@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { TASK_STATUS_LABELS, TASK_PRIORITY_LABELS, type TaskStatus, type TaskPriority } from '@/types/roles'
+import { TASK_STATUS_LABELS, type TaskStatus } from '@/types/roles'
 import { fetchMyTasks, formatDate, formatDeadline, type TaskWithAssignments } from '@/lib/tasks'
+import { getTaskPriorityStyle } from '@/lib/taskPriority'
 import { TaskSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
@@ -79,7 +80,7 @@ export function MyTasksPage() {
                   <tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/tasks/${t.id}`)}>
                     <td className="mono">{t.task_code}</td>
                     <td>{t.title}</td>
-                    <td><span className={`tag tag-${t.priority.toLowerCase()}`}>{TASK_PRIORITY_LABELS[t.priority as TaskPriority]}</span></td>
+                    <td><span className={getTaskPriorityStyle(t.priority).className} aria-label={getTaskPriorityStyle(t.priority).ariaLabel}>{getTaskPriorityStyle(t.priority).label}</span></td>
                     <td><span className={`attendance-badge ${t.status.toLowerCase()}`}>{TASK_STATUS_LABELS[t.status as TaskStatus]}</span></td>
                     <td className="mono">{formatDate(t.start_date)}</td>
                     <td className="mono">{formatDeadline(t.deadline_at, t.current_deadline)}</td>

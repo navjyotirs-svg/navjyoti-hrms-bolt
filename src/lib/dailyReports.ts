@@ -35,6 +35,11 @@ export interface DailyReportRow {
   work_completed: string
   follow_up_required: boolean
   total_hours_reported: number | null
+  has_call_activity: boolean
+  total_calls_made: number | null
+  calls_picked_up: number | null
+  calls_not_picked_up: number | null
+  leads_generated: number | null
   status: string
   submitted_at: string | null
   reviewed_at: string | null
@@ -238,12 +243,50 @@ export async function fetchFollowUps(filters?: {
   return (data || []) as unknown as FollowUpRow[]
 }
 
+export interface CallActivityData {
+  has_call_activity?: boolean
+  total_calls_made?: number | null
+  calls_picked_up?: number | null
+  calls_not_picked_up?: number | null
+  leads_generated?: number | null
+}
+
+export function validateCallFields(calls: CallActivityData): string | null {
+  if (!calls.has_call_activity) return null
+  const total = calls.total_calls_made
+  const picked = calls.calls_picked_up
+  const notPicked = calls.calls_not_picked_up
+  const leads = calls.leads_generated
+
+  if (total == null || picked == null || notPicked == null || leads == null) {
+    return 'All four call fields are required when Calls is checked.'
+  }
+  if (!Number.isInteger(total) || !Number.isInteger(picked) || !Number.isInteger(notPicked) || !Number.isInteger(leads)) {
+    return 'Call fields must be whole numbers only.'
+  }
+  if (total < 0 || picked < 0 || notPicked < 0 || leads < 0) {
+    return 'Call fields cannot be negative.'
+  }
+  if (picked + notPicked !== total) {
+    return 'Picked-up and not-picked-up calls must equal the total calls made.'
+  }
+  if (leads > picked) {
+    return 'Leads generated cannot be greater than calls picked up.'
+  }
+  return null
+}
+
 export async function saveDraft(payload: {
   report_date?: string
   overall_summary?: string
   work_completed?: string
   follow_up_required?: boolean
   task_items?: Array<Record<string, unknown>>
+  has_call_activity?: boolean
+  total_calls_made?: number | null
+  calls_picked_up?: number | null
+  calls_not_picked_up?: number | null
+  leads_generated?: number | null
 }) {
   return callReportAction('save_draft', payload)
 }
@@ -254,6 +297,11 @@ export async function submitReport(payload: {
   work_completed?: string
   follow_up_required?: boolean
   task_items?: Array<Record<string, unknown>>
+  has_call_activity?: boolean
+  total_calls_made?: number | null
+  calls_picked_up?: number | null
+  calls_not_picked_up?: number | null
+  leads_generated?: number | null
 }) {
   return callReportAction('submit', payload)
 }

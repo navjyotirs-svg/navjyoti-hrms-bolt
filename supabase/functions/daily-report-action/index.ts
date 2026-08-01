@@ -98,6 +98,34 @@ function hasPerm(perms: string[], code: string): boolean {
   return perms.includes(code);
 }
 
+function validateCallActivity(body: any): { hasCallActivity: boolean; totalCallsMade: number | null; callsPickedUp: number | null; callsNotPickedUp: number | null; leadsGenerated: number | null; error?: string } {
+  const hasCallActivity = !!body.has_call_activity;
+  if (!hasCallActivity) {
+    return { hasCallActivity: false, totalCallsMade: null, callsPickedUp: null, callsNotPickedUp: null, leadsGenerated: null };
+  }
+  const totalCallsMade = body.total_calls_made != null ? Number(body.total_calls_made) : null;
+  const callsPickedUp = body.calls_picked_up != null ? Number(body.calls_picked_up) : null;
+  const callsNotPickedUp = body.calls_not_picked_up != null ? Number(body.calls_not_picked_up) : null;
+  const leadsGenerated = body.leads_generated != null ? Number(body.leads_generated) : null;
+
+  if (totalCallsMade == null || callsPickedUp == null || callsNotPickedUp == null || leadsGenerated == null) {
+    return { hasCallActivity: true, totalCallsMade, callsPickedUp, callsNotPickedUp, leadsGenerated, error: "All four call fields are required when Calls is checked." };
+  }
+  if (!Number.isInteger(totalCallsMade) || !Number.isInteger(callsPickedUp) || !Number.isInteger(callsNotPickedUp) || !Number.isInteger(leadsGenerated)) {
+    return { hasCallActivity: true, totalCallsMade, callsPickedUp, callsNotPickedUp, leadsGenerated, error: "Call fields must be whole numbers only." };
+  }
+  if (totalCallsMade < 0 || callsPickedUp < 0 || callsNotPickedUp < 0 || leadsGenerated < 0) {
+    return { hasCallActivity: true, totalCallsMade, callsPickedUp, callsNotPickedUp, leadsGenerated, error: "Call fields cannot be negative." };
+  }
+  if (callsPickedUp + callsNotPickedUp !== totalCallsMade) {
+    return { hasCallActivity: true, totalCallsMade, callsPickedUp, callsNotPickedUp, leadsGenerated, error: "Picked-up and not-picked-up calls must equal the total calls made." };
+  }
+  if (leadsGenerated > callsPickedUp) {
+    return { hasCallActivity: true, totalCallsMade, callsPickedUp, callsNotPickedUp, leadsGenerated, error: "Leads generated cannot be greater than calls picked up." };
+  }
+  return { hasCallActivity: true, totalCallsMade, callsPickedUp, callsNotPickedUp, leadsGenerated };
+}
+
 async function getKolkataDate(): Promise<string> {
   const now = new Date();
   const kolkataTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
@@ -276,6 +304,9 @@ async function handleSaveDraft(
     tomorrow_plan, task_items = [],
   } = body;
 
+  const calls = validateCallActivity(body);
+  if (calls.error) return errorResponse(calls.error, 400);
+
   const { data: existing } = await supabase
     .from("daily_reports")
     .select("id, status")
@@ -295,6 +326,9 @@ async function handleSaveDraft(
       pending_work: pending_work || "", blockers: blockers || "",
       support_required: support_required || "", follow_up_required: follow_up_required || false,
       tomorrow_plan: tomorrow_plan || "", version: (existing as any).version + 1,
+      has_call_activity: calls.hasCallActivity, total_calls_made: calls.totalCallsMade,
+      calls_picked_up: calls.callsPickedUp, calls_not_picked_up: calls.callsNotPickedUp,
+      leads_generated: calls.leadsGenerated,
     }).eq("id", existing.id);
     reportId = existing.id;
   } else {
@@ -308,6 +342,9 @@ async function handleSaveDraft(
         blockers: blockers || "", support_required: support_required || "",
         follow_up_required: follow_up_required || false, tomorrow_plan: tomorrow_plan || "",
         status: "DRAFT",
+        has_call_activity: calls.hasCallActivity, total_calls_made: calls.totalCallsMade,
+        calls_picked_up: calls.callsPickedUp, calls_not_picked_up: calls.callsNotPickedUp,
+        leads_generated: calls.leadsGenerated,
       }).select().single();
     if (error) return errorResponse(`Failed to create draft: ${error.message}`, 500);
     reportId = newReport.id;
@@ -354,6 +391,9 @@ async function handleSubmit(
   if (!overall_summary || !overall_summary.trim())
     return errorResponse("Overall summary is required", 400);
 
+  const calls = validateCallActivity(body);
+  if (calls.error) return errorResponse(calls.error, 400);
+
   const { data: existing } = await supabase
     .from("daily_reports").select("id, status, version")
     .eq("employee_id", employee.id).eq("report_date", reportDate).maybeSingle();
@@ -371,6 +411,9 @@ async function handleSubmit(
       follow_up_required: follow_up_required || false, tomorrow_plan: tomorrow_plan || "",
       status: newStatus, submitted_at: new Date().toISOString(),
       version: existing.version + 1,
+      has_call_activity: calls.hasCallActivity, total_calls_made: calls.totalCallsMade,
+      calls_picked_up: calls.callsPickedUp, calls_not_picked_up: calls.callsNotPickedUp,
+      leads_generated: calls.leadsGenerated,
     }).eq("id", existing.id);
     reportId = existing.id;
     await insertHistory(supabase, reportId, "SUBMITTED", existing.status, newStatus, userId);
@@ -385,6 +428,9 @@ async function handleSubmit(
         support_required: support_required || "", follow_up_required: follow_up_required || false,
         tomorrow_plan: tomorrow_plan || "", status: newStatus,
         submitted_at: new Date().toISOString(),
+        has_call_activity: calls.hasCallActivity, total_calls_made: calls.totalCallsMade,
+        calls_picked_up: calls.callsPickedUp, calls_not_picked_up: calls.callsNotPickedUp,
+        leads_generated: calls.leadsGenerated,
       }).select().single();
     if (error) return errorResponse(`Failed to submit: ${error.message}`, 500);
     reportId = newReport.id;

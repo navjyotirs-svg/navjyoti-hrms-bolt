@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import {
-  TASK_STATUS_LABELS, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS,
+  TASK_STATUS_LABELS, TASK_TYPE_LABELS,
   COMPLETION_OUTCOME_LABELS,
   TASK_REQUEST_TYPE_LABELS, TASK_REQUEST_STATUS_LABELS,
   SUBMISSION_REVIEW_LABELS, ATTACHMENT_CATEGORY_LABELS,
   DEPENDENCY_TYPE_LABELS,
-  type TaskStatus, type TaskPriority, type TaskType, type CompletionOutcome,
+  type TaskStatus, type TaskType, type CompletionOutcome,
   type TaskRequestType, type TaskRequestStatus,
   type SubmissionReviewStatus, type AttachmentCategory, type DependencyType,
 } from '@/types/roles'
@@ -16,6 +16,7 @@ import {
   addProgressUpdate, submitTask, addTaskComment, uploadTaskAttachment,
   createTaskAttachmentSignedUrl, formatDate, formatDateTime, formatTaskCost, formatDeadline,
 } from '@/lib/tasks'
+import { getTaskPriorityStyle, getAssignmentDeadlinePerformance, getDeadlinePerformanceStyle, getPerformanceAccentClass } from '@/lib/taskPriority'
 import { DetailPageSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
@@ -189,7 +190,7 @@ export function TaskDetailPage() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Priority</span>
-              <span className={`tag tag-${task.priority.toLowerCase()}`}>{TASK_PRIORITY_LABELS[task.priority as TaskPriority]}</span>
+              <span className={getTaskPriorityStyle(task.priority).className} aria-label={getTaskPriorityStyle(task.priority).ariaLabel}>{getTaskPriorityStyle(task.priority).label}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Type</span>
@@ -238,8 +239,16 @@ export function TaskDetailPage() {
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)' }}>
                 <span style={{ color: 'var(--slate)', fontSize: '13px' }}>Assignee-wise Status</span>
                 <div style={{ marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                  {task.task_assignments.filter((a: any) => a.is_current).map((a: any) => (
-                    <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                  {task.task_assignments.filter((a: any) => a.is_current).map((a: any) => {
+                    const perf = getAssignmentDeadlinePerformance({
+                      deadlineAt: task.current_deadline || task.original_deadline,
+                      completedAt: a.ended_at,
+                      assignmentStatus: a.assignment_status || '',
+                    })
+                    const perfStyle = getDeadlinePerformanceStyle(perf)
+                    const accentClass = getPerformanceAccentClass(perf)
+                    return (
+                    <div key={a.id} className={accentClass} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -254,9 +263,11 @@ export function TaskDetailPage() {
                           {(a.assignment_status || 'ACCEPTANCE_PENDING').replace(/_/g, ' ')}
                         </span>
                         {a.progress_percent > 0 && <span style={{ color: 'var(--slate)' }}>{a.progress_percent}%</span>}
+                        <span className={perfStyle.className} aria-label={perfStyle.ariaLabel}>{perfStyle.label}</span>
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}

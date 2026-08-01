@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
-import { TASK_STATUS_LABELS, TASK_PRIORITY_LABELS, type TaskStatus, type TaskPriority } from '@/types/roles'
+import { TASK_STATUS_LABELS, type TaskStatus } from '@/types/roles'
 import {
   fetchTeamTasks,
   fetchTaskEvidenceCounts,
@@ -13,6 +13,7 @@ import {
   type TaskAssignmentWithEmployee,
   type TaskEvidenceCount,
 } from '@/lib/tasks'
+import { getTaskPriorityStyle } from '@/lib/taskPriority'
 import { TaskSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
@@ -166,7 +167,7 @@ export function TeamTasksPage() {
                       <td>{t.title}</td>
                       <td>{t.projects?.project_name || '—'}</td>
                       <td><AssigneeBadges assignments={t.task_assignments || []} /></td>
-                      <td><span className={`tag tag-${t.priority.toLowerCase()}`}>{TASK_PRIORITY_LABELS[t.priority as TaskPriority]}</span></td>
+                      <td><span className={getTaskPriorityStyle(t.priority).className} aria-label={getTaskPriorityStyle(t.priority).ariaLabel}>{getTaskPriorityStyle(t.priority).label}</span></td>
                       <td><span className={`attendance-badge ${t.status.toLowerCase()}`}>{TASK_STATUS_LABELS[t.status as TaskStatus]}</span></td>
                       <td className="mono" style={{ whiteSpace: 'nowrap' }}>{formatDeadlineShort(t.deadline_at, t.current_deadline)}</td>
                       <td className="mono">{formatTaskCost(t.task_cost, t.task_cost_currency)}</td>
@@ -199,7 +200,7 @@ export function TeamTasksPage() {
                     <AssigneeBadges assignments={t.task_assignments || []} />
                   </div>
                   <div style={{ display: 'flex', gap: 'var(--space-3)', fontSize: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-                    <span><span className={`tag tag-${t.priority.toLowerCase()}`}>{TASK_PRIORITY_LABELS[t.priority as TaskPriority]}</span></span>
+                    <span><span className={getTaskPriorityStyle(t.priority).className} aria-label={getTaskPriorityStyle(t.priority).ariaLabel}>{getTaskPriorityStyle(t.priority).label}</span></span>
                     <span className="mono">{formatDeadline(t.deadline_at, t.current_deadline)}</span>
                     {t.task_cost != null && <span className="mono">{formatTaskCost(t.task_cost, t.task_cost_currency)}</span>}
                   </div>

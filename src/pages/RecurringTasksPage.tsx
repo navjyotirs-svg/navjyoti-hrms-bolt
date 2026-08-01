@@ -12,6 +12,7 @@ import {
 import { fetchProjects, type ProjectRow } from '@/lib/projects'
 import { TableSkeleton } from '@/components/Skeleton'
 import { RECURRENCE_TYPE_LABELS, type RecurrenceType } from '@/types/roles'
+import { getTaskPriorityStyle } from '@/lib/taskPriority'
 import '@/styles/shared.css'
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
@@ -40,13 +41,6 @@ function statusTagClass(status: 'Active' | 'Paused' | 'Inactive'): string {
   if (status === 'Active') return 'tag-teal'
   if (status === 'Paused') return 'tag-amber'
   return 'tag-gray'
-}
-
-const PRIORITY_TAG_CLASS: Record<Priority, string> = {
-  LOW: 'tag-gray',
-  MEDIUM: 'tag-teal',
-  HIGH: 'tag-amber',
-  CRITICAL: 'tag-rose',
 }
 
 interface CreateForm {
@@ -237,7 +231,7 @@ export function RecurringTasksPage() {
                       <td>{t.title}</td>
                       <td>{projectName(t.project_id)}</td>
                       <td>{employeeName(t.assigned_employee_id)}</td>
-                      <td><span className={`tag ${PRIORITY_TAG_CLASS[t.priority as Priority] ?? 'tag-gray'}`}>{t.priority}</span></td>
+                      <td><span className={getTaskPriorityStyle(t.priority).className} aria-label={getTaskPriorityStyle(t.priority).ariaLabel}>{getTaskPriorityStyle(t.priority).label}</span></td>
                       <td>{RECURRENCE_TYPE_LABELS[t.recurrence_type as RecurrenceType] ?? t.recurrence_type}</td>
                       <td>{formatDate(t.start_date)}</td>
                       <td>{formatDate(t.end_date)}</td>

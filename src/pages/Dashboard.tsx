@@ -7,6 +7,7 @@ import { formatTimeRemaining, formatTimestamp, fetchTodayAttendance } from '@/li
 import { CheckInModal } from '@/components/CheckInModal'
 import { CheckoutModal } from '@/components/CheckoutModal'
 import { DashboardSkeleton } from '@/components/Skeleton'
+import { DeadlinePerformanceCard } from '@/components/DeadlinePerformanceCard'
 import '@/styles/dashboard.css'
 
 export function Dashboard() {
@@ -244,6 +245,8 @@ export function Dashboard() {
           if (!cancelled) setTodayAttendance(att as { check_in_at: string; required_checkout_at: string; final_status: string; actual_elapsed_minutes: number | null } | null)
         }
 
+        if (!cancelled) setMyEmployeeId(empData.id)
+
         if (!cancelled) {
           setMetrics((prev) => ({ ...prev, ...updates }))
           setError(null)
@@ -262,6 +265,7 @@ export function Dashboard() {
   const roleLabel = profile?.role ? (ROLE_LABELS as Record<string, string>)[profile.role] ?? profile.role : ''
 
   const [showDashboardCheckIn, setShowDashboardCheckIn] = useState(false)
+  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null)
 
   const handleDashboardCheckIn = useCallback(async () => {
     setShowDashboardCheckIn(true)
@@ -385,6 +389,8 @@ export function Dashboard() {
           </div>
         </div>
       )}
+
+      {myEmployeeId && <DeadlinePerformanceCard employeeId={myEmployeeId} />}
 
       {hasManagementTools && (
         <div className="dashboard-section">
