@@ -214,7 +214,7 @@ export function Dashboard() {
   // Core state (profile + employee lookup)
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null)
   const [myEmpData, setMyEmpData] = useState<{
-    full_name: string; designation: string | null; department_name: string | null; profile_photo_reference: string | null
+    organization_id: string; full_name: string; designation: string | null; department_name: string | null; profile_photo_reference: string | null
   } | null>(null)
   const [coreLoading, setCoreLoading] = useState(true)
   const [coreError, setCoreError] = useState<string | null>(null)
@@ -294,6 +294,7 @@ export function Dashboard() {
 
       setMyEmployeeId(empData.id)
       setMyEmpData({
+        organization_id: empData.organization_id,
         full_name: empData.full_name,
         designation: empData.designation,
         department_name: deptName,
@@ -312,8 +313,7 @@ export function Dashboard() {
     if (!myEmployeeId || !myEmpData) return
     setMetricsState(s => ({ ...s, loading: true, error: null }))
     try {
-      const orgId = (myEmpData as unknown as { organization_id?: string }).organization_id
-      if (!orgId) throw new Error('Organization not found')
+      const orgId = myEmpData.organization_id
       const kolkataDate = getKolkataDate()
       const updates: Partial<DashboardMetrics> = {}
 
@@ -442,7 +442,7 @@ export function Dashboard() {
         tasks.push((async () => {
           const { count: myTasks } = await supabase
             .from('task_assignments').select('*', { count: 'exact', head: true })
-            .eq('assigned_to', myEmployeeId).eq('is_current', true)
+            .eq('assigned_employee_id', myEmployeeId).eq('is_current', true)
             .in('assignment_status', ['ASSIGNED', 'ACCEPTANCE_PENDING', 'ACCEPTED', 'IN_PROGRESS', 'SUBMITTED'])
           updates.myActiveTasks = myTasks ?? 0
         })())
@@ -573,8 +573,7 @@ export function Dashboard() {
     }
     setNotCheckedInState(s => ({ ...s, loading: true, error: null }))
     try {
-      const orgId = (myEmpData as unknown as { organization_id?: string }).organization_id
-      if (!orgId) throw new Error('Organization not found')
+      const orgId = myEmpData.organization_id
       const kolkataDate = getKolkataDate()
 
       const { data: scopeEmpsData } = canReadAll
@@ -633,17 +632,17 @@ export function Dashboard() {
     setCalendarState(s => ({ ...s, loading: true, error: null }))
     try {
       const { data: holidays, error: calErr } = await supabase
-        .from('calendar_events').select('event_date, event_type, title')
-        .gte('event_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10))
-        .lte('event_date', new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10))
+        .from('calendar_events').select('start_date, event_type, title')
+        .gte('start_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10))
+        .lte('start_date', new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10))
       if (calErr) throw new Error(calErr.message)
 
       const events: CalendarEvent[] = []
       for (const h of (holidays ?? [])) {
-        const row = h as { event_date?: string | null; event_type?: string | null; title?: string | null }
-        if (isValidDateStr(row.event_date)) {
+        const row = h as { start_date?: string | null; event_type?: string | null; title?: string | null }
+        if (isValidDateStr(row.start_date)) {
           events.push({
-            date: row.event_date!,
+            date: row.start_date!,
             type: row.event_type ?? 'OTHER',
             label: row.title ?? 'Untitled',
           })
@@ -700,8 +699,8 @@ export function Dashboard() {
       }
 
       const { data: todayEvents } = await supabase
-        .from('calendar_events').select('id, event_date, event_type, title, start_time')
-        .eq('event_date', kolkataDate)
+        .from('calendar_events').select('id, start_date, event_type, title, start_time')
+        .eq('start_date', kolkataDate)
       for (const e of (todayEvents ?? [])) {
         const row = e as {
           id: string; title?: string | null; event_type?: string | null; start_time?: string | null
@@ -751,8 +750,7 @@ export function Dashboard() {
     }
     setPerfState(s => ({ ...s, loading: true, error: null }))
     try {
-      const orgId = (myEmpData as unknown as { organization_id?: string }).organization_id
-      if (!orgId) throw new Error('Organization not found')
+      const orgId = myEmpData.organization_id
 
       const { data: scopeEmpsData } = canReadTasksAll
         ? await supabase.from('employees')
@@ -767,7 +765,7 @@ export function Dashboard() {
         const { data: assignments } = await supabase
           .from('task_assignments')
           .select('id, assignment_status, ended_at, tasks!inner(current_deadline, original_deadline, deadline_at, status)')
-          .eq('assigned_to', emp.id).eq('is_current', true)
+          .eq('assigned_employee_id', emp.id).eq('is_current', true)
 
         let onTrack = 0, overdue = 0, metDeadline = 0, noDeadline = 0
         const nowPerf = new Date()

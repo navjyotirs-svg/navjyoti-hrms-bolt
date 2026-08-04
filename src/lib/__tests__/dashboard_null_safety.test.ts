@@ -188,3 +188,43 @@ test('20. DeadlinePerformanceCard still works — uses same extractTask pattern'
   assert(dpCode.includes('task?.current_deadline') || dpCode.includes('task?.original_deadline'),
     'DeadlinePerformanceCard must use optional chaining')
 })
+
+// ============================================================
+// 21-26. Organisation resolution + data source fixes
+// ============================================================
+
+test('21. Organization ID is stored in myEmpData state — not dropped', () => {
+  assert(code.includes('organization_id: string'), 'myEmpData type must include organization_id')
+  assert(code.includes('organization_id: empData.organization_id'), 'organization_id must be set from employee record')
+  assert(!code.includes("(myEmpData as unknown as { organization_id"), 'Must not use unsafe cast for organization_id')
+})
+
+test('22. Calendar uses start_date column — not event_date', () => {
+  assert(!code.includes('event_date'), 'Must not use event_date column name')
+  assert(code.includes('start_date'), 'Must use start_date column name for calendar_events')
+})
+
+test('23. Task assignments use assigned_employee_id — not assigned_to', () => {
+  assert(!code.includes(".eq('assigned_to'"), 'Must not query assigned_to for employee-scoped lookups')
+  assert(code.includes(".eq('assigned_employee_id'"), 'Must use assigned_employee_id for employee-scoped queries')
+})
+
+test('24. DeadlinePerformanceCard uses assigned_employee_id — not assigned_to', () => {
+  const dpCode = readFileSync(join(process.cwd(), 'src', 'components', 'DeadlinePerformanceCard.tsx'), 'utf-8')
+  assert(!dpCode.includes(".eq('assigned_to'"), 'DeadlinePerformanceCard must not query assigned_to')
+  assert(dpCode.includes(".eq('assigned_employee_id'"), 'DeadlinePerformanceCard must use assigned_employee_id')
+})
+
+test('25. No unsafe organization_id casts remain', () => {
+  assert(!code.includes('as unknown as { organization_id'), 'Must not cast myEmpData for organization_id')
+  assert(!code.includes("Organization not found"), 'Must not throw Organization not found error')
+})
+
+test('26. Organization ID flows from employee record to all sections', () => {
+  // The employee query selects organization_id
+  const empQueryIdx = code.indexOf(".from('employees')")
+  const selectIdx = code.indexOf('organization_id', empQueryIdx)
+  assert(selectIdx > -1 && selectIdx < empQueryIdx + 500, 'Employee query must select organization_id')
+  // All section loaders use myEmpData.organization_id directly
+  assert(code.includes('myEmpData.organization_id'), 'Sections must read organization_id from myEmpData directly')
+})

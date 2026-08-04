@@ -3596,3 +3596,33 @@ Complete visual and structural redesign of the Navjyoti HRMS Dashboard using a c
 ### Tests and Results
 - All 599 tests PASS (20 new + 579 existing, 0 failures)
 - Production build: PASS (932 kB JS / 64.44 kB CSS)
+
+## Dashboard Data Source Fix — 2026-08-04
+
+### Root Causes (4 bugs)
+
+**Bug 1: "Organization not found" in KPI, Not Checked In, Team Performance**
+- `myEmpData` state did NOT include `organization_id` — fetched but dropped from state
+- All sections read it via unsafe cast returning `undefined`
+- Fix: Added `organization_id` to state, removed unsafe casts, read `myEmpData.organization_id` directly
+
+**Bug 2: "Calendar could not be loaded"**
+- Query used `event_date` column; actual column is `start_date`
+- Fix: Changed all `event_date` to `start_date`
+
+**Bug 3: Deadline Performance shows no data**
+- `DeadlinePerformanceCard` queried `assigned_to` (stores user_id) with employee_id
+- Fix: Changed to `assigned_employee_id`
+
+**Bug 4: Team Task Performance shows no data**
+- Same `assigned_to` vs `assigned_employee_id` mismatch
+- Fix: Changed to `assigned_employee_id`
+
+### Files changed
+- `src/pages/Dashboard.tsx` — 8 edits
+- `src/components/DeadlinePerformanceCard.tsx` — 1 edit
+- `src/lib/__tests__/dashboard_null_safety.test.ts` — 6 new tests (21-26)
+
+### No data changes — no migrations, no records modified, no RLS altered
+
+### Tests: All 605 PASS (26 dashboard + 579 existing). Build: PASS.

@@ -26,7 +26,7 @@ export function DeadlinePerformanceCard({ employeeId }: { employeeId: string }) 
             id, assignment_status, ended_at, is_current,
             tasks!inner (id, current_deadline, original_deadline, status)
           `)
-          .eq('assigned_to', employeeId)
+          .eq('assigned_employee_id', employeeId)
           .eq('is_current', true)
 
         if (cancelled || !assignments) { setLoading(false); return }
