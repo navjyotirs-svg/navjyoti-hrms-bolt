@@ -3566,4 +3566,33 @@ Complete visual and structural redesign of the Navjyoti HRMS Dashboard using a c
 - All 579 tests PASS (0 failures)
 - Production build: PASS (219 modules, 929 kB JS / 63.57 kB CSS)
 
+## Dashboard Crash Fix — 2026-08-04
 
+### Root Cause
+- **File**: `src/pages/Dashboard.tsx`, lines 387 and 581
+- **Crash**: `Cannot read properties of undefined (reading 'current_deadline')`
+- **Cause**: Supabase `tasks!inner(...)` join returns a **single object**, not an array. Code did `(a.tasks as unknown[])[0]` which returned `undefined`, then `.current_deadline` crashed.
+- **Fix**: Added `extractTask()` helper that handles both single-object and array shapes, and `getDeadline()` helper with null-safe fallback chain: `current_deadline ?? original_deadline ?? deadline_at ?? null`.
+
+### Changes
+- `src/pages/Dashboard.tsx` — rewritten with:
+  1. **Null-safe data layer**: `extractTask()`, `getDeadline()`, `parseDeadline()`, `isValidDateStr()` helpers
+  2. **Section isolation**: Each section (metrics, not-checked-in, calendar, schedule, activity, performance, attendance) has its own `SectionState<T>` with independent loading/error/data. One section failing no longer hides the whole dashboard.
+  3. **Promise.allSettled**: Metric sub-queries run in parallel with `Promise.allSettled()` — partial failures don't crash the entire metrics section.
+  4. **Section-level error boundaries**: `SectionWrapper` and `SectionError` components show per-section error messages with Retry buttons.
+  5. **Empty states**: Each section shows a friendly empty state when data is available but empty.
+  6. **No deadline tracking**: Tasks without deadlines are counted as `noDeadline` and displayed as "No Deadline: N" — not marked overdue.
+  7. **Realtime safety**: Realtime payloads trigger section-specific refetches (not full state replacement).
+- `src/styles/dashboard.css` — added `.dash-section-error`, `.btn-section-retry`, `.dash-section-skeleton`, `.dash-empty-state`, `.perf-no-deadline` styles
+- `src/lib/__tests__/dashboard_null_safety.test.ts` — NEW: 20 tests covering crash fix, null-safety, section isolation, retry, realtime, no demo data
+
+### No data changes
+- No migrations created
+- No database columns added or modified
+- No RLS altered
+- No task/attendance/employee records changed
+- No business logic or deadline logic modified
+
+### Tests and Results
+- All 599 tests PASS (20 new + 579 existing, 0 failures)
+- Production build: PASS (932 kB JS / 64.44 kB CSS)

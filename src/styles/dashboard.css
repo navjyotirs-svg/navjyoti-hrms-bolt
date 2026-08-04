@@ -34,6 +34,50 @@
 }
 .btn-retry:hover { background: #b91c1c; }
 
+/* ---- Section-level error / empty states ---- */
+.dash-section-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius-md);
+  color: #92400e;
+  font-size: 13px;
+}
+.dash-section-error-msg { flex: 1; }
+.btn-section-retry {
+  background: #d97706;
+  color: #fff;
+  border: none;
+  padding: 4px 14px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-section-retry:hover { background: #b45309; }
+.dash-section-skeleton {
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
+  min-height: 80px;
+}
+.dash-empty-state {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--slate-400);
+  font-size: 14px;
+}
+.perf-no-deadline {
+  color: var(--slate-500);
+  background: var(--slate-100);
+}
+
 /* ============================================================
    PROFILE GREETING
    ============================================================ */
