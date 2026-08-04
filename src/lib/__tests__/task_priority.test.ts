@@ -24,11 +24,21 @@ function getAssignmentDeadlinePerformance(params: {
   const isCompleted = COMPLETED_STATUSES.includes((assignmentStatus || '').toUpperCase())
 
   if (!deadlineAt) return 'NO_DEADLINE_DATA'
-  const deadline = new Date(deadlineAt)
+
+  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(deadlineAt)
+  const deadlineStr = isDateOnly ? deadlineAt + 'T17:30:00+05:30' : deadlineAt
+  const deadline = new Date(deadlineStr)
   if (isNaN(deadline.getTime())) return 'NO_DEADLINE_DATA'
 
   if (isCompleted && completedAt) {
     const completed = new Date(completedAt)
+    if (isNaN(completed.getTime())) return 'NO_DEADLINE_DATA'
+    if (isDateOnly) {
+      const cDate = new Date(completed.getFullYear(), completed.getMonth(), completed.getDate())
+      const dDate = new Date(deadline.getFullYear(), deadline.getMonth(), deadline.getDate())
+      if (cDate.getTime() <= dDate.getTime()) return 'MET_DEADLINE'
+      return 'MISSED_DEADLINE'
+    }
     if (completed.getTime() <= deadline.getTime()) return 'MET_DEADLINE'
     return 'MISSED_DEADLINE'
   }
@@ -330,4 +340,64 @@ test('Server timezone: Asia/Kolkata is used for date calculations', () => {
     assignmentStatus: 'COMPLETED',
   })
   assert.equal(result, 'MET_DEADLINE')
+})
+
+// ============================================================
+// DATE-ONLY DEADLINE (current_deadline / original_deadline)
+// ============================================================
+
+test('Date-only deadline: Completed same day before 5:30 PM shows MET_DEADLINE', () => {
+  const result = getAssignmentDeadlinePerformance({
+    deadlineAt: '2026-07-31',
+    completedAt: '2026-07-31T14:00:00+05:30',
+    assignmentStatus: 'COMPLETED',
+  })
+  assert.equal(result, 'MET_DEADLINE')
+})
+
+test('Date-only deadline: Completed same day at 5:00 PM shows MET_DEADLINE', () => {
+  const result = getAssignmentDeadlinePerformance({
+    deadlineAt: '2026-07-31',
+    completedAt: '2026-07-31T17:00:00+05:30',
+    assignmentStatus: 'COMPLETED',
+  })
+  assert.equal(result, 'MET_DEADLINE')
+})
+
+test('Date-only deadline: Completed next day shows MISSED_DEADLINE', () => {
+  const result = getAssignmentDeadlinePerformance({
+    deadlineAt: '2026-07-31',
+    completedAt: '2026-08-01T09:00:00+05:30',
+    assignmentStatus: 'COMPLETED',
+  })
+  assert.equal(result, 'MISSED_DEADLINE')
+})
+
+test('Date-only deadline: Completed late same day still shows MET_DEADLINE (date-only comparison)', () => {
+  const result = getAssignmentDeadlinePerformance({
+    deadlineAt: '2026-07-31',
+    completedAt: '2026-07-31T23:00:00+05:30',
+    assignmentStatus: 'COMPLETED',
+  })
+  assert.equal(result, 'MET_DEADLINE')
+})
+
+test('Date-only deadline: Incomplete after deadline date shows OVERDUE', () => {
+  const result = getAssignmentDeadlinePerformance({
+    deadlineAt: '2026-07-31',
+    completedAt: null,
+    assignmentStatus: 'IN_PROGRESS',
+    serverNow: new Date('2026-08-01T10:00:00+05:30'),
+  })
+  assert.equal(result, 'OVERDUE')
+})
+
+test('Date-only deadline: Incomplete on deadline day shows IN_PROGRESS_ON_TIME', () => {
+  const result = getAssignmentDeadlinePerformance({
+    deadlineAt: '2026-07-31',
+    completedAt: null,
+    assignmentStatus: 'ACCEPTED',
+    serverNow: new Date('2026-07-31T10:00:00+05:30'),
+  })
+  assert.equal(result, 'IN_PROGRESS_ON_TIME')
 })

@@ -212,6 +212,18 @@ export function getAssignmentDeadlinePerformance(params: {
 
   if (isCompleted && completedAt) {
     const completed = new Date(completedAt)
+    if (isNaN(completed.getTime())) {
+      return 'NO_DEADLINE_DATA'
+    }
+    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(deadlineAt)
+    if (isDateOnly) {
+      const cDate = new Date(completed.getFullYear(), completed.getMonth(), completed.getDate())
+      const dDate = new Date(deadline.getFullYear(), deadline.getMonth(), deadline.getDate())
+      if (cDate.getTime() <= dDate.getTime()) {
+        return 'MET_DEADLINE'
+      }
+      return 'MISSED_DEADLINE'
+    }
     if (completed.getTime() <= deadline.getTime()) {
       return 'MET_DEADLINE'
     }

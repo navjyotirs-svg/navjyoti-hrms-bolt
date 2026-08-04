@@ -3626,3 +3626,22 @@ Complete visual and structural redesign of the Navjyoti HRMS Dashboard using a c
 ### No data changes — no migrations, no records modified, no RLS altered
 
 ### Tests: All 605 PASS (26 dashboard + 579 existing). Build: PASS.
+
+## Deadline Performance Date-Only Fix — 2026-08-04
+
+### Problem
+Completed tasks were showing "Missed Deadline" even when submitted before 5:30 PM on the deadline day.
+
+### Root Cause
+Task deadlines are stored as date-only strings (`2026-07-31`) in `current_deadline`/`original_deadline`. `new Date('2026-07-31')` is midnight UTC (05:30 AM IST), so any task completed after 05:30 AM IST on the deadline day was marked "Missed" even if submitted at 2 PM.
+
+### Fix
+When the deadline is a date-only string, compare **calendar dates only** (not timestamps). A task completed on the same calendar date as the deadline counts as "Met Deadline" regardless of the time of day.
+
+### Files changed
+- `src/lib/taskPriority.ts` — `getAssignmentDeadlinePerformance`: date-only comparison for completed tasks
+- `src/lib/tasks.ts` — `fetchTeamEmployeeSummaries`: same date-only comparison for met/missed deadline counts
+- `src/lib/__tests__/task_priority.test.ts` — 6 new tests for date-only deadlines + updated local function copy
+- `src/lib/__tests__/team_tasks.test.ts` — updated local function copy to match
+
+### Tests: All 611 PASS (75 task_priority + 536 existing). Build: PASS.

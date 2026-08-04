@@ -740,8 +740,17 @@ export async function fetchTeamEmployeeSummaries(orgId: string, _canReadAll: boo
       if (outcome === 'ON_TIME') s.met_deadline++
       else if (outcome === 'LATE') s.missed_deadline++
       else if (deadline && task?.completed_at) {
-        if (new Date(task.completed_at).getTime() <= new Date(deadline).getTime()) s.met_deadline++
-        else s.missed_deadline++
+        const completed = new Date(task.completed_at)
+        const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(deadline)
+        if (isDateOnly) {
+          const cDate = new Date(completed.getFullYear(), completed.getMonth(), completed.getDate())
+          const dDate = new Date(deadline)
+          if (cDate.getTime() <= dDate.getTime()) s.met_deadline++
+          else s.missed_deadline++
+        } else {
+          if (completed.getTime() <= new Date(deadline).getTime()) s.met_deadline++
+          else s.missed_deadline++
+        }
       }
     }
   }
