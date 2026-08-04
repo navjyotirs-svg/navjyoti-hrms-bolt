@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { fetchTaskPhotos, createTaskPhotoSignedUrl, type DailyReportTaskPhoto } from '@/lib/dailyReports'
 import { PhotoSlider, type SliderImage } from '@/components/PhotoSlider'
 import { useAuth } from '@/auth/AuthContext'
+import { DetailPageSkeleton } from '@/components/Skeleton'
 import '@/styles/shared.css'
 
 interface EmployeeEvidence {
@@ -144,7 +145,7 @@ export function TaskEvidenceViewerPage() {
       {error && <div className="form-error" style={{ marginBottom: '12px' }}>{error}</div>}
 
       {loading ? (
-        <div className="card"><div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--slate)' }}>Loading evidence…</div></div>
+        <DetailPageSkeleton />
       ) : evidence.length === 0 ? (
         <div className="card"><div className="empty-state"><div className="empty-state-text">No report evidence found for this task.</div></div></div>
       ) : (

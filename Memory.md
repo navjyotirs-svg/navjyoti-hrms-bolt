@@ -3523,3 +3523,47 @@ Reorganise Team Tasks from a single mixed task table into an employee-wise landi
 ### Tests and Results
 - New tests: 41/41 PASS. All task tests: 69/69 PASS. TypeScript: PASS. Build: PASS.
 
+## Dashboard Redesign — completed 2026-08-04
+
+### Objective
+Complete visual and structural redesign of the Navjyoti HRMS Dashboard using a colourful, compact, modern card-based layout. No existing business logic, database queries, permissions, RLS, realtime, notifications, reports, voice notes, projects, recurring tasks, or task workflows were modified.
+
+### Files changed
+- `src/styles/tokens.css` — added 10 dashboard gradient token pairs (green, blue, purple, orange, indigo, cyan, coral, violet, teal)
+- `src/components/EmployeeAvatar.tsx` — NEW: reusable avatar component with signed-URL profile photo, initials fallback, size variants (small/medium/large), online status indicator, skeleton loading, graceful image error handling
+- `src/pages/Dashboard.tsx` — fully rewritten: profile greeting, colourful KPI cards, calendar + schedule, not-checked-in employee cards, task performance, management quick actions, daily reports/follow-ups, recent activity
+- `src/styles/dashboard.css` — fully rewritten: gradient KPI cards, calendar grid, schedule timeline, employee card scroll, quick action grid, activity list, responsive breakpoints (desktop/tablet/mobile)
+- `src/pages/TaskEvidenceViewerPage.tsx` — fixed pre-existing skeleton test failure (added Skeleton import)
+
+### Dashboard layout (top to bottom)
+1. Profile Greeting — avatar, greeting, name, role, designation, department, date
+2. Attendance Widget — check-in/checkout status, timer, buttons (self only)
+3. KPI Summary Cards — colourful gradient cards with sub-metrics, clickable navigation
+4. Calendar & Schedule — monthly calendar with event markers + today's schedule timeline
+5. Not Checked In — horizontal employee cards with avatars
+6. Task Performance — deadline performance card + team performance list (management)
+7. Management Quick Actions — colourful action cards with icons and counts
+8. Daily Reports / Follow-ups — summary KPIs
+9. Recent Activity — audit log feed
+
+### Role-based dashboard
+- Director: org-wide employees, attendance, tasks, reports, projects, not-checked-in, activity
+- HR Admin: employee lifecycle, attendance, leave, reports, onboarding
+- Manager: team attendance, team tasks, team reports, team performance, voice notes
+- Employee: own tasks, reports, leave, tickets, notifications only
+
+### Data sources
+- All counts come from existing Supabase queries (attendance_records, task_assignments, daily_reports, projects, notifications, audit_logs, calendar_events)
+- Employee photos from private storage via signed URLs
+- No hardcoded/demo/fake data used
+- Deadline times correctly displayed as 05:30 PM IST (date-only fix from prior task)
+
+### Realtime
+- Single Supabase channel subscribes to 8 tables (attendance_records, tasks, task_assignments, daily_reports, leave_applications, notifications, projects, voice_notes)
+- Triggers full dashboard reload on any change
+
+### Tests and Results
+- All 579 tests PASS (0 failures)
+- Production build: PASS (219 modules, 929 kB JS / 63.57 kB CSS)
+
+

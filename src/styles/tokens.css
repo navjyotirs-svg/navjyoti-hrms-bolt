@@ -113,6 +113,26 @@
   /* ---- Safe area ---- */
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
+
+  /* ---- Dashboard gradient tokens ---- */
+  --dash-green-start: #10b981;
+  --dash-green-end: #059669;
+  --dash-blue-start: #3b82f6;
+  --dash-blue-end: #0ea5e9;
+  --dash-purple-start: #8b5cf6;
+  --dash-purple-end: #ec4899;
+  --dash-orange-start: #f97316;
+  --dash-orange-end: #eab308;
+  --dash-indigo-start: #6366f1;
+  --dash-indigo-end: #3b82f6;
+  --dash-cyan-start: #06b6d4;
+  --dash-cyan-end: #0891b2;
+  --dash-coral-start: #ef4444;
+  --dash-coral-end: #f97316;
+  --dash-violet-start: #7c3aed;
+  --dash-violet-end: #a855f7;
+  --dash-teal-start: #14b8a6;
+  --dash-teal-end: #0d9488;
 }
 
 *,
