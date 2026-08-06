@@ -57,6 +57,7 @@ import { ProjectsPage } from '@/pages/ProjectsPage'
 import { VoiceNotesPage } from '@/pages/VoiceNotesPage'
 import { RecurringTasksPage } from '@/pages/RecurringTasksPage'
 import { SelfAssignTaskPage } from '@/pages/SelfAssignTaskPage'
+import { PayrollPage } from '@/pages/PayrollPage'
 import type { ReactNode } from 'react'
 import type { Permission } from '@/types/roles'
 
@@ -280,6 +281,9 @@ function AppRoutes() {
         } />
         <Route path="/self-assign-task" element={
           <PermissionRoute permissions={['task.self_assign']}><SelfAssignTaskPage /></PermissionRoute>
+        } />
+        <Route path="/payroll" element={
+          <PermissionRoute permissions={['payroll.access']}><PayrollPage /></PermissionRoute>
         } />
         <Route path="/settings" element={<AccountSettingsPage />} />
       </Route>

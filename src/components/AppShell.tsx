@@ -43,6 +43,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/my-voice-notes': 'My Voice Notes',
   '/recurring-tasks': 'Recurring Tasks',
   '/self-assign-task': 'Self Assign Task',
+  '/payroll': 'Payroll',
 }
 
 function getPageTitle(pathname: string): string {

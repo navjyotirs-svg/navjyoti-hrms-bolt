@@ -173,6 +173,21 @@ export type Permission =
   | 'recurring_task.update'
   | 'recurring_task.pause'
   | 'recurring_task.deactivate'
+  // Phase 11 — Payroll
+  | 'payroll.access'
+  | 'payroll.employee_list.read_all'
+  | 'payroll.salary.read_self'
+  | 'payroll.salary.read_all'
+  | 'payroll.salary.edit'
+  | 'payroll.statement.calculate'
+  | 'payroll.statement.read_self'
+  | 'payroll.statement.read_all'
+  | 'payroll.statement.review'
+  | 'payroll.statement.approve'
+  | 'payroll.payslip.read_self'
+  | 'payroll.payslip.read_all'
+  | 'payroll.payslip.generate'
+  | 'payroll.audit.read'
 
 export type AttendanceStatus = 'PENDING_CHECKOUT' | 'FULL_DAY' | 'HALF_DAY'
 
@@ -722,6 +737,20 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'recurring_task.update': 'Update Recurring Task',
   'recurring_task.pause': 'Pause/Resume Recurring Task',
   'recurring_task.deactivate': 'Deactivate Recurring Task',
+  'payroll.access': 'Access Payroll',
+  'payroll.employee_list.read_all': 'Read Payroll Employee List',
+  'payroll.salary.read_self': 'Read Own Salary',
+  'payroll.salary.read_all': 'Read All Salaries',
+  'payroll.salary.edit': 'Edit Salary',
+  'payroll.statement.calculate': 'Calculate Salary Statement',
+  'payroll.statement.read_self': 'Read Own Statement',
+  'payroll.statement.read_all': 'Read All Statements',
+  'payroll.statement.review': 'Review Statement',
+  'payroll.statement.approve': 'Approve Statement',
+  'payroll.payslip.read_self': 'Read Own Payslip',
+  'payroll.payslip.read_all': 'Read All Payslips',
+  'payroll.payslip.generate': 'Generate Payslip',
+  'payroll.audit.read': 'Read Payroll Audit',
 }
 
 export type NavItem = {
@@ -941,6 +970,12 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Voice Notes',
     icon: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4a2 2 0 002 2h2a2 2 0 002-2v-4M12 2a3 3 0 013 3v6a3 3 0 01-6 0V5a3 3 0 013-3z',
     permissions: ['voice_note.send', 'voice_note.send_team', 'voice_note.send_all', 'voice_note.read_self', 'voice_note.read_own', 'voice_note.read_sent', 'voice_note.play_own', 'voice_note.acknowledge_own'],
+  },
+  {
+    id: 'payroll',
+    label: 'Payroll',
+    icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M12 16c1.657 0 3-.895 3-2s-1.343-2-3-2m0 0c-1.11 0-2.08-.402-2.599-1M12 12V8m0 4v4',
+    permissions: ['payroll.access'],
   },
   {
     id: 'settings',
