@@ -11,6 +11,7 @@ export interface UserProfile {
   organization_id: string | null
   status: AccountStatus
   is_active: boolean
+  photo_path: string | null
 }
 
 interface AuthContextValue {
@@ -24,6 +25,7 @@ interface AuthContextValue {
   resetPassword: (email: string) => Promise<{ error: string | null }>
   updatePassword: (newPassword: string) => Promise<{ error: string | null }>
   refreshProfile: () => Promise<void>
+  updatePhotoPath: (path: string | null) => void
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -51,7 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: profileData, error: profileErr } = await supabase
       .from('user_profiles')
-      .select('id, email, full_name, role, organization_id, status, is_active')
+      .select('id, email, full_name, role, organization_id, status, is_active, photo_path')
       .eq('id', userId)
       .maybeSingle()
 
@@ -148,6 +150,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [session, fetchProfileAndPermissions])
 
+  const updatePhotoPath = useCallback((path: string | null) => {
+    setProfile((prev) => prev ? { ...prev, photo_path: path } : prev)
+  }, [])
+
   useEffect(() => {
     let mounted = true
 
@@ -218,7 +224,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, profile, permissions, loading, profileError, signIn, signOut, resetPassword, updatePassword, refreshProfile }}
+      value={{ session, profile, permissions, loading, profileError, signIn, signOut, resetPassword, updatePassword, refreshProfile, updatePhotoPath }}
     >
       {children}
     </AuthContext.Provider>

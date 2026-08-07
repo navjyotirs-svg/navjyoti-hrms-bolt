@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '@/auth/AuthContext'
-import { ROLE_LABELS } from '@/types/roles'
 import { NotificationBell } from '@/components/NotificationBell'
 import { CheckoutModal } from '@/components/CheckoutModal'
 import { NavjyotiLogo } from '@/components/NavjyotiLogo'
 import { RealtimeIndicator } from '@/components/RealtimeIndicator'
+import { UserAvatarMenu } from '@/components/UserAvatarMenu'
 import { supabase } from '@/lib/supabase'
 import { fetchTodayAttendance, formatTimeRemaining } from '@/lib/attendance'
 import { CheckInModal } from '@/components/CheckInModal'
@@ -102,12 +102,7 @@ export function Topbar({ title, soundEnabled }: TopbarProps) {
         )}
         {profile?.id && <NotificationBell userId={profile.id} soundEnabled={soundEnabled} />}
         <RealtimeIndicator />
-        <div className="topbar-user">
-          <span className="topbar-user-name">{profile?.full_name ?? profile?.email}</span>
-          <span className="topbar-user-role">
-            {profile?.role ? ROLE_LABELS[profile.role] : ''}
-          </span>
-        </div>
+        <UserAvatarMenu />
         {showCheckout && (
           <CheckoutModal
             userId={profile!.id}

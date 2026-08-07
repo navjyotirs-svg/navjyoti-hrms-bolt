@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ChangeEvent } from 'react'
 import { useAuth } from '@/auth/AuthContext'
 import { useOutletContext } from 'react-router-dom'
 import { ROLE_LABELS } from '@/types/roles'
@@ -62,7 +62,7 @@ const EMPTY_SELF: SelfService = {
 }
 
 export function AccountSettingsPage() {
-  const { profile, updatePassword } = useAuth()
+  const { profile, updatePassword, updatePhotoPath } = useAuth()
   const { soundEnabled, toggleSound } = useOutletContext<{ soundEnabled: boolean; toggleSound: () => void }>()
   const [emp, setEmp] = useState<EmployeeRecord | null>(null)
   const [self, setSelf] = useState<SelfService>(EMPTY_SELF)
@@ -87,6 +87,9 @@ export function AccountSettingsPage() {
   const [testing, setTesting] = useState(false)
   const [reSubscribing, setReSubscribing] = useState(false)
   const [repairing, setRepairing] = useState(false)
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [diagnostics, setDiagnostics] = useState<{
     permission: NotifPermissionState
     serviceWorkerActive: boolean
@@ -231,6 +234,76 @@ export function AccountSettingsPage() {
     setReSubscribing(false)
   }
 
+  useEffect(() => {
+    let cancelled = false
+    if (!profile?.photo_path) { setPhotoUrl(null); return }
+    const photoPath = profile.photo_path
+    ;(async () => {
+      try {
+        const { data } = await supabase.storage
+          .from('profile-photos')
+          .createSignedUrl(photoPath, 300)
+        if (!cancelled) setPhotoUrl(data?.signedUrl ?? null)
+      } catch {
+        if (!cancelled) setPhotoUrl(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [profile?.photo_path])
+
+  async function handlePhotoUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !profile?.id) return
+    setPhotoError(null)
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setPhotoError('Please choose a JPG, PNG, or WebP image')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoError('Image must be under 5 MB')
+      return
+    }
+    setUploadingPhoto(true)
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+      const path = `${profile.id}/profile-photo.${ext}`
+      const { error: upErr } = await supabase.storage
+        .from('profile-photos')
+        .upload(path, file, { upsert: true, contentType: file.type })
+      if (upErr) throw upErr
+      const { error: dbErr } = await supabase
+        .from('user_profiles')
+        .update({ photo_path: path, updated_at: new Date().toISOString() })
+        .eq('id', profile.id)
+      if (dbErr) throw dbErr
+      updatePhotoPath(path)
+      const { data } = await supabase.storage.from('profile-photos').createSignedUrl(path, 300)
+      setPhotoUrl(data?.signedUrl ?? null)
+    } catch {
+      setPhotoError('Could not upload photo. Please try again.')
+    }
+    setUploadingPhoto(false)
+  }
+
+  async function handlePhotoRemove() {
+    if (!profile?.id || !profile?.photo_path) return
+    setPhotoError(null)
+    setUploadingPhoto(true)
+    try {
+      await supabase.storage.from('profile-photos').remove([profile.photo_path])
+      const { error: dbErr } = await supabase
+        .from('user_profiles')
+        .update({ photo_path: null, updated_at: new Date().toISOString() })
+        .eq('id', profile.id)
+      if (dbErr) throw dbErr
+      updatePhotoPath(null)
+      setPhotoUrl(null)
+    } catch {
+      setPhotoError('Could not remove photo. Please try again.')
+    }
+    setUploadingPhoto(false)
+  }
+
   if (!profile) return null
   if (loading) return (
     <div className="page">
@@ -273,6 +346,42 @@ export function AccountSettingsPage() {
     <div className="page">
       <div className="page-header">
         <h2 className="page-title">Account Settings</h2>
+      </div>
+
+      <div className="card">
+        <div className="card-header">Profile Photo</div>
+        <div className="card-body">
+          {photoError && <div className="form-error" style={{ marginBottom: 'var(--space-4)' }}>{photoError}</div>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+            <div>
+              {photoUrl ? (
+                <img src={photoUrl} alt="Profile" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--border)' }} />
+              ) : (
+                <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 28, fontWeight: 700 }}>
+                  {(emp?.full_name || profile.full_name || profile.email)[0]?.toUpperCase()}
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              <label className="btn btn-sm" style={{ cursor: 'pointer' }}>
+                {uploadingPhoto ? 'Uploading…' : 'Choose Photo'}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handlePhotoUpload}
+                  disabled={uploadingPhoto}
+                  style={{ display: 'none' }}
+                />
+              </label>
+              {photoUrl && (
+                <button className="btn btn-sm btn-secondary" onClick={handlePhotoRemove} disabled={uploadingPhoto} type="button">
+                  Remove Photo
+                </button>
+              )}
+              <div style={{ fontSize: '11.5px', color: 'var(--slate)' }}>JPG, PNG, or WebP — max 5 MB</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="card">
