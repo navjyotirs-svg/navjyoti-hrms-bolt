@@ -4,6 +4,7 @@ export type Role =
   | 'manager'
   | 'team_leader'
   | 'employee'
+  | 'sales'
   | 'intern'
   | 'system_admin'
 
@@ -570,6 +571,7 @@ export const ROLES: RoleDefinition[] = [
   { code: 'manager', label: 'Manager', description: 'Department management, task assignment, and approvals' },
   { code: 'team_leader', label: 'Team Leader', description: 'Team coordination and task oversight' },
   { code: 'employee', label: 'Employee', description: 'Personal attendance, tasks, reports, and tickets' },
+  { code: 'sales', label: 'Sales', description: 'Sales team member with personal attendance, tasks, reports, and tickets' },
   { code: 'intern', label: 'Intern / Trainee', description: 'Learning track with guided task assignment' },
   { code: 'system_admin', label: 'System Administrator', description: 'Platform configuration and security' },
 ]

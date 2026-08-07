@@ -13,6 +13,7 @@ const VALID_ROLES = [
   "manager",
   "team_leader",
   "employee",
+  "sales",
   "intern",
   "system_admin",
 ];

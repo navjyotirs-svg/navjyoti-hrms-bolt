@@ -174,18 +174,6 @@ export function PayrollPage() {
       {policy && (
         <div className="kpi-grid" style={{ marginBottom: '24px' }}>
           <div className="kpi-card">
-            <div className="kpi-label">Free Leave Days / Month</div>
-            <div className="kpi-value">{policy.free_leave_days_per_month}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Salary Divisor</div>
-            <div className="kpi-value">{policy.salary_divisor}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Sunday Excluded</div>
-            <div className="kpi-value">{policy.exclude_sundays_from_leave_count ? 'Yes' : 'No'}</div>
-          </div>
-          <div className="kpi-card">
             <div className="kpi-label">Policy Version</div>
             <div className="kpi-value">v{policy.policy_version}</div>
           </div>
